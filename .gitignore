@@ -1,0 +1,17 @@
+# Go
+.gotmp/
+*.exe
+/dbimpex
+/release/
+
+# 前端依赖（web/dist 为前端构建产物，需随仓库追踪）
+web/node_modules/
+
+# 运行期导出/构建产物
+.dbimpex-exports/
+web/tsconfig.app.tsbuildinfo
+
+# IDE / 系统
+.vscode/
+.qoder/
+.DS_Store

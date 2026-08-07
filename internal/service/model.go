@@ -1,0 +1,90 @@
+// Package service 业务服务层：模型定义 + 持久化 + 任务调度 + CLI。
+// 对外通过 Web 模式（Gin 托管前端 SPA）与 CLI 模式提供能力。
+package service
+
+import (
+	"dbimpex/internal/engine"
+)
+
+// ---- 引擎模型别名（模型统一定义在 engine 包，避免循环依赖） ----
+
+type (
+	// DBConnInfo 数据库连接信息（含子类型）
+	DBConnInfo = engine.DBConnInfo
+	// TableCondition 表级过滤条件
+	TableCondition = engine.TableCondition
+	// ExportOptions 导出选项
+	ExportOptions = engine.ExportOptions
+	// ImportOptions 导入选项
+	ImportOptions = engine.ImportOptions
+	// MigrateOptions 迁移选项
+	MigrateOptions = engine.MigrateOptions
+	// ResetMode 重置数据模式
+	ResetMode = engine.ResetMode
+	// ProgressInfo 任务进度信息
+	ProgressInfo = engine.Progress
+	// ProgressFunc 进度回调
+	ProgressFunc = engine.ProgressFunc
+)
+
+// 重置模式常量
+const (
+	ResetNone     = engine.ResetNone
+	ResetTruncate = engine.ResetTruncate
+	ResetDrop     = engine.ResetDrop
+)
+
+// SupportedDBTypes 支持的数据库类型及子类型
+var SupportedDBTypes = map[string][]string{
+	"mysql":      {"5.7", "8.0", "mariadb"},
+	"postgresql": {"12", "13", "14", "15", "16"},
+	"oracle":     {"11g", "12c", "19c", "21c"},
+}
+
+// TaskConfig 任务配置（可保存/加载，自动记忆上次配置）
+type TaskConfig struct {
+	ID          string          `json:"id" yaml:"id"`
+	Name        string          `json:"name" yaml:"name"`
+	Type        string          `json:"type" yaml:"type"` // export/import/migrate
+	ExportOpts  *ExportOptions  `json:"exportOpts,omitempty" yaml:"exportOpts,omitempty"`
+	ImportOpts  *ImportOptions  `json:"importOpts,omitempty" yaml:"importOpts,omitempty"`
+	MigrateOpts *MigrateOptions `json:"migrateOpts,omitempty" yaml:"migrateOpts,omitempty"`
+	CreatedAt   int64           `json:"createdAt" yaml:"createdAt"`
+	UpdatedAt   int64           `json:"updatedAt" yaml:"updatedAt"`
+	IsLastUsed  bool            `json:"isLastUsed" yaml:"isLastUsed"`
+}
+
+// ExecutionRecord 执行历史记录
+type ExecutionRecord struct {
+	ID           string   `json:"id"`                     // 同 taskID
+	TaskType     string   `json:"taskType"`               // export/import/migrate
+	TaskConfigID string   `json:"taskConfigId,omitempty"` // 关联的任务配置 ID（可选）
+	Status       string   `json:"status"`                 // running/done/error/cancelled
+	StartedAt    int64    `json:"startedAt"`
+	FinishedAt   int64    `json:"finishedAt"`
+	Duration     int64    `json:"duration"`   // 毫秒
+	TotalUnits   int      `json:"totalUnits"` // 工作单元数（表 + 对象）
+	DoneUnits    int      `json:"doneUnits"`  // 终态时已完成的单元数（失败/取消时用于还原真实进度）
+	TotalRows    int64    `json:"totalRows"`
+	OutputPath   string   `json:"outputPath,omitempty"`
+	FileSize     int64    `json:"fileSize,omitempty"`
+	ErrorMsg     string   `json:"errorMsg,omitempty"`
+	Logs         []string `json:"logs,omitempty"`   // 执行日志快照（截断保留最近若干条，供终态回放展示）
+	Target       string   `json:"target,omitempty"` // 操作目标描述（连接名 + 库表对象），如 "生产库 · db1(93表)"
+	Summary      string   `json:"summary"`          // 如 "3表, 40000行, 15.3MB"
+}
+
+// ConnRecord 连接配置存储记录：ID（xid）为主键，Name 仅为展示名（可改可重名）
+type ConnRecord struct {
+	ID   string     `json:"id"`
+	Name string     `json:"name"`
+	Conn DBConnInfo `json:"conn"`
+}
+
+// ConnInfo 连接列表展示信息
+type ConnInfo struct {
+	ID       string     `json:"id"`
+	Name     string     `json:"name"`
+	Conn     DBConnInfo `json:"conn"`
+	SubTypes []string   `json:"subTypes"` // 该类型可用的子类型
+}

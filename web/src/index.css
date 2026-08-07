@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    /* 前景色用柔和深灰而非近纯黑，避免加粗标题过于黑重、抢视觉焦点 */
+    --foreground: 224 20% 18%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 20% 18%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 20% 18%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 48%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    /* 不强制灰度抗锯齿：中文字形在系统默认渲染下更锐利，antialiased 会使笔画发虚 */
+    font-optical-sizing: auto;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+    /* 全局基准：正文 14px，中文行高需宽松 */
+    font-size: 14px;
+    line-height: 1.6;
+    /* 中文不宜收紧字距 */
+    letter-spacing: 0.01em;
+  }
+  /* 所有元素（含表单控件/代码块/弹层）一律继承全局字体，禁止回退到浏览器默认字体 */
+  input,
+  button,
+  select,
+  textarea,
+  optgroup,
+  fieldset,
+  legend,
+  code,
+  kbd,
+  pre,
+  samp {
+    font-family: inherit;
+    letter-spacing: inherit;
+  }
+  /* 数字统一等宽，避免进度/行数跳动时错位 */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  /* 中文在 12px 下渲染发虚，全局将 text-xs 提升为 13px */
+  .text-xs {
+    font-size: 0.8125rem;
+    line-height: 1.55;
+  }
+  /* 小字徽标/辅助文本最低不低于 11px */
+  .text-\[10px\] {
+    font-size: 0.6875rem;
+    line-height: 1.4;
+  }
+
+  /* 细滚动条（贴近桌面客户端工具观感） */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-border;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/40;
+  }
+}
