@@ -188,8 +188,8 @@ export default function MigrateView() {
           )}
           {crossType && (
             <Hint>
-              跨类型迁移（{srcType} → {tgtType}）：数据以行数据中转可正常迁移，表结构自动转换；
-              触发器为源库方言对象无法自动转换，不会迁移；视图/函数/存储过程也不迁移（如需请使用同类型迁移）。
+              跨类型迁移（{srcType} → {tgtType}）：表结构自动转换，数据可正常迁移；
+              触发器/视图/函数/存储过程不支持跨类型迁移（如需请使用同类型迁移）。
             </Hint>
           )}
           {!crossType && !!opts.sourceConn && !!opts.targetConn && opts.sourceConn !== opts.targetConn && (
@@ -243,7 +243,7 @@ export default function MigrateView() {
                       set({ schemaOnly: !v })
                     }}
                     label="迁移结构"
-                    description="生成 CREATE TABLE 等 DDL 语句（跨库类型时自动转换方言）"
+                    description="表结构（含触发器），跨数据库类型时自动转换"
                   />
                   <CheckRow
                     checked={!opts.schemaOnly}
@@ -252,7 +252,7 @@ export default function MigrateView() {
                       set({ dataOnly: !v })
                     }}
                     label="迁移数据"
-                    description="生成 INSERT 语句，按批量大小分批写入"
+                    description="按批量大小分批迁移表数据"
                   />
                 </div>
               </Section>
@@ -268,13 +268,16 @@ export default function MigrateView() {
             </div>
 
             <div className="p-5">
-              <Section title="性能" description="批量大小影响单次 INSERT 的行数，过大可能占用更多内存">
-                <Input
-                  type="number"
-                  className="w-40"
-                  value={opts.batchSize || 0}
-                  onChange={(e) => set({ batchSize: Number(e.target.value) })}
-                />
+              <Section title="性能" description="批量越大迁移越快，但内存占用更高">
+                <div className="space-y-1">
+                  <Label>批量大小</Label>
+                  <Input
+                    type="number"
+                    className="w-40"
+                    value={opts.batchSize || 0}
+                    onChange={(e) => set({ batchSize: Number(e.target.value) })}
+                  />
+                </div>
               </Section>
             </div>
           </Card>

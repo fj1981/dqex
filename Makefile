@@ -67,6 +67,7 @@ stop:
 dev: web-deps web-stub stop
 	@echo ">> go run 启动后端 http://localhost:8181"
 	@echo ">> 启动前端 http://localhost:5281 (Ctrl+C 停止)"
+	@echo ">> dev 代理自动注入令牌（读 ~/.dbimpex/web-access.json），5281 无需 ?token= 即可访问"
 	@$(GO) run ./cmd & BACKEND_PID=$$!; \
 	trap "kill $$BACKEND_PID 2>/dev/null; sh scripts/kill-dev-ports.sh" EXIT; \
 	cd web && yarn dev
@@ -76,6 +77,7 @@ dev: web-deps web-stub stop
 dev-debug: web-deps web-stub stop
 	@echo ">> dlv 调试服务: 127.0.0.1:2345（VS Code F5 attach）"
 	@echo ">> 启动前端 http://localhost:5281 (Ctrl+C 停止)"
+	@echo ">> dev 代理自动注入令牌（读 ~/.dbimpex/web-access.json），5281 无需 ?token= 即可访问"
 	@$(DLV) debug --headless --listen=127.0.0.1:2345 --api-version=2 --accept-multiclient ./cmd & BACKEND_PID=$$!; \
 	trap "kill $$BACKEND_PID 2>/dev/null; sh scripts/kill-dev-ports.sh" EXIT; \
 	cd web && yarn dev

@@ -36,6 +36,8 @@ function defaultOptions(): ExportOptions {
     dataOnly: false,
     batchSize: 500,
     compress: true,
+    singleTransaction: true,
+    gzip: false,
   }
 }
 
@@ -149,7 +151,7 @@ export default function ExportView() {
       {step === 1 && (
         <div className="space-y-4">
           <Hint>
-            勾选要导出的库、表与对象（视图/函数/存储过程）；不选择则不导出，可使用「全选」快捷操作。可为单张表设置数据导出条件（完整 SQL）与导出模式。
+            勾选要导出的库、表与对象（视图/函数/存储过程）；不选择则不导出。可为单张表设置数据过滤条件与导出模式。
           </Hint>
           <TablePicker
             connId={opts.sourceConn}
@@ -177,7 +179,7 @@ export default function ExportView() {
                       set({ schemaOnly: !v })
                     }}
                     label="导出结构"
-                    description="生成 CREATE TABLE 等 DDL（含触发器），并导出视图/函数/存储过程"
+                    description="表结构（含触发器），以及视图/函数/存储过程"
                   />
                   <CheckRow
                     checked={!opts.schemaOnly}
@@ -186,7 +188,7 @@ export default function ExportView() {
                       set({ dataOnly: !v })
                     }}
                     label="导出数据"
-                    description="生成 INSERT 语句，按批量大小分批写入"
+                    description="按批量大小分批导出表数据"
                   />
                 </div>
               </Section>
@@ -196,10 +198,22 @@ export default function ExportView() {
               <Section title="输出设置">
                 <div className="grid gap-2">
                   <CheckRow
+                    checked={opts.singleTransaction}
+                    onCheckedChange={(v) => set({ singleTransaction: v })}
+                    label="一致性快照导出"
+                    description="所有表的数据处于同一时间点（仅 MySQL/PostgreSQL 生效）"
+                  />
+                  <CheckRow
                     checked={opts.compress}
                     onCheckedChange={(v) => set({ compress: v })}
                     label="压缩为 zip"
                     description="取消则保留目录结构输出"
+                  />
+                  <CheckRow
+                    checked={opts.gzip}
+                    onCheckedChange={(v) => set({ gzip: v })}
+                    label="gzip 压缩 SQL 文件"
+                    description="生成 .sql.gz，体积更小；导入侧自动解压"
                   />
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-4">
@@ -216,7 +230,7 @@ export default function ExportView() {
                     <Input
                       value={opts.outputDir}
                       onChange={(e) => set({ outputDir: e.target.value })}
-                      placeholder="留空使用默认（数据目录下的 exports）"
+                      placeholder="留空使用默认目录"
                     />
                   </div>
                 </div>
@@ -224,13 +238,16 @@ export default function ExportView() {
             </div>
 
             <div className="p-5">
-              <Section title="性能" description="批量大小影响单次 INSERT 的行数，过大可能占用更多内存">
-                <Input
-                  type="number"
-                  className="w-40"
-                  value={opts.batchSize || 0}
-                  onChange={(e) => set({ batchSize: Number(e.target.value) })}
-                />
+              <Section title="性能" description="批量越大导出越快，但内存占用更高">
+                <div className="space-y-1">
+                  <Label>批量大小</Label>
+                  <Input
+                    type="number"
+                    className="w-40"
+                    value={opts.batchSize || 0}
+                    onChange={(e) => set({ batchSize: Number(e.target.value) })}
+                  />
+                </div>
               </Section>
             </div>
           </Card>

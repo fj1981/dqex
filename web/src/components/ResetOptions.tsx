@@ -38,7 +38,7 @@ export default function ResetOptions({ resetMode, backup, onResetModeChange, onB
         <>
           <label className="flex items-center space-x-2 pt-1">
             <Checkbox checked={backup} onCheckedChange={(v) => onBackupChange(v === true)} />
-            <span className="text-sm">重置前在目标库创建备份表 __dbimpex_bak_*（导入成功后自动清理）</span>
+            <span className="text-sm">重置前自动创建备份表（导入成功后自动清理）</span>
           </label>
           <Alert>
             <AlertTriangle className="h-4 w-4" />

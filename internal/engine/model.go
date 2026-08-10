@@ -47,6 +47,11 @@ type ExportOptions struct {
 	DataOnly   bool             `json:"dataOnly" yaml:"dataOnly"`     // 仅导出数据
 	BatchSize  int              `json:"batchSize" yaml:"batchSize"`
 	Compress   bool             `json:"compress" yaml:"compress"` // 是否打包 zip，默认 true
+	// SingleTransaction 一致性快照导出（等同 mysqldump --single-transaction）：
+	// 全程在同一事务内读取，跨表数据处于同一时间点，避免运行中库导出出不一致状态
+	SingleTransaction bool `json:"singleTransaction" yaml:"singleTransaction"`
+	// Gzip 将 SQL 文件 gzip 压缩为 .sql.gz（导入侧透明解压；与 Compress 同时开启时 zip 内为 .sql.gz）
+	Gzip bool `json:"gzip" yaml:"gzip"`
 }
 
 // ResetMode 重置数据模式
@@ -128,10 +133,12 @@ type CompareOptions struct {
 	ForceData     bool         `json:"forceData,omitempty" yaml:"forceData,omitempty"`         // 结构不一致时仍强制对比数据（默认跳过）
 }
 
-// TableAlias 表别名配对：源表 ↔ 目标表（不同名但逻辑对应的表）
+// TableAlias 表级对比配置：源表 ↔ 目标表（不同名但逻辑对应，Target 空=同名匹配），
+// 并可单独指定该表数据对比的忽略列（与全局忽略列合并生效）
 type TableAlias struct {
-	Source string `json:"source" yaml:"source"`
-	Target string `json:"target" yaml:"target"`
+	Source        string   `json:"source" yaml:"source"`
+	Target        string   `json:"target" yaml:"target"`
+	IgnoreColumns []string `json:"ignoreColumns,omitempty" yaml:"ignoreColumns,omitempty"` // 表级忽略列（列名大小写不敏感）
 }
 
 // CompareResult 对比结果（序列化落盘为 JSON 报告）

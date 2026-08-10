@@ -71,6 +71,10 @@ export interface ExportOptions {
   dataOnly: boolean
   batchSize: number
   compress: boolean
+  // 一致性快照导出（MySQL/PostgreSQL），跨表数据处于同一时间点
+  singleTransaction: boolean
+  // SQL 文件 gzip 压缩为 .sql.gz
+  gzip: boolean
 }
 
 export type ResetMode = "" | "truncate" | "drop"
@@ -104,10 +108,12 @@ export interface MigrateOptions {
 
 // ---- 对比 ----
 
-// 表别名配对：源表 ↔ 目标表（不同名但逻辑对应的表）
+// 表级对比配置：源表 ↔ 目标表（不同名但逻辑对应），可单独指定该表的忽略列
 export interface TableAlias {
   source: string
   target: string
+  // 表级忽略列：仅对该表数据对比生效，与全局 ignoreColumns 合并
+  ignoreColumns?: string[]
 }
 
 export interface CompareOptions {
@@ -122,7 +128,7 @@ export interface CompareOptions {
   structureOnly: boolean
   dataOnly: boolean
   threshold: number // 数据逐行比较阈值，默认 1000
-  ignoreColumns?: string[] // 数据内容对比忽略的列（如 created_at/updated_at）
+  ignoreColumns?: string[] // 全局忽略列：所有表数据对比时跳过（如 created_at/updated_at）
   forceData?: boolean // 结构不一致时仍强制对比数据（默认跳过）
 }
 

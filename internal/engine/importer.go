@@ -2,9 +2,11 @@ package engine
 
 import (
 	"archive/zip"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -36,6 +38,51 @@ type importFile struct {
 	path string
 }
 
+// sqlBaseName 从 SQL 文件名提取库名（支持 .sql 与 .sql.gz，大小写不敏感），ok=false 表示非 SQL 文件
+func sqlBaseName(name string) (string, bool) {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.HasSuffix(lower, ".sql.gz"):
+		return name[:len(name)-len(".sql.gz")], true
+	case strings.HasSuffix(lower, ".sql"):
+		return name[:len(name)-len(".sql")], true
+	}
+	return "", false
+}
+
+// gzReadCloser gzip 流与底层文件的组合读取器，Close 时两者均关闭
+type gzReadCloser struct {
+	gz *gzip.Reader
+	f  *os.File
+}
+
+func (r *gzReadCloser) Read(p []byte) (int, error) { return r.gz.Read(p) }
+func (r *gzReadCloser) Close() error {
+	err1 := r.gz.Close()
+	err2 := r.f.Close()
+	if err1 != nil {
+		return err1
+	}
+	return err2
+}
+
+// openSQLFile 打开 SQL 文件，.gz 结尾时透明 gzip 解压
+func openSQLFile(path string) (io.ReadCloser, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasSuffix(strings.ToLower(path), ".gz") {
+		return f, nil
+	}
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		f.Close()
+		return nil, fmt.Errorf("解压 gzip 失败: %w", err)
+	}
+	return &gzReadCloser{gz: gz, f: f}, nil
+}
+
 // InspectImportFile 预览导入文件信息（不解压执行）
 // 如果存在同名 .desc 描述文件，会读取其中的元信息（表列表、对象、条件等）
 func InspectImportFile(path string) (*ImportFileInfo, error) {
@@ -46,17 +93,19 @@ func InspectImportFile(path string) (*ImportFileInfo, error) {
 	}
 	ext := strings.ToLower(filepath.Ext(path))
 	info := &ImportFileInfo{Size: st.Size()}
-	switch ext {
-	case ".sql":
+	if dbName, ok := sqlBaseName(filepath.Base(path)); ok {
 		info.Type = "sql"
-		dbName := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 		info.Databases = []string{dbName}
-		// 尝试读取同名 .desc 文件
-		descPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".desc"
+		// 尝试读取同名 .desc 文件（库.desc；.sql.gz 先剥 .gz）
+		base := path
+		if strings.HasSuffix(strings.ToLower(base), ".gz") {
+			base = base[:len(base)-3]
+		}
+		descPath := strings.TrimSuffix(base, filepath.Ext(base)) + ".desc"
 		if desc, err := readDescFile(descPath); err == nil {
 			info.Descs = map[string]*ExportDesc{dbName: desc}
 		}
-	case ".zip":
+	} else if ext == ".zip" {
 		info.Type = "zip"
 		r, err := zip.OpenReader(path)
 		if err != nil {
@@ -72,9 +121,8 @@ func InspectImportFile(path string) (*ImportFileInfo, error) {
 			name := filepath.ToSlash(f.Name)
 			parts := strings.Split(name, "/")
 			if len(parts) == 1 {
-				// 根目录文件
-				if strings.HasSuffix(strings.ToLower(name), ".sql") {
-					db := strings.TrimSuffix(parts[0], filepath.Ext(parts[0]))
+				// 根目录文件（.sql / .sql.gz 每个即一个库的完整导出）
+				if db, ok := sqlBaseName(parts[0]); ok {
 					if db != "" {
 						dbSet[db] = true
 					}
@@ -96,8 +144,8 @@ func InspectImportFile(path string) (*ImportFileInfo, error) {
 			info.Descs = descs
 		}
 		sort.Strings(info.Databases)
-	default:
-		return nil, fmt.Errorf("不支持的文件格式: %s（仅支持 .sql / .zip）", ext)
+	} else {
+		return nil, fmt.Errorf("不支持的文件格式: %s（仅支持 .sql / .sql.gz / .zip）", filepath.Ext(path))
 	}
 	return info, nil
 }
@@ -143,14 +191,12 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 	var files []importFile
 	var tempDir string
 
-	switch ext {
-	case ".sql":
+	if dbName, ok := sqlBaseName(filepath.Base(opts.InputPath)); ok {
 		if opts.Target.DBName == "" {
 			return nil, fmt.Errorf("连接配置未指定目标库，无法导入单文件")
 		}
-		dbName := strings.TrimSuffix(filepath.Base(opts.InputPath), ".sql")
 		files = []importFile{{db: opts.Target.DBName, name: dbName, path: opts.InputPath}}
-	case ".zip":
+	} else if ext == ".zip" {
 		var err error
 		tempDir, err = os.MkdirTemp(opts.TempDir, "dbimpex_import_*")
 		if err != nil {
@@ -164,8 +210,8 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 		if err != nil {
 			return nil, err
 		}
-	default:
-		return nil, fmt.Errorf("不支持的文件格式: %s（仅支持 .sql / .zip）", ext)
+	} else {
+		return nil, fmt.Errorf("不支持的文件格式: %s（仅支持 .sql / .sql.gz / .zip）", filepath.Ext(opts.InputPath))
 	}
 
 	if len(files) == 0 {
@@ -240,16 +286,17 @@ func planZipImport(tempDir string, target *DBConnInfo) ([]importFile, error) {
 		if err != nil || info.IsDir() {
 			return err
 		}
-		if !strings.EqualFold(filepath.Ext(path), ".sql") {
-			return nil
-		}
 		rel, _ := filepath.Rel(tempDir, path)
 		parts := strings.Split(filepath.ToSlash(rel), "/")
 		if len(parts) != 1 {
 			// 忽略子目录中的文件
 			return nil
 		}
-		dbName := strings.TrimSuffix(parts[0], filepath.Ext(parts[0]))
+		// .sql / .sql.gz 均为一个库的完整导出
+		dbName, ok := sqlBaseName(parts[0])
+		if !ok {
+			return nil
+		}
 		f := importFile{name: dbName, path: path}
 		if singleDB {
 			f.db = target.DBName
@@ -289,7 +336,7 @@ func countSQLBlocks(conn DBConnInfo, path string) (int, error) {
 	if !ok {
 		return 0, fmt.Errorf("不支持的方言: %s", conn.Type)
 	}
-	f, err := os.Open(path)
+	f, err := openSQLFile(path)
 	if err != nil {
 		return 0, err
 	}
@@ -306,7 +353,7 @@ func countSQLBlocks(conn DBConnInfo, path string) (int, error) {
 
 // importSQLFile 解析并执行单个 SQL 文件，返回语句数；blockUnits 为 true 时每执行一块推进一个进度单元
 func importSQLFile(ctx context.Context, cli *cydb.DBCli, path string, t *tracker, blockUnits bool) (int64, error) {
-	f, err := os.Open(path)
+	f, err := openSQLFile(path)
 	if err != nil {
 		return 0, err
 	}

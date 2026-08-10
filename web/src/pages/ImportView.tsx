@@ -334,7 +334,7 @@ export default function ImportView() {
           {/* 已有解析结果时才全高弹性（详情区内部滚动）；未选文件时卡片按内容自然高度，避免拖拽区被拉伸撑满 */}
           <Card className={cn("flex flex-col gap-4 p-5", fileInfo && "min-h-0 flex-1 overflow-hidden")}>
             <div className="space-y-1">
-              <Label>文件路径（支持 .sql 或 .zip）</Label>
+              <Label>文件路径（支持 .sql / .sql.gz / .zip）</Label>
               <div className="flex gap-2">
                 <Input
                   value={inputLabel || opts.inputPath}
@@ -379,12 +379,12 @@ export default function ImportView() {
               <div className={fileInfo ? undefined : "text-sm"}>
                 {uploading ? "上传中..." : fileInfo ? "重新选择文件，或将新文件拖拽到此处" : "点击选择文件，或将文件拖拽到此处"}
               </div>
-              {!fileInfo && <div className="text-xs text-muted-foreground">支持 .sql 与 .zip 格式</div>}
+              {!fileInfo && <div className="text-xs text-muted-foreground">支持 .sql / .sql.gz / .zip 格式</div>}
             </div>
             <input
               ref={fileRef}
               type="file"
-              accept=".sql,.zip"
+              accept=".sql,.gz,.zip"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0]
@@ -488,13 +488,16 @@ export default function ImportView() {
               />
             </div>
             <div className="p-5">
-              <Section title="性能" description="批量大小影响单次 INSERT 的行数，过大可能占用更多内存">
-                <Input
-                  type="number"
-                  className="w-40"
-                  value={opts.batchSize || 0}
-                  onChange={(e) => set({ batchSize: Number(e.target.value) })}
-                />
+              <Section title="性能" description="批量越大导入越快，但内存占用更高">
+                <div className="space-y-1">
+                  <Label>批量大小</Label>
+                  <Input
+                    type="number"
+                    className="w-40"
+                    value={opts.batchSize || 0}
+                    onChange={(e) => set({ batchSize: Number(e.target.value) })}
+                  />
+                </div>
               </Section>
             </div>
           </Card>

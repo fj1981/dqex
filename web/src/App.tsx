@@ -84,10 +84,21 @@ function Sidebar() {
   )
 }
 
+// 左侧导航 ↔ 操作历史联动：功能页内只显示该类型的执行记录，任务列表等页面显示全部
+const TYPE_BY_PATH: Record<string, string> = {
+  "/export": "export",
+  "/import": "import",
+  "/migrate": "migrate",
+  "/compare": "compare",
+}
+
 function RightPanel() {
   const { panelOpen, togglePanel, connections, history, openDrawer, loadConnections, loadHistory } = useAppStore()
   const location = useLocation()
   const navigate = useNavigate()
+
+  const filterType = TYPE_BY_PATH[location.pathname]
+  const records = filterType ? history.filter((h) => h.taskType === filterType) : history
 
   useEffect(() => {
     loadConnections()
@@ -104,7 +115,7 @@ function RightPanel() {
   }
 
   const delRecord = async (taskID: string) => {
-    if (!window.confirm("确定删除这条执行记录吗？（不会删除已导出的文件）")) return
+    if (!window.confirm("确定删除这条执行记录吗？（会同步删除其导出/对比产物文件）")) return
     try {
       await api.deleteHistory(taskID)
       loadHistory()
@@ -165,15 +176,18 @@ function RightPanel() {
       <Separator />
 
       <div className="px-3 py-2 text-xs font-medium text-muted-foreground">
-        操作历史{history.length > 0 && <span className="ml-1 tabular-nums">({history.length})</span>}
+        {filterType ? `${TASK_TYPE_LABEL[filterType] || filterType}历史` : "操作历史"}
+        {records.length > 0 && <span className="ml-1 tabular-nums">({records.length})</span>}
       </div>
       {/* 用普通滚动容器而非 ScrollArea：radix viewport 内部的 display:table 包裹层会被 nowrap 内容撑宽，
           导致长错误文本把卡片推出视口、悬停按钮不可见 */}
       <div className="scrollbar-thin flex-1 overflow-y-auto px-3 pb-3">
-        {history.length === 0 && (
-          <div className="py-4 text-center text-xs text-muted-foreground">暂无执行记录</div>
+        {records.length === 0 && (
+          <div className="py-4 text-center text-xs text-muted-foreground">
+            {filterType ? "该类型暂无执行记录" : "暂无执行记录"}
+          </div>
         )}
-        {history.map((h) => {
+        {records.map((h) => {
           const s = STATUS_META[h.status] || STATUS_META.cancelled
           return (
             <div
@@ -186,7 +200,10 @@ function RightPanel() {
               onKeyDown={(e) => e.key === "Enter" && navigate(`/${h.taskType}?running=${h.id}`)}
             >
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">{TASK_TYPE_LABEL[h.taskType] || h.taskType}</span>
+                {/* 类型过滤下全部同类，省略类型名；全部视图保留以区分 */}
+                {!filterType && (
+                  <span className="text-sm font-medium">{TASK_TYPE_LABEL[h.taskType] || h.taskType}</span>
+                )}
                 <span className={cn("flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium", s.cls)}>
                   <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
                   {s.label}

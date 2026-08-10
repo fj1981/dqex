@@ -7,7 +7,7 @@ require (
 	github.com/pingcap/tidb/parser v0.0.0-20231013125129-93a834a6bf8d
 	github.com/rs/xid v1.6.0
 	github.com/spf13/cobra v1.10.1
-	gitlab.mycyclone.com/rpa-platform/pk-infrakit-g v0.1.0
+	gitlab.mycyclone.com/rpa-platform/pk-infrakit-g v0.1.1
 	golang.org/x/term v0.37.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -89,4 +89,4 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
-replace gitlab.mycyclone.com/rpa-platform/pk-infrakit-g => /Users/fanjun/project/pk-infrakit-g
+// replace gitlab.mycyclone.com/rpa-platform/pk-infrakit-g => /Users/fanjun/project/pk-infrakit-g

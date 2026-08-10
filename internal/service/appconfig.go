@@ -16,12 +16,13 @@ const DefaultConfigName = "config.yaml"
 // EnvConfigFile 指定全局配置文件的环境变量
 const EnvConfigFile = "DBIMPEX_CONFIG"
 
-// DirConfig 四类数据目录配置（留空 = 由 data 目录派生）
+// DirConfig 五类数据目录配置（留空 = 由 data 目录派生）
 type DirConfig struct {
-	Data    string `yaml:"data"`    // ① 配置保存目录（connections/tasks/history）
-	Tmp     string `yaml:"tmp"`     // ② 任务处理临时目录
-	Uploads string `yaml:"uploads"` // ③ Web 上传临时目录
-	Exports string `yaml:"exports"` // ④ 最终生成产物目录
+	Data     string `yaml:"data"`     // ① 配置保存目录（connections/tasks/history）
+	Tmp      string `yaml:"tmp"`      // ② 任务处理临时目录
+	Uploads  string `yaml:"uploads"`  // ③ Web 上传临时目录
+	Exports  string `yaml:"exports"`  // ④ 导出产物目录
+	Compares string `yaml:"compares"` // ⑤ 对比报告目录
 }
 
 // AppConfig 全局独立配置（config.yaml）
@@ -31,10 +32,11 @@ type AppConfig struct {
 
 // ResolvedDirs 解析后的最终目录
 type ResolvedDirs struct {
-	Data    string
-	Tmp     string
-	Uploads string
-	Exports string
+	Data     string
+	Tmp      string
+	Uploads  string
+	Exports  string
+	Compares string
 }
 
 // FindConfigFile 确定全局配置文件路径：显式指定 > 环境变量 DBIMPEX_CONFIG > ~/.dbimpex/config.yaml（缺省位置不存在时返回 ""）
@@ -91,9 +93,10 @@ func ResolveDirs(dataDirFlag string, cfg *AppConfig) ResolvedDirs {
 		return fallback
 	}
 	return ResolvedDirs{
-		Data:    data,
-		Tmp:     pick(cfg.Dirs.Tmp, filepath.Join(data, TempDirName)),
-		Uploads: pick(cfg.Dirs.Uploads, filepath.Join(data, UploadDirName)),
-		Exports: pick(cfg.Dirs.Exports, filepath.Join(data, ExportDirName)),
+		Data:     data,
+		Tmp:      pick(cfg.Dirs.Tmp, filepath.Join(data, TempDirName)),
+		Uploads:  pick(cfg.Dirs.Uploads, filepath.Join(data, UploadDirName)),
+		Exports:  pick(cfg.Dirs.Exports, filepath.Join(data, ExportDirName)),
+		Compares: pick(cfg.Dirs.Compares, filepath.Join(data, CompareDirName)),
 	}
 }

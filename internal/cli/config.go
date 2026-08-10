@@ -55,9 +55,11 @@ type compareConfig struct {
 	Aliases       map[string]string `yaml:"aliases"`        // 源表: 目标表
 	Scope         string            `yaml:"scope"`          // both|structure|data，默认 both
 	Threshold     int               `yaml:"threshold"`      // 逐行对比阈值，默认 1000
-	IgnoreColumns []string          `yaml:"ignore_columns"` // 数据内容对比忽略的列（如 created_at/updated_at）
-	ForceData     bool              `yaml:"force_data"`     // 结构不一致时仍强制对比数据（默认跳过）
-	Output        string            `yaml:"output"`         // 报告 JSON 保存路径（可选）
+	IgnoreColumns []string          `yaml:"ignore_columns"` // 全局忽略列：所有表数据内容对比时跳过（如 created_at/updated_at）
+	// TableIgnoreColumns 表级忽略列（源表: 列列表），与全局忽略列合并生效
+	TableIgnoreColumns map[string][]string `yaml:"ignore_columns_by_table"`
+	ForceData          bool                `yaml:"force_data"` // 结构不一致时仍强制对比数据（默认跳过）
+	Output             string              `yaml:"output"`     // 报告 JSON 保存路径（可选）
 }
 
 type exportConfig struct {
@@ -71,13 +73,16 @@ type exportConfig struct {
 	SchemaOnly bool           `yaml:"schema_only"`
 	DataOnly   bool           `yaml:"data_only"`
 	Compress   *bool          `yaml:"compress"` // 默认 true
-	BatchSize  int            `yaml:"batch_size"`
+	Gzip       bool           `yaml:"gzip"`     // SQL 文件 gzip 压缩为 .sql.gz
+	// SingleTransaction 一致性快照导出，指针区分未配置（默认 true）与显式 false
+	SingleTransaction *bool `yaml:"single_transaction"`
+	BatchSize         int   `yaml:"batch_size"`
 }
 
 type importConfig struct {
 	Target    *cliConnConfig `yaml:"target"`
 	TargetRef string         `yaml:"target_ref"`
-	Input     string         `yaml:"input"`  // .sql 或 .zip
+	Input     string         `yaml:"input"`  // .sql / .sql.gz / .zip
 	Reset     string         `yaml:"reset"`  // ""|truncate|drop
 	Backup    *bool          `yaml:"backup"` // 默认 true
 	BatchSize int            `yaml:"batch_size"`
@@ -255,7 +260,15 @@ func compareFromLegacy(o *CompareOptions) *compareConfig {
 	if len(o.Aliases) > 0 {
 		cfg.Aliases = make(map[string]string, len(o.Aliases))
 		for _, a := range o.Aliases {
-			cfg.Aliases[a.Source] = a.Target
+			if a.Target != "" {
+				cfg.Aliases[a.Source] = a.Target
+			}
+			if len(a.IgnoreColumns) > 0 {
+				if cfg.TableIgnoreColumns == nil {
+					cfg.TableIgnoreColumns = make(map[string][]string)
+				}
+				cfg.TableIgnoreColumns[a.Source] = a.IgnoreColumns
+			}
 		}
 	}
 	switch {
@@ -277,12 +290,13 @@ func exportFromLegacy(o *ExportOptions) *exportConfig {
 		}
 	}
 	compress := o.Compress
+	singleTx := o.SingleTransaction
 	return &exportConfig{
 		Source: connToCli(o.Source), SourceRef: o.SourceConn,
 		Output: o.OutputDir, Name: o.TaskName,
 		Databases: o.Databases, Tables: o.Tables,
 		Conditions: conds, SchemaOnly: o.SchemaOnly, DataOnly: o.DataOnly,
-		Compress: &compress, BatchSize: o.BatchSize,
+		Compress: &compress, Gzip: o.Gzip, SingleTransaction: &singleTx, BatchSize: o.BatchSize,
 	}
 }
 
@@ -338,9 +352,11 @@ source:
 #   old_table: new_table
 scope: both            # both | structure | data
 threshold: 1000        # 单表行数超过阈值时仅对比行数，不逐行比对
-# ignore_columns:      # 数据内容对比忽略的列（如时间戳列，可选）
+# ignore_columns:      # 全局忽略列：所有表数据对比时跳过（如时间戳列，可选）
 #   - created_at
 #   - updated_at
+# ignore_columns_by_table:   # 表级忽略列：仅对指定表生效，与全局合并（可选）
+#   t_order: [sync_flag]
 # force_data: false    # 结构不一致时仍强制对比数据（默认跳过）
 # output: report.json  # 对比报告 JSON 保存路径（可选）
 `,
@@ -357,11 +373,13 @@ source:
 schema_only: false     # 仅导出结构
 data_only: false       # 仅导出数据
 compress: true         # 打包为 zip
+gzip: false            # SQL 文件 gzip 压缩为 .sql.gz（导入侧自动解压）
+single_transaction: true  # 一致性快照导出（仅 MySQL/PostgreSQL 生效）
 batch_size: 500
 `,
 	"import": `# dbx import 独立配置文件（dbx import --config import.yaml）
 target:
-` + indentBlock(tplConn, "  ") + `input: ./export.zip    # 导入文件（.sql 或 .zip）
+` + indentBlock(tplConn, "  ") + `input: ./export.zip    # 导入文件（.sql / .sql.gz / .zip）
 reset: ""              # "" 直接追加 | truncate 清空表 | drop 删除重建
 backup: true           # 重置前创建备份表（仅 reset 非空时生效）
 batch_size: 500
@@ -447,6 +465,20 @@ func compareOptsFromConfig(cfg *compareConfig, requireConns bool) (CompareOption
 	for src, tgt := range cfg.Aliases {
 		opts.Aliases = append(opts.Aliases, TableAlias{Source: src, Target: tgt})
 	}
+	// 表级忽略列：并入同名 alias 条目，无则新建（Target 空=同名匹配）
+	for src, cols := range cfg.TableIgnoreColumns {
+		merged := false
+		for i := range opts.Aliases {
+			if strings.EqualFold(strings.TrimSpace(opts.Aliases[i].Source), strings.TrimSpace(src)) {
+				opts.Aliases[i].IgnoreColumns = cols
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			opts.Aliases = append(opts.Aliases, TableAlias{Source: src, IgnoreColumns: cols})
+		}
+	}
 	switch scope := strings.ToLower(strings.TrimSpace(cfg.Scope)); scope {
 	case "", "both":
 	case "structure":
@@ -476,7 +508,7 @@ func splitOutput(v string) (outputDir, wantZip string) {
 }
 
 func exportOptsFromConfig(cfg *exportConfig) (ExportOptions, error) {
-	opts := ExportOptions{Compress: true}
+	opts := ExportOptions{Compress: true, SingleTransaction: true}
 	if cfg.Source != nil {
 		opts.Source = cfg.Source.toConn()
 	}
@@ -493,6 +525,10 @@ func exportOptsFromConfig(cfg *exportConfig) (ExportOptions, error) {
 	opts.DataOnly = cfg.DataOnly
 	if cfg.Compress != nil {
 		opts.Compress = *cfg.Compress
+	}
+	opts.Gzip = cfg.Gzip
+	if cfg.SingleTransaction != nil {
+		opts.SingleTransaction = *cfg.SingleTransaction
 	}
 	opts.BatchSize = cfg.BatchSize
 	return opts, nil

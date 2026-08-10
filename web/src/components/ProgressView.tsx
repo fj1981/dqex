@@ -88,13 +88,15 @@ export default function ProgressView({ taskID, taskType, onSaveTask, onBack, wid
   }, [isRunning])
 
   // 任务进入终态（完成/失败/取消）后刷新右侧操作历史：
-  // 后端先持久化终态再推送 SSE，此刻读取到的已是最新状态；延迟少量时间兼容写入耗时
+  // 后端先持久化终态再推送 SSE，此刻读取到的已是最新状态；延迟少量时间兼容写入耗时。
+  // 注意：终态时后端会连发 progress+done 两个事件，progress 引用连续变化，
+  // 这里不可返回 clearTimeout 清理（会把刚挂上的定时器取消导致列表永远不刷新）；
+  // ref 已保证只调度一次，无需清理
   const refreshedRef = useRef(false)
   useEffect(() => {
     if (isRunning || !progress || refreshedRef.current) return
     refreshedRef.current = true
-    const t = setTimeout(() => useAppStore.getState().loadHistory(), 500)
-    return () => clearTimeout(t)
+    setTimeout(() => useAppStore.getState().loadHistory(), 500)
   }, [isRunning, progress])
 
   useEffect(() => {

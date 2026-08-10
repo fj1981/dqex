@@ -2,9 +2,11 @@ package engine
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,8 +126,11 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 			t.log("警告: 库 %s 未获取到前置约束语句，导入带外键依赖的库可能失败", p.db)
 		}
 
-		dbFile := filepath.Join(baseDir, sanitizeName(p.db)+".sql")
-		rows, err := exportDatabase(ctx, cli, p.db, p.tables, dbFile, opts, t, beginSQL, endSQL)
+		dbFile := filepath.Join(baseDir, sanitizeName(p.db)+sqlFileExt(opts.Gzip))
+		// 一致性快照：启用后全部读取在同一事务内进行，跨表处于同一时间点
+		exportCli, endSnapshot := beginSnapshot(cli, opts.SingleTransaction, t)
+		rows, err := exportDatabase(ctx, exportCli, p.db, p.tables, dbFile, opts, t, beginSQL, endSQL)
+		endSnapshot(err == nil)
 		if err != nil {
 			cli.Close()
 			return nil, fmt.Errorf("导出库 %s 失败: %w", p.db, err)
@@ -155,6 +160,57 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 	return result, nil
 }
 
+// sqlFileExt 导出 SQL 文件后缀（开启 gzip 时为 .sql.gz，导入侧透明解压）
+func sqlFileExt(gzipEnabled bool) string {
+	if gzipEnabled {
+		return ".sql.gz"
+	}
+	return ".sql"
+}
+
+// beginSnapshot 启用且库类型支持时开启一致性快照事务（等同 mysqldump --single-transaction），
+// 返回用于读取的 cli 与结束函数（按成功与否 commit/rollback）；不支持或开启失败时退化为原 cli 普通读取
+func beginSnapshot(cli *cydb.DBCli, enabled bool, t *tracker) (*cydb.DBCli, func(ok bool)) {
+	noop := func(bool) {}
+	if !enabled {
+		return cli, noop
+	}
+	dbType := strings.ToLower(cli.DBType())
+	switch dbType {
+	case "mysql", "mariadb":
+		// 快照需 REPEATABLE READ 隔离级别才对整事务有效；会话级设置，对其后开启的事务生效
+		if _, err := cli.DirectExecute("SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ"); err != nil {
+			t.log("警告: 设置会话隔离级别失败: %v（退化为普通导出）", err)
+			return cli, noop
+		}
+	case "postgres":
+	default:
+		t.log("库类型 %s 不支持一致性快照导出，按普通方式导出", cli.DBType())
+		return cli, noop
+	}
+	tx, err := cli.BeginTx()
+	if err != nil {
+		t.log("警告: 开启快照事务失败: %v（退化为普通导出）", err)
+		return cli, noop
+	}
+	if dbType == "postgres" {
+		// Postgres 事务默认 READ COMMITTED，需在首次读取前提升为 REPEATABLE READ
+		if _, err := tx.DirectExecute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"); err != nil {
+			_ = tx.Rollback()
+			t.log("警告: 设置事务隔离级别失败: %v（退化为普通导出）", err)
+			return cli, noop
+		}
+	}
+	t.log("一致性快照已启用：全部表在同一事务内读取")
+	return tx, func(ok bool) {
+		if ok {
+			_ = tx.Commit()
+		} else {
+			_ = tx.Rollback()
+		}
+	}
+}
+
 // exportDatabase 将整个数据库（表 + 视图/函数/存储过程）导出为单个 SQL 文件。
 // 文件内顺序：建表 DDL（含触发器）→ 数据（INSERT）→ 视图 → 函数 → 存储过程。
 // SchemaOnly=true 时跳过数据段；DataOnly=true 时跳过建表段；二者都为 false 时两段都有。
@@ -165,8 +221,14 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 		return 0, err
 	}
 	defer f.Close()
-	w := bufio.NewWriterSize(f, 256*1024)
-	defer w.Flush()
+	// gzip 开启时 SQL 内容经 gzip 流写出（文件名以 .sql.gz 结尾）
+	var out io.Writer = f
+	var gz *gzip.Writer
+	if opts.Gzip {
+		gz = gzip.NewWriter(f)
+		out = gz
+	}
+	w := bufio.NewWriterSize(out, 256*1024)
 
 	now := time.Now().Format("2006-01-02 15:04:05")
 	fmt.Fprintf(w, "-- dbx export\n-- Database: %s\n-- Time: %s\n\n", db, now)
@@ -274,9 +336,15 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 	if err := w.Flush(); err != nil {
 		return totalRows, err
 	}
+	if gz != nil {
+		if err := gz.Close(); err != nil {
+			return totalRows, err
+		}
+	}
 
-	// 写入 .desc 描述文件
-	descPath := strings.TrimSuffix(filePath, filepath.Ext(filePath)) + ".desc"
+	// 写入 .desc 描述文件（.sql.gz 先剥 .gz 再去 .sql，保持 库.desc 同名约定）
+	base := strings.TrimSuffix(filePath, ".gz")
+	descPath := strings.TrimSuffix(base, filepath.Ext(base)) + ".desc"
 	if err := writeDescFile(descPath, desc); err != nil {
 		t.log("写入描述文件失败（已跳过）: %v", err)
 	}

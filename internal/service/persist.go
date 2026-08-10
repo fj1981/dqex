@@ -10,24 +10,27 @@ import (
 
 	"github.com/rs/xid"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
+	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
 )
 
 // PersistMgr 统一持久化管理：连接配置 + 任务配置 + 执行历史（JSON 文件存储于数据根目录）
 type PersistMgr struct {
-	baseDir                      string
-	tmpDir, uploadDir, exportDir string
-	mu                           sync.Mutex
+	baseDir                                  string
+	tmpDir, uploadDir, exportDir, compareDir string
+	mu                                       sync.Mutex
 }
 
 // 数据根目录（默认 ~/.dbimpex，--data-dir 可覆盖）下的子目录规划：
 //   - 根目录：配置存储（connections/tasks/history JSON）
 //   - uploads：Web 上传文件临时目录
 //   - tmp：任务处理临时目录（如 zip 解压，任务结束自动清理）
-//   - exports：最终生成产物目录（导出 zip/目录、对比报告 JSON）
+//   - exports：导出产物目录（导出 zip/目录）
+//   - compares：对比报告目录（compare-<ID>.json）
 const (
-	UploadDirName = "uploads"
-	TempDirName   = "tmp"
-	ExportDirName = "exports"
+	UploadDirName  = "uploads"
+	TempDirName    = "tmp"
+	ExportDirName  = "exports"
+	CompareDirName = "compares"
 )
 
 // NewPersistMgr 创建持久化管理器（默认 ~/.dbimpex/，子目录由 data 目录派生）
@@ -35,14 +38,14 @@ func NewPersistMgr(baseDir string) (*PersistMgr, error) {
 	return NewPersistMgrWith(ResolveDirs(baseDir, nil))
 }
 
-// NewPersistMgrWith 按解析后的四类目录创建持久化管理器
+// NewPersistMgrWith 按解析后的五类目录创建持久化管理器
 func NewPersistMgrWith(dirs ResolvedDirs) (*PersistMgr, error) {
-	for _, d := range []string{dirs.Data, dirs.Tmp, dirs.Uploads, dirs.Exports} {
+	for _, d := range []string{dirs.Data, dirs.Tmp, dirs.Uploads, dirs.Exports, dirs.Compares} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, err
 		}
 	}
-	return &PersistMgr{baseDir: dirs.Data, tmpDir: dirs.Tmp, uploadDir: dirs.Uploads, exportDir: dirs.Exports}, nil
+	return &PersistMgr{baseDir: dirs.Data, tmpDir: dirs.Tmp, uploadDir: dirs.Uploads, exportDir: dirs.Exports, compareDir: dirs.Compares}, nil
 }
 
 // BaseDir 返回存储根目录（配置存储）
@@ -54,10 +57,33 @@ func (p *PersistMgr) UploadDir() string { return p.uploadDir }
 // TempDir 返回任务处理临时目录（zip 解压等，任务结束自动清理）
 func (p *PersistMgr) TempDir() string { return p.tmpDir }
 
-// ExportDir 返回最终生成产物目录（导出文件、对比报告）
+// ExportDir 返回导出产物目录（导出 zip/目录）
 func (p *PersistMgr) ExportDir() string { return p.exportDir }
 
+// CompareDir 返回对比报告目录（compare-<ID>.json）
+func (p *PersistMgr) CompareDir() string { return p.compareDir }
+
 func (p *PersistMgr) path(name string) string { return filepath.Join(p.baseDir, name) }
+
+// RemoveArtifact 清理执行记录 OutputPath 指向的产物文件（目录或文件均可）。
+// 安全边界：仅清理 exports/compares 受管目录内的产物，用户自定义输出路径
+// （export -o / compare --output）不动；文件不存在时静默跳过。
+func (p *PersistMgr) RemoveArtifact(outputPath string) {
+	path := strings.TrimSpace(outputPath)
+	if path == "" {
+		return
+	}
+	cleaned := filepath.Clean(path)
+	inDir := func(dir string) bool {
+		return dir != "" && strings.HasPrefix(cleaned, filepath.Clean(dir)+string(os.PathSeparator))
+	}
+	if !inDir(p.exportDir) && !inDir(p.compareDir) {
+		return
+	}
+	if err := os.RemoveAll(path); err != nil {
+		cylog.Warnf("清理产物文件失败 %s: %v", path, err)
+	}
+}
 
 func (p *PersistMgr) loadJSON(name string, v any) error {
 	data, err := os.ReadFile(p.path(name))
@@ -284,6 +310,36 @@ func (p *PersistMgr) GetLastUsed(taskType string) *TaskConfig {
 	return latest
 }
 
+// ---- Web 访问凭证（web-access.json） ----
+
+// WebAccessInfo Web 访问凭证：持久化后重启可复用（未过期时），dbx url 随时可取
+type WebAccessInfo struct {
+	Addr     string `json:"addr"`               // 监听地址 host:port
+	Token    string `json:"token"`              // 访问令牌（空=启动时禁用了认证）
+	IssuedAt int64  `json:"issuedAt,omitempty"` // 令牌签发时间（Unix 毫秒），用于过期判断
+}
+
+// SaveWebAccess 保存 Web 访问凭证（0600 落盘）
+func (p *PersistMgr) SaveWebAccess(info WebAccessInfo) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.saveJSON("web-access.json", info)
+}
+
+// LoadWebAccess 读取 Web 访问凭证；文件不存在或无有效内容时 ok=false
+func (p *PersistMgr) LoadWebAccess() (WebAccessInfo, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var info WebAccessInfo
+	if err := p.loadJSON("web-access.json", &info); err != nil {
+		return WebAccessInfo{}, false
+	}
+	if info.Addr == "" && info.Token == "" {
+		return WebAccessInfo{}, false
+	}
+	return info, true
+}
+
 // ---- 执行历史（history.json） ----
 
 const maxHistoryRecords = 200
@@ -307,6 +363,10 @@ func (p *PersistMgr) SaveHistory(record ExecutionRecord) error {
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].StartedAt > records[j].StartedAt })
 	if len(records) > maxHistoryRecords {
+		// 超限裁剪的最旧记录：同步清理其产物文件，避免磁盘无限增长
+		for _, r := range records[maxHistoryRecords:] {
+			p.RemoveArtifact(r.OutputPath)
+		}
 		records = records[:maxHistoryRecords]
 	}
 	return p.saveJSON("history.json", records)

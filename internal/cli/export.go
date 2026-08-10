@@ -16,8 +16,8 @@ var exportSrc connFlags
 var exportCmd = &cobra.Command{
 	Use:     "export [database [table...]]",
 	Aliases: []string{"exp"},
-	Short:   "导出数据库结构及数据为 SQL（可压缩为 zip）",
-	Long: `导出数据库结构及数据为 SQL（可压缩为 zip）。
+	Short:   "导出数据库结构及数据为 SQL（可压缩为 zip / gzip）",
+	Long: `导出数据库结构及数据为 SQL（可压缩为 zip / gzip）。
 
 独立闭环用法：
   dbx export --gen-config > export.yaml   # 生成配置模板
@@ -53,6 +53,8 @@ func init() {
 	f.Bool("no-data", false, "不导出数据，仅导出结构（同 --schema-only，mysqldump 风格）")
 	f.Bool("no-create-info", false, "不导出建表语句，仅导出数据（同 --data-only，mysqldump 风格）")
 	f.Bool("compress", true, "打包为 zip")
+	f.Bool("gzip", false, "SQL 文件 gzip 压缩为 .sql.gz（与 --compress 可同时开启；导入侧透明解压）")
+	f.Bool("single-transaction", true, "一致性快照导出（等同 mysqldump --single-transaction，仅 MySQL/PostgreSQL 生效）")
 	f.Int("batch-size", 500, "批量大小")
 	registerConnAliases(exportCmd, "", "source-", &exportSrc)
 	rootCmd.AddCommand(exportCmd)
@@ -65,7 +67,7 @@ func cliExport(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	opts := ExportOptions{Compress: true}
+	opts := ExportOptions{Compress: true, SingleTransaction: true}
 	var wantZip string
 	if v, _ := f.GetString("config"); v != "" {
 		cfg, lerr := loadExportConfig(v)
@@ -143,6 +145,12 @@ func cliExport(cmd *cobra.Command, args []string) error {
 	}
 	if f.Changed("compress") {
 		opts.Compress, _ = f.GetBool("compress")
+	}
+	if f.Changed("gzip") {
+		opts.Gzip, _ = f.GetBool("gzip")
+	}
+	if f.Changed("single-transaction") {
+		opts.SingleTransaction, _ = f.GetBool("single-transaction")
 	}
 	if f.Changed("batch-size") {
 		opts.BatchSize, _ = f.GetInt("batch-size")

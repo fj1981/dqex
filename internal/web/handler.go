@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"path/filepath"
+	"strings"
 
 	"dbimpex/internal/engine"
 	"dbimpex/internal/service"
@@ -164,15 +165,27 @@ type UploadReq struct {
 	File *multipart.FileHeader `file:"file" binding:"required"`
 }
 
+// maxUploadSize 上传文件大小上限（2GB），防止误传/恶意大文件打满磁盘
+const maxUploadSize = 2 << 30
+
 func handleImportUpload(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req UploadReq) (any, error) {
 		name := filepath.Base(req.File.Filename)
-		ext := filepath.Ext(name)
-		if ext != ".sql" && ext != ".zip" {
-			return nil, cygin.NewError(service.ErrFileType, cygin.WithErrPrint(), cygin.WithErrDetailf("仅支持 .sql 或 .zip 文件: %s", name))
+		lower := strings.ToLower(name)
+		ext := filepath.Ext(lower)
+		// .sql / .zip / .sql.gz（gzip 压缩的 SQL）
+		if ext != ".sql" && ext != ".zip" && !(ext == ".gz" && strings.HasSuffix(lower, ".sql.gz")) {
+			return nil, cygin.NewError(service.ErrFileType, cygin.WithErrPrint(), cygin.WithErrDetailf("仅支持 .sql / .sql.gz / .zip 文件: %s", name))
+		}
+		if req.File.Size > maxUploadSize {
+			return nil, cygin.NewError(service.ErrFileType, cygin.WithErrPrint(), cygin.WithErrDetailf("上传文件超过大小上限 2GB: %s", name))
 		}
 		dir := svc.Persist().UploadDir()
-		saveTo := filepath.Join(dir, fmt.Sprintf("%d%s", nowMillis(), ext))
+		saveExt := ext
+		if ext == ".gz" {
+			saveExt = ".sql.gz" // 保留完整后缀，保证下游按 .sql.gz 识别解压
+		}
+		saveTo := filepath.Join(dir, fmt.Sprintf("%d%s", nowMillis(), saveExt))
 		if err := c.SaveUploadedFile(req.File, saveTo); err != nil {
 			return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetailf("保存上传文件失败: %v", err))
 		}

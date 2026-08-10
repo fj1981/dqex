@@ -15,8 +15,8 @@ var importTarget connFlags
 var importCmd = &cobra.Command{
 	Use:     "import",
 	Aliases: []string{"imp"},
-	Short:   "导入 SQL 文件（.sql 或 .zip）到数据库",
-	Long: `导入 SQL 文件（.sql 或 .zip）到数据库。
+	Short:   "导入 SQL 文件（.sql / .sql.gz / .zip）到数据库",
+	Long: `导入 SQL 文件（.sql / .sql.gz / .zip）到数据库。
 
 独立闭环用法：
   dbx import --gen-config > import.yaml   # 生成配置模板
@@ -39,7 +39,7 @@ func init() {
 	f.StringP("target-conn", "t", "", "使用已保存连接（ID 或名称），与 --target-* 同时给出时后者优先")
 	_ = importCmd.RegisterFlagCompletionFunc("task", completeTaskIDs("import"))
 	_ = importCmd.RegisterFlagCompletionFunc("target-conn", completeConnNames)
-	f.StringP("input", "i", "", "导入文件(.sql 或 .zip)")
+	f.StringP("input", "i", "", "导入文件(.sql / .sql.gz / .zip)")
 	f.String("reset", "", "重置模式: truncate|drop（默认不重置）")
 	_ = importCmd.RegisterFlagCompletionFunc("reset", fixedCompletion("truncate", "drop"))
 	f.Bool("backup", true, "重置前创建备份表")

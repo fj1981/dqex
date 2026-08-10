@@ -18,7 +18,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import * as api from "@/api"
 import PageHeader from "@/components/PageHeader"
 import { useAppStore } from "@/stores/app"
-import { TASK_TYPE_LABEL, type ExecutionRecord, type TaskConfig } from "@/types"
+import { TASK_TYPE_LABEL, type ConnInfo, type ExecutionRecord, type TaskConfig } from "@/types"
 import { formatTime } from "@/lib/utils"
 
 const TYPE_ICON: Record<string, { icon: React.ReactNode; cls: string }> = {
@@ -27,23 +27,39 @@ const TYPE_ICON: Record<string, { icon: React.ReactNode; cls: string }> = {
   migrate: { icon: <ArrowLeftRight className="h-5 w-5" />, cls: "bg-purple-50 text-purple-500" },
 }
 
-function taskSummary(task: TaskConfig): string[] {
+// 连接主键（或旧配置中的连接名）转显示名，未命中时回退原值
+function connLabel(key: string | undefined, conns: ConnInfo[]): string {
+  if (!key) return "-"
+  return conns.find((c) => c.id === key || c.name === key)?.name || key
+}
+
+// 表清单摘要：前 3 张 + 总数，避免长名单撑高卡片；完整清单由悬停 title 展示
+function tablesSummary(tables?: string[]): string {
+  if (!tables?.length) return ""
+  const head = tables.slice(0, 3).join("，")
+  return tables.length > 3 ? `${head} 等 ${tables.length} 张` : head
+}
+
+function taskSummary(task: TaskConfig, conns: ConnInfo[]): string[] {
   const lines: string[] = []
   if (task.type === "export" && task.exportOpts) {
     const o = task.exportOpts
-    lines.push(`源: ${o.sourceConn || "-"}`)
-    if (o.tables?.length) lines.push(`表: ${o.tables.slice(0, 5).join(", ")}${o.tables.length > 5 ? ` 等 ${o.tables.length} 张` : ""}`)
+    lines.push(`源: ${connLabel(o.sourceConn, conns)}`)
+    const tbl = tablesSummary(o.tables)
+    if (tbl) lines.push(`表: ${tbl}`)
     lines.push(`模式: ${o.schemaOnly ? "仅结构" : o.dataOnly ? "仅数据" : "结构+数据"}${o.compress ? "，zip 打包" : ""}`)
   } else if (task.type === "import" && task.importOpts) {
     const o = task.importOpts
-    lines.push(`目标: ${o.targetConn || "-"}`)
-    // 仅展示文件名，隐藏服务器路径信息
-    lines.push(`文件: ${o.inputPath ? o.inputPath.split(/[\\/]/).pop() : "-"}`)
+    lines.push(`目标: ${connLabel(o.targetConn, conns)}`)
+    // 仅展示文件名，隐藏服务器路径信息；未选文件时不占位
+    const file = o.inputPath ? o.inputPath.split(/[\\/]/).pop() : ""
+    if (file) lines.push(`文件: ${file}`)
     lines.push(`重置: ${o.resetMode || "不重置"}`)
   } else if (task.type === "migrate" && task.migrateOpts) {
     const o = task.migrateOpts
-    lines.push(`源: ${o.sourceConn || "-"} → 目标: ${o.targetConn || "-"}`)
-    if (o.tables?.length) lines.push(`表: ${o.tables.slice(0, 5).join(", ")}${o.tables.length > 5 ? ` 等 ${o.tables.length} 张` : ""}`)
+    lines.push(`${connLabel(o.sourceConn, conns)} → ${connLabel(o.targetConn, conns)}`)
+    const tbl = tablesSummary(o.tables)
+    if (tbl) lines.push(`表: ${tbl}`)
     lines.push(`模式: ${o.schemaOnly ? "仅结构" : o.dataOnly ? "仅数据" : "结构+数据"}，重置: ${o.resetMode || "不重置"}`)
   }
   return lines
@@ -53,6 +69,7 @@ function taskSummary(task: TaskConfig): string[] {
 export default function TaskView() {
   const navigate = useNavigate()
   const loadHistory = useAppStore((s) => s.loadHistory)
+  const connections = useAppStore((s) => s.connections)
   const [typeFilter, setTypeFilter] = useState("all")
   const [keyword, setKeyword] = useState("")
   const [tasks, setTasks] = useState<TaskConfig[]>([])
@@ -160,8 +177,8 @@ export default function TaskView() {
                       {task.isLastUsed && <Badge variant="outline" className="shrink-0 font-normal">上次使用</Badge>}
                     </div>
                     <div className="mt-1 space-y-0.5 text-sm text-muted-foreground">
-                      {taskSummary(task).map((l, i) => (
-                        <div key={i} className="truncate">{l}</div>
+                      {taskSummary(task, connections).map((l, i) => (
+                        <div key={i} className="truncate" title={l}>{l}</div>
                       ))}
                       <div className="text-xs">更新于 {formatTime(new Date(task.updatedAt).toISOString())}</div>
                     </div>
@@ -196,7 +213,7 @@ export default function TaskView() {
           {detail && (
             <div className="space-y-3 text-sm">
               <div className="space-y-1">
-                {taskSummary(detail).map((l, i) => (
+                {taskSummary(detail, connections).map((l, i) => (
                   <div key={i}>{l}</div>
                 ))}
               </div>

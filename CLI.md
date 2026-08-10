@@ -71,13 +71,24 @@ install.bat D:\dbx        :: 或安装到自定义目录
 ## 全局说明
 
 ```bash
-dbx                      # 启动 Web 服务（默认端口 8181）
+dbx                      # 启动 Web 服务（默认端口 8181，仅监听 127.0.0.1 + 随机 token 认证，自动打开浏览器）
 dbx version              # 查看版本号
 dbx --port 9000          # 指定 Web 端口
+dbx --host 0.0.0.0       # 对外暴露（默认仅本机；启动日志给出带 token 的访问链接）
+dbx --no-browser         # 启动时不自动打开浏览器（远程/无头环境）
+dbx --no-auth            # 禁用 token 认证（仅限可信环境，不推荐）
+dbx url                  # 输出带 token 的 Web 访问链接（令牌有效期 24 小时）
+dbx url --token-only     # 仅输出 token，便于 curl/脚本调试
 dbx --data-dir /data/x   # 指定数据根目录（优先于全局配置）
 dbx --config-file /etc/dbx.yaml   # 指定全局配置文件
 dbx <命令> --help        # 查看任意命令帮助
 ```
+
+> **Web 安全**：默认仅监听本机并启用令牌认证，令牌持久化于数据目录 `web-access.json`（0600），
+> **有效期 24 小时**：未过期时重启复用，运行中超期 API 返回 401 并提示重启服务刷新，重启后自动换新；
+> 删除该文件可强制重新生成。启动时自动打开带 `?token=` 的浏览器链接（令牌存入 sessionStorage，
+> 后续页面导航不丢失）；`dbx url` 可随时取回访问链接及剩余有效期；API 也可手动携带
+> `Authorization: Bearer <token>` / `X-Auth-Token` 头或 `?token=` 参数（SSE/下载走查询参数）。
 
 > ⚠️ Web 模式下的 `--port` 是 **Web 服务端口**；`export` / `import` 子命令中的
 > `--port` 是 **数据库端口**（mysqldump 风格别名），两者作用域不同。
@@ -303,6 +314,8 @@ dbx export camunda \
 | `--schema-only` / `--no-data` | 仅导出结构（不导数据） |
 | `--data-only` / `--no-create-info` | 仅导出数据（不导建表语句） |
 | `--compress` | 打包为 zip，默认 true |
+| `--gzip` | SQL 文件 gzip 压缩为 `.sql.gz`，默认 false（导入侧自动解压；与 `--compress` 可同时开启） |
+| `--single-transaction` | 一致性快照导出（等同 mysqldump `--single-transaction`），全程同一事务内读取，跨表数据处于同一时间点；仅 MySQL/PostgreSQL 生效，默认 true |
 | `--batch-size` | 批量大小，默认 500 |
 
 **示例：**
@@ -319,8 +332,8 @@ dbx export camunda act_ge_property act_id_user \
 
 ### import 导入
 
-将 `.sql` 或 `.zip` 导入目标数据库。`.sql` 单文件直接导入目标库；
-`.zip` 内每个根目录 `.sql` 文件对应一个库（文件名即库名）。
+将 `.sql` / `.sql.gz` / `.zip` 导入目标数据库。`.sql`（或 gzip 压缩的 `.sql.gz`）单文件直接导入目标库；
+`.zip` 内每个根目录 `.sql` / `.sql.gz` 文件对应一个库（文件名即库名）。
 
 ```bash
 dbx import [flags]
@@ -334,7 +347,7 @@ dbx import [flags]
 | `--target-type` / `--target-host` / `--target-port` / `--target-un` / `--target-pw` / `--target-db` / `--target-subtype` | 内联目标连接 |
 | `--host` / `--port` / `--user` / `--password` / `--database` | mysqldump 风格别名，等价于上面 target-* |
 | `--target-conn` | 使用已保存连接（ID 或名称） |
-| `--input` | 导入文件（.sql 或 .zip），必填 |
+| `--input` | 导入文件（.sql / .sql.gz / .zip），必填 |
 | `--reset` | 重置模式：`truncate`（清空表）/ `drop`（删除重建），默认不重置 |
 | `--backup` | 重置前创建备份表，默认 true |
 | `--batch-size` | 批量大小，默认 500 |

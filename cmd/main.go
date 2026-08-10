@@ -29,5 +29,5 @@ func runWeb(args *cli.WebArgs) {
 		fmt.Fprintf(os.Stderr, "初始化服务失败: %v\n", err)
 		os.Exit(1)
 	}
-	web.RunWeb(svc, args.Port)
+	web.RunWeb(svc, args.Host, args.Port, args.NoAuth, args.NoBrowser)
 }

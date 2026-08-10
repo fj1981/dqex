@@ -227,7 +227,7 @@ func (s *Service) RunCompare(ctx context.Context, opts CompareOptions, cb Progre
 	return engine.RunCompare(ctx, opts, cb)
 }
 
-// RunCompareRecorded 执行对比并记录历史：结果落盘 exports/compare-<ID>.json，
+// RunCompareRecorded 执行对比并记录历史：结果落盘 compares/compare-<ID>.json，
 // 返回记录 ID，供 `compare show --id <ID>` 回看差异明细（CLI 同步执行路径用）
 func (s *Service) RunCompareRecorded(ctx context.Context, opts CompareOptions, cb ProgressFunc, taskConfigID string) (string, *CompareResult, error) {
 	taskID := newTaskID()
@@ -244,7 +244,7 @@ func (s *Service) RunCompareRecorded(ctx context.Context, opts CompareOptions, c
 		record.ErrorMsg = err.Error()
 	} else {
 		record.Status = "done"
-		outputPath := filepath.Join(s.persist.ExportDir(), "compare-"+taskID+".json")
+		outputPath := filepath.Join(s.persist.CompareDir(), "compare-"+taskID+".json")
 		if e := saveCompareResult(outputPath, result); e != nil {
 			cylog.Errorf("保存对比结果失败: %v", e)
 		} else {
@@ -495,7 +495,7 @@ func (s *Service) StartMigrate(opts MigrateOptions, taskConfigID string) (string
 	return taskID, nil
 }
 
-// StartCompare 异步启动对比任务，返回 taskID；完成后结果报告落盘 ExportDir/compare-<taskID>.json
+// StartCompare 异步启动对比任务，返回 taskID；完成后结果报告落盘 CompareDir/compare-<taskID>.json
 func (s *Service) StartCompare(opts CompareOptions, taskConfigID string) (string, error) {
 	src, err := s.resolveConn(opts.SourceConn, opts.Source)
 	if err != nil {
@@ -525,7 +525,7 @@ func (s *Service) StartCompare(opts CompareOptions, taskConfigID string) (string
 			if result == nil {
 				return
 			}
-			outputPath := filepath.Join(s.persist.ExportDir(), "compare-"+taskID+".json")
+			outputPath := filepath.Join(s.persist.CompareDir(), "compare-"+taskID+".json")
 			if e := saveCompareResult(outputPath, result); e != nil {
 				cylog.Errorf("保存对比结果失败: %v", e)
 			} else {
@@ -555,7 +555,11 @@ func (s *Service) GetCompareResult(taskID string) (*CompareResult, error) {
 		path = rec.OutputPath
 	}
 	if path == "" {
-		path = filepath.Join(s.persist.ExportDir(), "compare-"+taskID+".json")
+		path = filepath.Join(s.persist.CompareDir(), "compare-"+taskID+".json")
+		// 兼容：旧版对比报告存于 exports/，新路径不存在时回退旧路径读取
+		if _, serr := os.Stat(path); serr != nil {
+			path = filepath.Join(s.persist.ExportDir(), "compare-"+taskID+".json")
+		}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -719,7 +723,7 @@ func (s *Service) GetHistory(taskID string) (ExecutionRecord, error) {
 	return s.persist.GetHistory(taskID)
 }
 
-// DeleteHistory 删除执行记录；运行中的任务不允许删除
+// DeleteHistory 删除执行记录并同步清理其产物文件（仅受管目录内）；运行中的任务不允许删除
 func (s *Service) DeleteHistory(taskID string) error {
 	rec, err := s.persist.GetHistory(taskID)
 	if err != nil {
@@ -728,7 +732,12 @@ func (s *Service) DeleteHistory(taskID string) error {
 	if rec.Status == "running" {
 		return cygin.NewError(ErrHistoryRunning, cygin.WithErrPrint(), cygin.WithErrDetailf("任务运行中，无法删除记录: %s", taskID))
 	}
-	return s.persist.DeleteHistory(taskID)
+	if err := s.persist.DeleteHistory(taskID); err != nil {
+		return err
+	}
+	// 记录删除成功后清理对应产物（导出目录/zip、对比报告），用户自定义输出路径不受影响
+	s.persist.RemoveArtifact(rec.OutputPath)
+	return nil
 }
 
 // newTaskID 生成任务主键：xid（内嵌时间戳，字典序即时间序，全局唯一），与连接配置主键风格一致

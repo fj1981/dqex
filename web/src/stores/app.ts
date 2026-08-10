@@ -71,7 +71,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   loadHistory: async () => {
     try {
       const list = await api.listHistory()
-      set({ history: (list || []).slice(0, 20) })
+      // 全量展示（后端最多保留 200 条）：标题计数即真实总数，面板独立滚动不挤压布局
+      set({ history: list || [] })
     } catch (e) {
       console.error(e)
     }

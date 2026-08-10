@@ -18,13 +18,16 @@ import (
 
 // WebArgs Web 启动参数（未执行 CLI 子命令时由 Execute 返回）
 type WebArgs struct {
+	Host       string
 	Port       int
+	NoAuth     bool
+	NoBrowser  bool
 	DataDir    string
 	ConfigFile string
 }
 
 var (
-	webArgs     = &WebArgs{Port: 8181}
+	webArgs     = &WebArgs{Host: "127.0.0.1", Port: 8181}
 	cliExecuted bool // 执行过任一 CLI 子命令（含 help）时为 true
 )
 
@@ -49,7 +52,10 @@ CLI 子命令与 Web 功能对齐：export / import / migrate / compare / conn /
 
 // Execute CLI 入口：返回非 nil 表示需启动 Web 服务；CLI 子命令执行完直接退出
 func Execute() *WebArgs {
+	rootCmd.PersistentFlags().StringVar(&webArgs.Host, "host", "127.0.0.1", "Web 服务监听地址（默认仅本机；对外暴露用 0.0.0.0，请确保已启用令牌认证）")
 	rootCmd.PersistentFlags().IntVar(&webArgs.Port, "port", 8181, "Web 服务端口")
+	rootCmd.PersistentFlags().BoolVar(&webArgs.NoAuth, "no-auth", false, "禁用令牌认证（仅限可信环境，不推荐）")
+	rootCmd.PersistentFlags().BoolVar(&webArgs.NoBrowser, "no-browser", false, "启动时不自动打开浏览器")
 	rootCmd.PersistentFlags().StringVar(&webArgs.DataDir, "data-dir", "", "数据根目录（默认取全局配置，否则 ~/.dbimpex）")
 	rootCmd.PersistentFlags().StringVar(&webArgs.ConfigFile, "config-file", "", "全局配置文件（默认 环境变量 DBIMPEX_CONFIG 或 ~/.dbimpex/config.yaml）")
 	// help 展示（--help / 裸跑分组命令）也视为 CLI 执行，避免随后误启 Web

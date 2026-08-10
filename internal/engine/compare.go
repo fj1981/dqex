@@ -54,11 +54,14 @@ func RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*Com
 		threshold = DefaultCompareThreshold
 	}
 	// 忽略列归一化（列名大小写不敏感），数据内容对比时排除这些列
-	ignore := make(map[string]bool, len(opts.IgnoreColumns))
-	for _, c := range opts.IgnoreColumns {
-		if c = strings.TrimSpace(c); c != "" {
-			ignore[strings.ToLower(c)] = true
+	ignore := normalizeIgnoreColumns(opts.IgnoreColumns)
+	// 表级忽略列索引（小写源表名 → 列集合）：与全局忽略列合并后对该表生效
+	tableIgnore := make(map[string]map[string]bool, len(opts.Aliases))
+	for _, a := range opts.Aliases {
+		if len(a.IgnoreColumns) == 0 {
+			continue
 		}
+		tableIgnore[strings.ToLower(strings.TrimSpace(a.Source))] = normalizeIgnoreColumns(a.IgnoreColumns)
 	}
 	// 清空表结构元数据缓存：对比要求两侧实时结构，避免复用陈旧/他实例缓存
 	cydb.FlushTableInfoCache()
@@ -121,7 +124,18 @@ func RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*Com
 					// 结构不一致时默认不对比数据（列定义都不同，数据对比意义有限）；--force-data 可强制
 					tr.Data = &DataDiff{Mode: "skipped", SkippedReason: "结构不一致，已跳过数据对比（--force-data 可强制）"}
 				} else {
-					data, err := compareTableData(ctx, sourceCli, targetCli, pair.SourceName, pair.TargetName, threshold, ignore, t)
+					// 表级忽略列与全局合并；无表级配置时直接用全局集合（避免逐表拷贝）
+					tblIgnore := ignore
+					if extra, ok := tableIgnore[strings.ToLower(pair.SourceName)]; ok {
+						tblIgnore = make(map[string]bool, len(ignore)+len(extra))
+						for c := range ignore {
+							tblIgnore[c] = true
+						}
+						for c := range extra {
+							tblIgnore[c] = true
+						}
+					}
+					data, err := compareTableData(ctx, sourceCli, targetCli, pair.SourceName, pair.TargetName, threshold, tblIgnore, t)
 					if err != nil {
 						t.log("表 %s 数据对比失败（已跳过）: %v", pair.Name, err)
 					} else {
@@ -376,6 +390,17 @@ func diffColumns(srcCols, tgtCols []ColumnItem, normSrc, normTgt func(string) st
 }
 
 // ---- 数据对比 ----
+
+// normalizeIgnoreColumns 忽略列归一化：去空白、小写（列名大小写不敏感）
+func normalizeIgnoreColumns(cols []string) map[string]bool {
+	ret := make(map[string]bool, len(cols))
+	for _, c := range cols {
+		if c = strings.TrimSpace(c); c != "" {
+			ret[strings.ToLower(c)] = true
+		}
+	}
+	return ret
+}
 
 // compareTableData 单表数据对比：超阈值仅比较行数；有主键时走 PK 模式
 // （主键判断有无：缺失/多出，内容对比判断变化），无主键回退整行归一化多重集比较；

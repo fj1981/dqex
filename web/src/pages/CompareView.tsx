@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
-import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp, MoveRight, Play, RotateCcw, Save, ScrollText, Search, X } from "lucide-react"
+import { ArrowRight, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, MoveRight, Play, RotateCcw, Save, ScrollText, Search, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -25,6 +25,7 @@ import SaveTaskDialog from "@/components/SaveTaskDialog"
 import { Section } from "@/components/Section"
 import StepWizard from "@/components/StepWizard"
 import TablePicker from "@/components/TablePicker"
+import ColumnMultiSelect, { isTimeColumn, toColumnOptions } from "@/components/ColumnMultiSelect"
 import { useAppStore } from "@/stores/app"
 import { cn } from "@/lib/utils"
 import type {
@@ -33,6 +34,8 @@ import type {
   CompareOptions,
   CompareResult,
   CompareTableResult,
+  TableAlias,
+  TableColumn,
   TaskConfig,
 } from "@/types"
 
@@ -41,8 +44,8 @@ const STEPS = ["选择源和目标库", "选择表", "设置对比选项", "结�
 // 对比范围：三选一互斥，取代原先两个相互制约的复选框
 const COMPARE_SCOPES = [
   { key: "both", label: "结构 + 数据", desc: "列结构与数据同时对比（默认）", structureOnly: false, dataOnly: false },
-  { key: "structure", label: "仅结构", desc: "表存在性 + 列级差异，跳过数据", structureOnly: true, dataOnly: false },
-  { key: "data", label: "仅数据", desc: "只比数据差异，跳过结构对比", structureOnly: false, dataOnly: true },
+  { key: "structure", label: "仅结构", desc: "只对比表结构差异，跳过数据", structureOnly: true, dataOnly: false },
+  { key: "data", label: "仅数据", desc: "只对比数据差异，跳过结构", structureOnly: false, dataOnly: true },
 ]
 
 function defaultOptions(): CompareOptions {
@@ -75,6 +78,9 @@ export default function CompareView() {
   const [taskState, setTaskState] = useState("running")
   const [report, setReport] = useState<CompareResult | null>(null)
   const [targetTables, setTargetTables] = useState<string[]>([])
+  const [tableCols, setTableCols] = useState<Record<string, TableColumn[]>>({})
+  const [colsLoading, setColsLoading] = useState(false)
+  const filledDefaults = useRef(false)
   const [aliasQuery, setAliasQuery] = useState("")
   const [aliasOnlyConfigured, setAliasOnlyConfigured] = useState(false)
   const [logs, setLogs] = useState<string[]>([])
@@ -88,6 +94,9 @@ export default function CompareView() {
 
   // 目标库当前作用域名：inline 覆盖优先，其次连接配置的库
   const targetDB = opts.target?.DBName || findConn(opts.targetConn)?.conn.DBName || ""
+
+  // 源库作用域（单库对）：inline 覆盖优先，其次连接配置的库，再退到选中库
+  const sourceDB = opts.source?.DBName || findConn(opts.sourceConn)?.conn.DBName || (opts.databases || [])[0] || ""
 
   // 源连接未配置库时，以选中的第一个库 inline 覆盖源/目标库名（对比作用域为单个库对）
   const pickSourceDB = (dbName: string) => {
@@ -176,14 +185,20 @@ export default function CompareView() {
     api.getCompareResult(runningTaskID).then(setReport).catch(() => {})
   }, [taskState, runningTaskID, report])
 
-  // 别名配置更新：同一源表只保留一条映射
-  const setAlias = (source: string, target: string) => {
-    const aliases = (opts.aliases || []).filter((a) => a.source !== source)
-    if (target.trim()) {
-      aliases.push({ source, target: target.trim() })
+  // 表级配置更新：同一源表只保留一条（目标表名 + 忽略列），两者皆空则删除条目
+  const upsertAlias = (source: string, patch: { target?: string; ignoreColumns?: string[] }) => {
+    const cur = (opts.aliases || []).find((a) => a.source === source)
+    const next: TableAlias = {
+      source,
+      target: (patch.target ?? cur?.target ?? "").trim(),
+      ignoreColumns: (patch.ignoreColumns ?? cur?.ignoreColumns ?? []).filter(Boolean),
     }
-    set({ aliases })
+    const rest = (opts.aliases || []).filter((a) => a.source !== source)
+    if (next.target || (next.ignoreColumns || []).length > 0) rest.push(next)
+    set({ aliases: rest })
   }
+  const setAlias = (source: string, target: string) => upsertAlias(source, { target })
+  const setTableIgnore = (source: string, cols: string[]) => upsertAlias(source, { ignoreColumns: cols })
 
   const startRun = async () => {
     if (!opts.sourceConn || !opts.targetConn) {
@@ -226,16 +241,88 @@ export default function CompareView() {
   }
 
   const selectedBareTables = (opts.tables || []).map(bareName)
-  const aliasOf = (src: string) => (opts.aliases || []).find((a) => a.source === src)?.target || ""
+
+  // 进入选项步骤时拉取选中表的列信息（忽略列下拉候选）；
+  // 首次进入时默认回填时间类列（创建/更新时间），全局忽略同步预选
+  const selectedTablesKey = selectedBareTables.join(",")
+  useEffect(() => {
+    if (step !== 2 || !opts.sourceConn || !sourceDB || !selectedTablesKey) return
+    let cancelled = false
+    setColsLoading(true)
+    Promise.all(
+      selectedBareTables.map((t) =>
+        api
+          .getTableColumns(opts.sourceConn, sourceDB, t)
+          .then((r) => r.columns || [])
+          .catch(() => [] as TableColumn[]),
+      ),
+    )
+      .then((colsArr) => {
+        if (cancelled) return
+        const map: Record<string, TableColumn[]> = {}
+        selectedBareTables.forEach((t, i) => {
+          map[t] = colsArr[i]
+        })
+        setTableCols(map)
+        if (!filledDefaults.current) {
+          filledDefaults.current = true
+          setOpts((prev) => {
+            const aliases = [...(prev.aliases || [])]
+            selectedBareTables.forEach((t, i) => {
+              const times = colsArr[i].filter(isTimeColumn).map((c) => c.name)
+              if (times.length === 0) return
+              const idx = aliases.findIndex((a) => a.source === t)
+              if (idx >= 0) {
+                if ((aliases[idx].ignoreColumns || []).length === 0) {
+                  aliases[idx] = { ...aliases[idx], ignoreColumns: times }
+                }
+              } else {
+                aliases.push({ source: t, target: "", ignoreColumns: times })
+              }
+            })
+            const timeUnion = [...new Set(colsArr.flat().filter(isTimeColumn).map((c) => c.name))]
+            const ignoreColumns =
+              !prev.ignoreColumns?.length && timeUnion.length > 0 ? timeUnion : prev.ignoreColumns
+            return { ...prev, aliases, ignoreColumns }
+          })
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setColsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [step, opts.sourceConn, sourceDB, selectedTablesKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 全局忽略列下拉候选：所有已加载表列的并集（同名去重）
+  const globalColOptions = useMemo(() => {
+    const seen = new Map<string, TableColumn>()
+    Object.values(tableCols).forEach((cols) =>
+      cols.forEach((c) => {
+        const k = c.name.toLowerCase()
+        if (!seen.has(k)) seen.set(k, c)
+      }),
+    )
+    return toColumnOptions([...seen.values()])
+  }, [tableCols])
+  // 单表的表级配置条目（目标表名 + 忽略列）
+  const aliasEntryOf = (src: string) => (opts.aliases || []).find((a) => a.source === src)
+  const aliasOf = (src: string) => aliasEntryOf(src)?.target || ""
+  const ignoreOf = (src: string) => (aliasEntryOf(src)?.ignoreColumns || []).join(",")
+  const isConfigured = (src: string) => {
+    const a = aliasEntryOf(src)
+    return !!a && (!!a.target.trim() || (a.ignoreColumns || []).length > 0)
+  }
   const configuredAliases = useMemo(
-    () => (opts.aliases || []).filter((a) => a.target.trim()),
+    () => (opts.aliases || []).filter((a) => a.target.trim() || (a.ignoreColumns || []).length > 0),
     [opts.aliases],
   )
   const scopeKey = opts.structureOnly ? "structure" : opts.dataOnly ? "data" : "both"
-  // 别名列表过滤：搜索关键词 + 仅看已配置；表多时无需翻长列表
+  // 表级配置列表过滤：搜索关键词 + 仅看已配置；表多时无需翻长列表
   const aliasList = selectedBareTables.filter(
     (t) =>
-      (!aliasOnlyConfigured || aliasOf(t)) &&
+      (!aliasOnlyConfigured || isConfigured(t)) &&
       (!aliasQuery.trim() ||
         t.toLowerCase().includes(aliasQuery.trim().toLowerCase()) ||
         aliasOf(t).toLowerCase().includes(aliasQuery.trim().toLowerCase())),
@@ -286,7 +373,7 @@ export default function CompareView() {
           )}
           {!!opts.sourceConn && !!opts.targetConn && opts.sourceConn !== opts.targetConn && (
             <Hint>
-              对比作用域为单个库对：源库与目标库各选一个库，表按名称匹配（不区分大小写）；不同名的同义表可在下一步配置别名配对。
+              对比范围为单个库对；表按名称匹配，不同名的同义表可在下一步配置别名配对。
             </Hint>
           )}
           <WizardFooter
@@ -323,76 +410,89 @@ export default function CompareView() {
       )}
 
       {step === 2 && (
-        <div className="mx-auto w-full max-w-4xl space-y-4">
+        // min-h-0 防止 Card 被 h-full 父容器拉伸，消除内容下方大片留白
+        <div className="mx-auto flex w-full min-h-0 max-w-4xl flex-col gap-4">
           <Card className="divide-y p-0">
-            {/* 对比选项单行紧凑布局：范围三选一内联横排 + 阈值同行，说明并入副标题 */}
-            <div className="flex flex-wrap items-center gap-x-8 gap-y-3 p-5">
-              <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-                <div className="flex items-center gap-1.5">
-                  <span className="mr-0.5 text-sm font-medium">对比内容</span>
-                  {COMPARE_SCOPES.map((s) => (
-                    <button
-                      key={s.key}
-                      type="button"
-                      title={s.desc}
-                      onClick={() => set({ structureOnly: s.structureOnly, dataOnly: s.dataOnly })}
-                      className={cn(
-                        "flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors",
-                        scopeKey === s.key ? "border-primary/40 bg-primary/5 font-medium text-primary" : "text-muted-foreground hover:bg-accent/50",
-                      )}
-                    >
-                      <span
+            {/* 对比选项：两列网格，标签在上控件在下，说明随行内对齐 */}
+            <div className="space-y-5 p-5">
+              <div className="grid gap-x-10 gap-y-5 md:grid-cols-2">
+                <div>
+                  <div className="mb-2 text-sm font-medium">对比内容</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {COMPARE_SCOPES.map((s) => (
+                      <button
+                        key={s.key}
+                        type="button"
+                        title={s.desc}
+                        onClick={() => set({ structureOnly: s.structureOnly, dataOnly: s.dataOnly })}
                         className={cn(
-                          "flex h-3 w-3 items-center justify-center rounded-full border",
-                          scopeKey === s.key ? "border-primary" : "border-muted-foreground/40",
+                          "flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors",
+                          scopeKey === s.key ? "border-primary/40 bg-primary/5 font-medium text-primary" : "text-muted-foreground hover:bg-accent/50",
                         )}
                       >
-                        {scopeKey === s.key && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
-                      </span>
-                      {s.label}
-                    </button>
-                  ))}
+                        <span
+                          className={cn(
+                            "flex h-3 w-3 items-center justify-center rounded-full border",
+                            scopeKey === s.key ? "border-primary" : "border-muted-foreground/40",
+                          )}
+                        >
+                          {scopeKey === s.key && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                        </span>
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5 text-xs">
-                  <span className="mr-0.5 text-sm font-medium">数据阈值</span>
-                  <Input
-                    type="number"
-                    className="h-8 w-28 text-xs"
-                    value={opts.threshold || 0}
-                    onChange={(e) => set({ threshold: Number(e.target.value) })}
-                  />
-                  <span className="text-muted-foreground">行以内逐行比，超出仅比行数</span>
+                <div>
+                  <div className="mb-2 text-sm font-medium">数据阈值</div>
+                  <div className="flex h-8 items-center gap-2">
+                    <Input
+                      type="number"
+                      className="h-8 w-28 text-xs"
+                      value={opts.threshold || 0}
+                      onChange={(e) => set({ threshold: Number(e.target.value) })}
+                    />
+                    <span className="text-xs text-muted-foreground">行以内逐行比，超出仅比行数</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5 text-xs">
-                  <span className="mr-0.5 text-sm font-medium">忽略列</span>
-                  <Input
-                    className="h-8 w-56 text-xs"
-                    placeholder="created_at,updated_at"
-                    value={(opts.ignoreColumns || []).join(",")}
-                    onChange={(e) => set({ ignoreColumns: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
-                  />
-                  <span className="text-muted-foreground">内容对比时跳过这些列</span>
+                <div>
+                  <div className="mb-2 text-sm font-medium">忽略列（全局）</div>
+                  <div className="flex items-start gap-2">
+                    <ColumnMultiSelect
+                      className="max-w-72"
+                      options={globalColOptions}
+                      value={opts.ignoreColumns || []}
+                      onChange={(cols) => set({ ignoreColumns: cols })}
+                      placeholder="选择全局忽略列"
+                      loading={colsLoading}
+                    />
+                    <span className="mt-1.5 shrink-0 text-xs text-muted-foreground">所有表数据对比时跳过；时间列默认已选</span>
+                  </div>
                 </div>
-                <label className="flex cursor-pointer items-center gap-1.5 text-xs">
-                  <Checkbox
-                    checked={opts.forceData || false}
-                    onCheckedChange={(v) => set({ forceData: v === true })}
-                  />
-                  <span className="mr-0.5 text-sm font-medium">结构不一致时强制对比数据</span>
-                  <span className="text-muted-foreground">默认结构有差异则跳过数据对比</span>
-                </label>
+                <div>
+                  <div className="mb-2 text-sm font-medium">结构不一致时</div>
+                  <label className="flex h-8 cursor-pointer items-center gap-2 text-xs">
+                    <Checkbox
+                      checked={opts.forceData || false}
+                      onCheckedChange={(v) => set({ forceData: v === true })}
+                    />
+                    <span>强制对比数据</span>
+                    <span className="text-muted-foreground">默认结构有差异则跳过数据对比</span>
+                  </label>
+                </div>
               </div>
-              <div className="text-xs text-muted-foreground">逐行对比基于两侧公共列，差异明细每侧最多 20 条</div>
+              {/* 全局规则说明单独成行，不再随选项换行漂移 */}
+              <div className="text-xs text-muted-foreground">逐行对比基于两侧公共列；差异样本每侧最多展示 20 行</div>
             </div>
 
             <div className="p-5">
               <Section
-                title={`表别名配对${configuredAliases.length ? ` · 已配置 ${configuredAliases.length} 项` : ""}`}
-                description="源与目标表名不同但逻辑对应时，指定目标表名参与比较；留空按同名匹配，支持搜索定位"
+                title={`表级配置 · 别名配对 / 忽略列${configuredAliases.length ? ` · 已配置 ${configuredAliases.length} 项` : ""}`}
+                description="源与目标表名不同时指定目标表名（留空按同名匹配）；可为单表设置忽略列，与全局忽略列合并生效"
               >
                 {selectedBareTables.length === 0 ? (
                   <div className="text-xs text-muted-foreground">
-                    未勾选表（将对比库内全部表）；如需为特定表配置别名，请返回上一步勾选。
+                    未勾选表（将对比库内全部表）；如需为特定表配置别名/忽略列，请返回上一步勾选。
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -433,12 +533,13 @@ export default function CompareView() {
                         <div
                           key={t}
                           className={cn(
-                            "flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm",
-                            aliasOf(t) ? "border-primary/30 bg-primary/5" : "border-transparent bg-muted/30",
+                            "flex items-center gap-2 rounded-md border px-2.5 py-1.5",
+                            isConfigured(t) ? "border-primary/30 bg-primary/5" : "border-transparent bg-muted/30",
                           )}
                         >
-                          <span className="w-44 shrink-0 truncate font-mono text-xs" title={t}>{t}</span>
-                          <span className="shrink-0 text-muted-foreground">↔</span>
+                          {/* 固定宽列 + 图标箭头：多行基线对齐，不再依赖文本字符 */}
+                          <span className="w-40 shrink-0 truncate font-mono text-xs" title={t}>{t}</span>
+                          <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                           <Input
                             className="h-7 flex-1 text-xs"
                             list="compare-alias-targets"
@@ -446,12 +547,20 @@ export default function CompareView() {
                             value={aliasOf(t)}
                             onChange={(e) => setAlias(t, e.target.value)}
                           />
-                          {aliasOf(t) && (
+                          <ColumnMultiSelect
+                            compact
+                            options={toColumnOptions(tableCols[t] || [])}
+                            value={aliasEntryOf(t)?.ignoreColumns || []}
+                            onChange={(cols) => setTableIgnore(t, cols)}
+                            placeholder="选择该表忽略列"
+                            loading={colsLoading && !tableCols[t]}
+                          />
+                          {isConfigured(t) && (
                             <button
                               type="button"
                               className="shrink-0 text-muted-foreground hover:text-foreground"
-                              title="清除该别名"
-                              onClick={() => setAlias(t, "")}
+                              title="清除该表的别名与忽略列"
+                              onClick={() => upsertAlias(t, { target: "", ignoreColumns: [] })}
                             >
                               <X className="h-3.5 w-3.5" />
                             </button>
