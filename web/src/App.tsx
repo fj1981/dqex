@@ -11,6 +11,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Plus,
+  Scale,
   Trash2,
 } from "lucide-react"
 import * as api from "@/api"
@@ -24,6 +25,7 @@ import TaskView from "@/pages/TaskView"
 import ExportView from "@/pages/ExportView"
 import ImportView from "@/pages/ImportView"
 import MigrateView from "@/pages/MigrateView"
+import CompareView from "@/pages/CompareView"
 import { TASK_TYPE_LABEL } from "@/types"
 import { cn, formatTime, shortPaths } from "@/lib/utils"
 
@@ -32,6 +34,7 @@ const NAV = [
   { path: "/export", label: "导出", desc: "数据库 → 文件", icon: FileDown },
   { path: "/import", label: "导入", desc: "文件 → 数据库", icon: FileUp },
   { path: "/migrate", label: "迁移", desc: "数据库 → 数据库", icon: ArrowLeftRight },
+  { path: "/compare", label: "对比", desc: "数据库 ↔ 数据库", icon: Scale },
 ]
 
 // 历史状态样式：底色胶囊 + 状态圆点，强化状态辨识度
@@ -279,8 +282,8 @@ function Layout() {
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <Database className="h-4 w-4" />
           </span>
-          <span className="font-medium">dbimpex</span>
-          <Badge variant="secondary" className="ml-1 font-normal">导入 · 导出 · 迁移</Badge>
+          <span className="font-medium">数据库工作台</span>
+          <Badge variant="secondary" className="ml-1 font-normal">导入 · 导出 · 迁移 · 对比</Badge>
         </div>
         <span className="text-xs text-muted-foreground">MySQL / PostgreSQL / Oracle</span>
       </header>
@@ -292,6 +295,7 @@ function Layout() {
             <Route path="/export" element={<ExportView />} />
             <Route path="/import" element={<ImportView />} />
             <Route path="/migrate" element={<MigrateView />} />
+            <Route path="/compare" element={<CompareView />} />
           </Routes>
         </main>
         <RightPanel />

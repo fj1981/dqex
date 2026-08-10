@@ -11,6 +11,7 @@ import Hint from "@/components/Hint"
 import TaskConfigBar from "@/components/TaskConfigBar"
 import WizardFooter from "@/components/WizardFooter"
 import * as api from "@/api"
+import { CONN_SINGLE_W } from "@/components/ConnectionPair"
 import ConnectionSelect from "@/components/ConnectionSelect"
 import PageHeader from "@/components/PageHeader"
 import ProgressView from "@/components/ProgressView"
@@ -308,17 +309,19 @@ export default function ImportView() {
 
       <StepWizard steps={STEPS} current={step} onStepClick={(i) => !runningTaskID && setStep(i)} />
 
+      {/* 单卡宽度与迁移/对比页双卡布局中的卡片同宽（CONN_SINGLE_W），各任务页卡片尺寸统一 */}
       {step === 0 && (
-        <div className="mx-auto max-w-2xl space-y-4">
-          <Hint>
-            导入文件需与目标库为同类型数据库（如 MySQL 导出的文件只能导入 MySQL，不支持跨类型转换）。
-          </Hint>
+        <div className={`mx-auto w-full space-y-4 ${CONN_SINGLE_W}`}>
           <ConnectionSelect
             title="目标数据库"
             subtitle="选择要导入到的数据库连接"
             value={opts.targetConn}
             onChange={(name) => set({ targetConn: name })}
           />
+          {/* 提示位置与迁移/对比页 step0 保持一致：连接卡下方、操作按钮上方 */}
+          <Hint>
+            导入文件需与目标库为同类型数据库（如 MySQL 导出的文件只能导入 MySQL，不支持跨类型转换）。
+          </Hint>
           <WizardFooter
             onNext={() => setStep(1)}
             next={<Button disabled={!opts.targetConn} onClick={() => setStep(1)}>下一步</Button>}

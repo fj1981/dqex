@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -195,6 +196,27 @@ func (s *Service) RunMigrate(ctx context.Context, opts MigrateOptions, cb Progre
 	return err
 }
 
+// RunCompare 执行数据库对比（作用域为单个库对，两侧必须已选定库）
+func (s *Service) RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*CompareResult, error) {
+	src, err := s.resolveConn(opts.SourceConn, opts.Source)
+	if err != nil {
+		return nil, err
+	}
+	target, err := s.resolveConn(opts.TargetConn, opts.Target)
+	if err != nil {
+		return nil, err
+	}
+	opts.Source = src
+	opts.Target = target
+	if opts.Threshold <= 0 {
+		opts.Threshold = engine.DefaultCompareThreshold
+	}
+	if (src.DBName == "" && src.Schema == "") || (target.DBName == "" && target.Schema == "") {
+		return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("请先选择对比的库"))
+	}
+	return engine.RunCompare(ctx, opts, cb)
+}
+
 func normalizeReset(mode ResetMode) ResetMode {
 	switch strings.ToLower(string(mode)) {
 	case "truncate":
@@ -255,7 +277,8 @@ func (r *TaskRunner) Start(taskID, taskType string, run func(ctx context.Context
 			}()
 			err = run(ctx, publish)
 		}()
-		// 终态兜底推送（引擎出错时可能未推送 error 状态）
+		// 终态兜底推送（引擎出错时可能未推送 error 状态）；ctx 已取消时一律按取消认定，
+		// 不依赖错误文案匹配（驱动层报错文案不可控）
 		r.mu.RLock()
 		t := r.running[taskID]
 		r.mu.RUnlock()
@@ -263,7 +286,7 @@ func (r *TaskRunner) Start(taskID, taskType string, run func(ctx context.Context
 			final := t.latest
 			final.TaskID = taskID
 			if err != nil {
-				if strings.Contains(err.Error(), "任务已取消") {
+				if ctx.Err() != nil || strings.Contains(err.Error(), "任务已取消") {
 					final.State = "cancelled"
 					final.Message = "任务已取消"
 				} else {
@@ -277,6 +300,11 @@ func (r *TaskRunner) Start(taskID, taskType string, run func(ctx context.Context
 			}
 			r.publish(taskID, final)
 		}
+		// 终态推送后清理运行表，避免 entry/日志快照无限累积；
+		// 后续进度查询由 streamProgress 回退到执行历史回放
+		r.mu.Lock()
+		delete(r.running, taskID)
+		r.mu.Unlock()
 	}()
 }
 
@@ -356,7 +384,7 @@ func (s *Service) StartExport(opts ExportOptions, taskConfigID string) (string, 
 		var last ProgressInfo
 		wrapped := func(p ProgressInfo) { last = p; publish(p) }
 		outputPath, err := s.RunExport(ctx, opts, wrapped)
-		s.finishRecord(&record, err, last, func(r *ExecutionRecord) {
+		s.finishRecord(ctx, &record, err, last, func(r *ExecutionRecord) {
 			r.TotalUnits = last.TotalUnits
 			r.TotalRows = last.DoneRows
 			r.Summary = buildSummary(last.TotalUnits, last.DoneRows, record.FileSize)
@@ -387,7 +415,7 @@ func (s *Service) StartImport(opts ImportOptions, taskConfigID string) (string, 
 		var last ProgressInfo
 		wrapped := func(p ProgressInfo) { last = p; publish(p) }
 		err := s.RunImport(ctx, opts, wrapped)
-		s.finishRecord(&record, err, last, func(r *ExecutionRecord) {
+		s.finishRecord(ctx, &record, err, last, func(r *ExecutionRecord) {
 			r.TotalUnits = last.TotalUnits
 			r.TotalRows = last.DoneRows
 			r.Summary = buildSummary(last.TotalUnits, last.DoneRows, 0)
@@ -414,7 +442,7 @@ func (s *Service) StartMigrate(opts MigrateOptions, taskConfigID string) (string
 		var last ProgressInfo
 		wrapped := func(p ProgressInfo) { last = p; publish(p) }
 		err := s.RunMigrate(ctx, opts, wrapped)
-		s.finishRecord(&record, err, last, func(r *ExecutionRecord) {
+		s.finishRecord(ctx, &record, err, last, func(r *ExecutionRecord) {
 			r.TotalUnits = last.TotalUnits
 			r.TotalRows = last.DoneRows
 			r.Summary = buildSummary(last.TotalUnits, last.DoneRows, 0)
@@ -422,6 +450,79 @@ func (s *Service) StartMigrate(opts MigrateOptions, taskConfigID string) (string
 		return err
 	})
 	return taskID, nil
+}
+
+// StartCompare 异步启动对比任务，返回 taskID；完成后结果报告落盘 ExportDir/compare-<taskID>.json
+func (s *Service) StartCompare(opts CompareOptions, taskConfigID string) (string, error) {
+	src, err := s.resolveConn(opts.SourceConn, opts.Source)
+	if err != nil {
+		return "", err
+	}
+	target, err := s.resolveConn(opts.TargetConn, opts.Target)
+	if err != nil {
+		return "", err
+	}
+	opts.Source = src
+	opts.Target = target
+	if (src.DBName == "" && src.Schema == "") || (target.DBName == "" && target.Schema == "") {
+		return "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("请先选择对比的库"))
+	}
+	taskID := newTaskID()
+	record := ExecutionRecord{ID: taskID, TaskType: "compare", TaskConfigID: taskConfigID, Status: "running", StartedAt: time.Now().UnixMilli(),
+		Target: fmt.Sprintf("%s → %s · %s", s.connLabel(opts.SourceConn, src), s.connLabel(opts.TargetConn, target), targetTables(nil, opts.Tables))}
+	_ = s.persist.SaveHistory(record)
+
+	s.runner.Start(taskID, "compare", func(ctx context.Context, publish ProgressFunc) error {
+		var last ProgressInfo
+		wrapped := func(p ProgressInfo) { last = p; publish(p) }
+		result, err := s.RunCompare(ctx, opts, wrapped)
+		s.finishRecord(ctx, &record, err, last, func(r *ExecutionRecord) {
+			r.TotalUnits = last.TotalUnits
+			r.TotalRows = last.DoneRows
+			if result == nil {
+				return
+			}
+			outputPath := filepath.Join(s.persist.ExportDir(), "compare-"+taskID+".json")
+			if e := saveCompareResult(outputPath, result); e != nil {
+				cylog.Errorf("保存对比结果失败: %v", e)
+			} else {
+				r.OutputPath = outputPath
+			}
+			sm := result.Summary
+			r.Summary = fmt.Sprintf("%d项, 一致%d, 结构差异%d, 数据差异%d", sm.Total, sm.Matched, sm.StructureDiff, sm.DataDiff)
+		})
+		return err
+	})
+	return taskID, nil
+}
+
+// saveCompareResult 对比结果序列化落盘（带缩进便于人工查看）
+func saveCompareResult(path string, result *CompareResult) error {
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+// GetCompareResult 按 taskID 读取已落盘的对比结果报告
+func (s *Service) GetCompareResult(taskID string) (*CompareResult, error) {
+	path := ""
+	if rec, err := s.persist.GetHistory(taskID); err == nil && rec.OutputPath != "" {
+		path = rec.OutputPath
+	}
+	if path == "" {
+		path = filepath.Join(s.persist.ExportDir(), "compare-"+taskID+".json")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, cygin.NewError(ErrTaskNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("对比结果不存在: %s", taskID))
+	}
+	var result CompareResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+	}
+	return &result, nil
 }
 
 // ProgressCh 订阅任务进度（供 SSE 使用）
@@ -434,12 +535,13 @@ func (s *Service) CancelTask(taskID string) error {
 	return s.runner.Cancel(taskID)
 }
 
-// finishRecord 落盘终态记录：last 为最后一次进度快照，统一持久化完成单元数与日志快照（供终态回放与实时展示一致）
-func (s *Service) finishRecord(record *ExecutionRecord, err error, last ProgressInfo, fill func(*ExecutionRecord)) {
+// finishRecord 落盘终态记录：last 为最后一次进度快照，统一持久化完成单元数与日志快照（供终态回放与实时展示一致）；
+// ctx 已取消时一律记为 cancelled，不依赖错误文案匹配（驱动层报错文案不可控）
+func (s *Service) finishRecord(ctx context.Context, record *ExecutionRecord, err error, last ProgressInfo, fill func(*ExecutionRecord)) {
 	record.FinishedAt = time.Now().UnixMilli()
 	record.Duration = record.FinishedAt - record.StartedAt
 	if err != nil {
-		if strings.Contains(err.Error(), "任务已取消") {
+		if ctx.Err() != nil || strings.Contains(err.Error(), "任务已取消") {
 			record.Status = "cancelled"
 		} else {
 			record.Status = "error"
@@ -552,6 +654,11 @@ func (s *Service) RunTaskByID(taskID string) (string, error) {
 			return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("任务配置缺少迁移选项: %s", task.ID))
 		}
 		return s.StartMigrate(*task.MigrateOpts, task.ID)
+	case "compare":
+		if task.CompareOpts == nil {
+			return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("任务配置缺少对比选项: %s", task.ID))
+		}
+		return s.StartCompare(*task.CompareOpts, task.ID)
 	default:
 		return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("未知任务类型: %s", task.Type))
 	}

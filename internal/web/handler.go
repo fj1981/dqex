@@ -221,6 +221,35 @@ func handleMigrate(svc *service.Service) gin.HandlerFunc {
 	})
 }
 
+// ==================== 对比 ====================
+
+// CompareReq 对比请求
+type CompareReq struct {
+	Options      service.CompareOptions `json:"options"`
+	TaskConfigID string                 `json:"taskConfigId"`
+}
+
+func handleCompare(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req CompareReq) (StartResp, error) {
+		taskID, err := svc.StartCompare(req.Options, req.TaskConfigID)
+		if err != nil {
+			return StartResp{}, err
+		}
+		return StartResp{TaskID: taskID}, nil
+	})
+}
+
+// CompareResultReq 对比结果查询请求
+type CompareResultReq struct {
+	TaskID string `query:"taskID" binding:"required"`
+}
+
+func handleCompareResult(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req CompareResultReq) (*service.CompareResult, error) {
+		return svc.GetCompareResult(req.TaskID)
+	})
+}
+
 // ==================== 任务配置 ====================
 
 // ListTasksReq 任务列表请求

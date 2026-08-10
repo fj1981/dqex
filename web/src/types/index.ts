@@ -102,6 +102,80 @@ export interface MigrateOptions {
   batchSize: number
 }
 
+// ---- 对比 ----
+
+// 表别名配对：源表 ↔ 目标表（不同名但逻辑对应的表）
+export interface TableAlias {
+  source: string
+  target: string
+}
+
+export interface CompareOptions {
+  sourceConn: string
+  targetConn: string
+  source?: DBConn | null
+  target?: DBConn | null
+  databases?: string[]
+  // 选中的表（undefined/空 = 对比库内全部表）
+  tables?: string[]
+  aliases?: TableAlias[]
+  structureOnly: boolean
+  dataOnly: boolean
+  threshold: number // 数据逐行比较阈值，默认 1000
+}
+
+export interface CompareColumnItem {
+  name: string
+  dataType: string
+  nullable: boolean
+  primaryKey: boolean
+}
+
+export interface CompareColumnDiff {
+  matched: boolean
+  sourceOnly: CompareColumnItem[]
+  targetOnly: CompareColumnItem[]
+  different: { name: string; source: CompareColumnItem; target: CompareColumnItem }[]
+}
+
+export interface CompareDataDiff {
+  mode: "rows" | "count" // rows=逐行比较 / count=仅比较行数
+  sourceRows: number
+  targetRows: number
+  equal: boolean
+  missing?: number // 源有目标无（rows 模式）
+  extra?: number   // 目标有源无（rows 模式）
+  missingSamples?: Record<string, unknown>[]
+  extraSamples?: Record<string, unknown>[]
+  sampleColumns?: string[] // 采样行列序（按源表列定义顺序）
+  skippedReason?: string
+}
+
+export interface CompareTableResult {
+  name: string
+  sourceName?: string
+  targetName?: string
+  status: "both" | "source_only" | "target_only"
+  columns?: CompareColumnDiff | null
+  data?: CompareDataDiff | null
+}
+
+export interface CompareSummary {
+  total: number
+  matched: number
+  sourceOnly: number
+  targetOnly: number
+  structureDiff: number
+  dataDiff: number
+}
+
+export interface CompareResult {
+  source: string
+  target: string
+  tables: CompareTableResult[]
+  summary: CompareSummary
+}
+
 // ---- 进度 ----
 
 export interface Progress {
@@ -121,7 +195,7 @@ export interface Progress {
 
 // ---- 任务配置 / 执行历史 ----
 
-export type TaskType = "export" | "import" | "migrate"
+export type TaskType = "export" | "import" | "migrate" | "compare"
 
 export interface TaskConfig {
   id: string
@@ -130,6 +204,7 @@ export interface TaskConfig {
   exportOpts?: ExportOptions | null
   importOpts?: ImportOptions | null
   migrateOpts?: MigrateOptions | null
+  compareOpts?: CompareOptions | null
   createdAt: number
   updatedAt: number
   isLastUsed: boolean
@@ -182,6 +257,7 @@ export const TASK_TYPE_LABEL: Record<string, string> = {
   export: "导出",
   import: "导入",
   migrate: "迁移",
+  compare: "对比",
 }
 
 export const RESET_MODE_LABEL: Record<string, string> = {

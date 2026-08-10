@@ -19,10 +19,13 @@ interface Props {
   subtitle?: string
   value: string // 连接主键 id（兼容旧任务配置中的连接名）
   onChange: (id: string) => void
+  // 成对布局（迁移/对比页）中启用 h-full + mt-auto 与另一侧等高；
+  // 单卡页（导出/导入）必须关闭：flex 父容器会把卡片拉伸，多余高度被 mt-auto 变成中部空白
+  fill?: boolean
 }
 
 // 连接选择卡片：下拉选择已保存连接 + 连接摘要 + 测试连接 + 管理连接
-export default function ConnectionSelect({ title, subtitle, value, onChange }: Props) {
+export default function ConnectionSelect({ title, subtitle, value, onChange, fill }: Props) {
   const { connections, openDrawer } = useAppStore()
   const [tested, setTested] = useState<Record<string, boolean>>({})
   const [testing, setTesting] = useState(false)
@@ -50,7 +53,7 @@ export default function ConnectionSelect({ title, subtitle, value, onChange }: P
   }
 
   return (
-    <Card className={cn("p-4 transition-colors", selected && "border-primary/40")}>
+    <Card className={cn("flex flex-col p-4 transition-colors", fill && "h-full", selected && "border-primary/40")}>
       <div className="mb-3 flex items-center justify-between">
         <div>
           {/* 标题字重降为 medium：中文 semibold 常被合成为粗体，纯黑加粗会抢视觉焦点 */}
@@ -61,6 +64,7 @@ export default function ConnectionSelect({ title, subtitle, value, onChange }: P
             </span>
             {title}
           </div>
+          {/* 副标题直接完整展示（允许换行），不用 hover 提示 */}
           {subtitle && <div className="mt-1 text-xs text-muted-foreground">{subtitle}</div>}
         </div>
         <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground hover:text-foreground" onClick={() => openDrawer()}>
@@ -101,37 +105,44 @@ export default function ConnectionSelect({ title, subtitle, value, onChange }: P
         </SelectContent>
       </Select>
 
-      {selected && (
-        <div className="mt-3 flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
-          <div className="min-w-0 text-sm text-muted-foreground">
-            <span className="text-xs">
-              {selected.conn.Host}:{selected.conn.Port}
-              {selected.conn.DBName ? ` / ${selected.conn.DBName}` : ""}
-              {selected.conn.Service ? ` / ${selected.conn.Service}` : ""}
-              {selected.conn.Schema ? ` / ${selected.conn.Schema}` : ""}
-            </span>
-            {!selected.conn.DBName && !selected.conn.Service && (
-              <span className="ml-2 text-xs text-amber-600">未指定库</span>
-            )}
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {tested[value] === true && (
-              <span className="flex items-center gap-1 text-xs font-medium text-green-600">
-                <CheckCircle2 className="h-3.5 w-3.5" /> 已连通
-              </span>
-            )}
-            {tested[value] === false && (
-              <span className="flex items-center gap-1 text-xs font-medium text-destructive">
-                <XCircle className="h-3.5 w-3.5" /> 连接失败
-              </span>
-            )}
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={doTest} disabled={testing}>
-              {testing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <PlugZap className="mr-1 h-3.5 w-3.5" />}
-              {testing ? "测试中..." : "测试连接"}
-            </Button>
-          </div>
+      {/* 摘要条固定渲染（未选连接时为占位）：保证各页卡片高度恒定；fill 模式下钉在底部支撑双卡等高 */}
+      <div className={cn(fill ? "mt-auto pt-3" : "mt-3")}>
+        <div className="flex min-h-11 items-center justify-between rounded-md bg-muted/50 px-3 py-2">
+          {selected ? (
+            <>
+              <div className="min-w-0 text-sm text-muted-foreground">
+                <span className="text-xs">
+                  {selected.conn.Host}:{selected.conn.Port}
+                  {selected.conn.DBName ? ` / ${selected.conn.DBName}` : ""}
+                  {selected.conn.Service ? ` / ${selected.conn.Service}` : ""}
+                  {selected.conn.Schema ? ` / ${selected.conn.Schema}` : ""}
+                </span>
+                {!selected.conn.DBName && !selected.conn.Service && (
+                  <span className="ml-2 text-xs text-amber-600">未指定库</span>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {tested[value] === true && (
+                  <span className="flex items-center gap-1 text-xs font-medium text-green-600">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> 已连通
+                  </span>
+                )}
+                {tested[value] === false && (
+                  <span className="flex items-center gap-1 text-xs font-medium text-destructive">
+                    <XCircle className="h-3.5 w-3.5" /> 连接失败
+                  </span>
+                )}
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={doTest} disabled={testing}>
+                  {testing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <PlugZap className="mr-1 h-3.5 w-3.5" />}
+                  {testing ? "测试中..." : "测试连接"}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <span className="text-xs text-muted-foreground">选择连接后在此展示连接摘要</span>
+          )}
         </div>
-      )}
+      </div>
     </Card>
   )
 }

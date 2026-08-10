@@ -10,7 +10,7 @@ import Hint from "@/components/Hint"
 import TaskConfigBar from "@/components/TaskConfigBar"
 import WizardFooter from "@/components/WizardFooter"
 import * as api from "@/api"
-import ConnectionSelect from "@/components/ConnectionSelect"
+import ConnectionPair from "@/components/ConnectionPair"
 import PageHeader from "@/components/PageHeader"
 import ProgressView from "@/components/ProgressView"
 import ResetOptions from "@/components/ResetOptions"
@@ -167,27 +167,22 @@ export default function MigrateView() {
 
       <StepWizard steps={STEPS} current={step} onStepClick={(i) => !runningTaskID && setStep(i)} />
 
+      {/* 数据源卡片布局共用 ConnectionPair，各任务页卡片尺寸统一 */}
       {step === 0 && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-3">
-            <ConnectionSelect
-              title="源数据库"
-              subtitle="从中读取结构与数据"
-              value={opts.sourceConn}
-              onChange={(name) => set({ sourceConn: name, source: null, databases: [], tables: [], objects: [], conditions: [] })}
-            />
-            <div className="flex h-11 items-center justify-center self-center">
-              <span className="flex h-9 w-9 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm">
-                <MoveRight className="h-5 w-5" />
-              </span>
-            </div>
-            <ConnectionSelect
-              title="目标数据库"
-              subtitle="将数据写入此处"
-              value={opts.targetConn}
-              onChange={(name) => set({ targetConn: name, target: null })}
-            />
-          </div>
+        <ConnectionPair
+          source={{
+            title: "源数据库",
+            subtitle: "从中读取结构与数据",
+            value: opts.sourceConn,
+            onChange: (name) => set({ sourceConn: name, source: null, databases: [], tables: [], objects: [], conditions: [] }),
+          }}
+          target={{
+            title: "目标数据库",
+            subtitle: "将数据写入此处",
+            value: opts.targetConn,
+            onChange: (name) => set({ targetConn: name, target: null }),
+          }}
+        >
           {opts.sourceConn && opts.sourceConn === opts.targetConn && (
             <Hint variant="warning">源和目标不能是同一个连接，请重新选择。</Hint>
           )}
@@ -213,7 +208,7 @@ export default function MigrateView() {
               </Button>
             }
           />
-        </div>
+        </ConnectionPair>
       )}
 
       {step === 1 && (

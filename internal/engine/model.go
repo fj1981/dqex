@@ -109,6 +109,95 @@ const BackupTablePrefix = "__dbimpex_bak_"
 // DefaultBatchSize 默认批量大小
 const DefaultBatchSize = 500
 
+// ---- 数据库对比 ----
+
+// CompareOptions 对比选项
+// Tables 为 nil 时对比库内全部表；源/目标不同名的同义表通过 Aliases 配对
+type CompareOptions struct {
+	SourceConn    string       `json:"sourceConn" yaml:"sourceConn"`
+	TargetConn    string       `json:"targetConn" yaml:"targetConn"`
+	Source        *DBConnInfo  `json:"source,omitempty" yaml:"source,omitempty"`
+	Target        *DBConnInfo  `json:"target,omitempty" yaml:"target,omitempty"`
+	Tables        []string     `json:"tables,omitempty" yaml:"tables,omitempty"`
+	Aliases       []TableAlias `json:"aliases,omitempty" yaml:"aliases,omitempty"`
+	StructureOnly bool         `json:"structureOnly" yaml:"structureOnly"` // 仅比结构
+	DataOnly      bool         `json:"dataOnly" yaml:"dataOnly"`           // 仅比数据
+	Threshold     int          `json:"threshold" yaml:"threshold"`         // 数据逐行比较阈值，默认 1000
+}
+
+// TableAlias 表别名配对：源表 ↔ 目标表（不同名但逻辑对应的表）
+type TableAlias struct {
+	Source string `json:"source" yaml:"source"`
+	Target string `json:"target" yaml:"target"`
+}
+
+// CompareResult 对比结果（序列化落盘为 JSON 报告）
+type CompareResult struct {
+	Source  string               `json:"source"` // 源连接标签
+	Target  string               `json:"target"` // 目标连接标签
+	Tables  []CompareTableResult `json:"tables"`
+	Summary CompareSummary       `json:"summary"`
+}
+
+// CompareSummary 对比汇总计数
+type CompareSummary struct {
+	Total         int `json:"total"`         // 配对总数
+	Matched       int `json:"matched"`       // 完全一致
+	SourceOnly    int `json:"sourceOnly"`    // 仅源有
+	TargetOnly    int `json:"targetOnly"`    // 仅目标有
+	StructureDiff int `json:"structureDiff"` // 结构差异
+	DataDiff      int `json:"dataDiff"`      // 数据差异（含仅计数不一致）
+}
+
+// CompareTableResult 单表（配对）对比结果
+// Status: source_only=仅源有 / target_only=仅目标有 / both=两侧均有
+type CompareTableResult struct {
+	Name       string      `json:"name"`                 // 展示名：同名取表名，别名配对为 "源表 ↔ 目标表"
+	SourceName string      `json:"sourceName,omitempty"` // 源侧实际表名
+	TargetName string      `json:"targetName,omitempty"` // 目标侧实际表名
+	Status     string      `json:"status"`
+	Columns    *ColumnDiff `json:"columns,omitempty"` // 结构差异（DataOnly 时为 nil）
+	Data       *DataDiff   `json:"data,omitempty"`    // 数据差异（StructureOnly 时为 nil）
+}
+
+// ColumnDiff 列级结构差异
+type ColumnDiff struct {
+	Matched    bool             `json:"matched"`
+	SourceOnly []ColumnItem     `json:"sourceOnly"` // 源有目标无的列
+	TargetOnly []ColumnItem     `json:"targetOnly"` // 目标有源无的列
+	Different  []ColumnItemDiff `json:"different"`  // 类型/可空/主键不一致的列
+}
+
+// ColumnItem 单列信息
+type ColumnItem struct {
+	Name       string `json:"name"`
+	DataType   string `json:"dataType"`
+	Nullable   bool   `json:"nullable"`
+	PrimaryKey bool   `json:"primaryKey"`
+}
+
+// ColumnItemDiff 不一致列的双侧信息（供前端并排展示）
+type ColumnItemDiff struct {
+	Name   string     `json:"name"`
+	Source ColumnItem `json:"source"`
+	Target ColumnItem `json:"target"`
+}
+
+// DataDiff 数据差异
+// Mode: rows=逐行比较 / count=仅比较行数（超阈值）
+type DataDiff struct {
+	Mode           string           `json:"mode"`
+	SourceRows     int64            `json:"sourceRows"`
+	TargetRows     int64            `json:"targetRows"`
+	Equal          bool             `json:"equal"`             // count 模式：行数相等；rows 模式：无差异
+	Missing        int              `json:"missing,omitempty"` // 源有目标无的行数（rows 模式）
+	Extra          int              `json:"extra,omitempty"`   // 目标有源无的行数（rows 模式）
+	MissingSamples []map[string]any `json:"missingSamples,omitempty"`
+	ExtraSamples   []map[string]any `json:"extraSamples,omitempty"`
+	SampleColumns  []string         `json:"sampleColumns,omitempty"` // 采样行列序（按源表列定义顺序），供前端按序渲染
+	SkippedReason  string           `json:"skippedReason,omitempty"` // 未逐行比较的原因说明
+}
+
 // ExportDesc 导出描述文件（.desc）内容，与 .sql 文件同名，JSON 格式
 // 导入时直接读取此文件即可获取导出元信息，无需解析 SQL 内容
 type ExportDesc struct {

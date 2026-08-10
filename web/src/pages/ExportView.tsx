@@ -10,6 +10,7 @@ import Hint from "@/components/Hint"
 import TaskConfigBar from "@/components/TaskConfigBar"
 import WizardFooter from "@/components/WizardFooter"
 import * as api from "@/api"
+import { CONN_SINGLE_W } from "@/components/ConnectionPair"
 import ConnectionSelect from "@/components/ConnectionSelect"
 import PageHeader from "@/components/PageHeader"
 import ProgressView from "@/components/ProgressView"
@@ -130,14 +131,17 @@ export default function ExportView() {
 
       <StepWizard steps={STEPS} current={step} onStepClick={(i) => runningTaskID ? undefined : setStep(i)} />
 
+      {/* 单卡宽度与迁移/对比页双卡布局中的卡片同宽（CONN_SINGLE_W），各任务页卡片尺寸统一 */}
       {step === 0 && (
-        <div className="mx-auto max-w-2xl space-y-4">
+        <div className={`mx-auto w-full space-y-4 ${CONN_SINGLE_W}`}>
           <ConnectionSelect
             title="源数据库"
             subtitle="选择要导出的数据库连接"
             value={opts.sourceConn}
             onChange={(name) => set({ sourceConn: name })}
           />
+          {/* 提示位置与其他任务页 step0 保持一致：连接卡下方、操作按钮上方 */}
+          <Hint>导出的 SQL 为源库方言格式，之后只能导入到同类型数据库（如 MySQL 导出只能导入 MySQL）。</Hint>
           <WizardFooter onNext={() => setStep(1)} />
         </div>
       )}
@@ -146,7 +150,6 @@ export default function ExportView() {
         <div className="space-y-4">
           <Hint>
             勾选要导出的库、表与对象（视图/函数/存储过程）；不选择则不导出，可使用「全选」快捷操作。可为单张表设置数据导出条件（完整 SQL）与导出模式。
-            导出的 SQL 为源库方言格式，之后只能导入到同类型数据库（如 MySQL 导出只能导入 MySQL）。
           </Hint>
           <TablePicker
             connId={opts.sourceConn}

@@ -2,7 +2,7 @@ GO ?= go
 DLV ?= dlv
 PLATFORMS := darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64
 
-.PHONY: all build web-deps web-dist web-stub dev dev-debug stop release clean
+.PHONY: all build web web-deps web-dist web-stub dev dev-debug stop release clean
 
 all: build
 
@@ -12,6 +12,11 @@ web-deps:
 		echo ">> 安装前端依赖 (yarn)..."; \
 		cd web && yarn install; \
 	fi
+
+# 无条件构建前端：每次都执行 yarn build，输出新的 web/dist
+web: web-deps
+	@echo ">> 构建前端 (web/dist)..."
+	@cd web && yarn build
 
 # 真实构建前端产物（build/release 使用）：dist 缺失时执行 yarn build
 web-dist: web-deps

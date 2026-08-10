@@ -19,6 +19,12 @@ type (
 	ImportOptions = engine.ImportOptions
 	// MigrateOptions 迁移选项
 	MigrateOptions = engine.MigrateOptions
+	// CompareOptions 对比选项
+	CompareOptions = engine.CompareOptions
+	// TableAlias 表别名配对
+	TableAlias = engine.TableAlias
+	// CompareResult 对比结果
+	CompareResult = engine.CompareResult
 	// ResetMode 重置数据模式
 	ResetMode = engine.ResetMode
 	// ProgressInfo 任务进度信息
@@ -45,10 +51,11 @@ var SupportedDBTypes = map[string][]string{
 type TaskConfig struct {
 	ID          string          `json:"id" yaml:"id"`
 	Name        string          `json:"name" yaml:"name"`
-	Type        string          `json:"type" yaml:"type"` // export/import/migrate
+	Type        string          `json:"type" yaml:"type"` // export/import/migrate/compare
 	ExportOpts  *ExportOptions  `json:"exportOpts,omitempty" yaml:"exportOpts,omitempty"`
 	ImportOpts  *ImportOptions  `json:"importOpts,omitempty" yaml:"importOpts,omitempty"`
 	MigrateOpts *MigrateOptions `json:"migrateOpts,omitempty" yaml:"migrateOpts,omitempty"`
+	CompareOpts *CompareOptions `json:"compareOpts,omitempty" yaml:"compareOpts,omitempty"`
 	CreatedAt   int64           `json:"createdAt" yaml:"createdAt"`
 	UpdatedAt   int64           `json:"updatedAt" yaml:"updatedAt"`
 	IsLastUsed  bool            `json:"isLastUsed" yaml:"isLastUsed"`
@@ -57,7 +64,7 @@ type TaskConfig struct {
 // ExecutionRecord 执行历史记录
 type ExecutionRecord struct {
 	ID           string   `json:"id"`                     // 同 taskID
-	TaskType     string   `json:"taskType"`               // export/import/migrate
+	TaskType     string   `json:"taskType"`               // export/import/migrate/compare
 	TaskConfigID string   `json:"taskConfigId,omitempty"` // 关联的任务配置 ID（可选）
 	Status       string   `json:"status"`                 // running/done/error/cancelled
 	StartedAt    int64    `json:"startedAt"`

@@ -1,4 +1,6 @@
 import type {
+  CompareOptions,
+  CompareResult,
   ConnInfo,
   DBConn,
   DBTables,
@@ -68,6 +70,12 @@ export const startImport = (options: ImportOptions, taskConfigId?: string) =>
 
 export const startMigrate = (options: MigrateOptions, taskConfigId?: string) =>
   post<{ taskID: string }>("/api/migrate", { options, backup: options.backup, taskConfigId })
+
+export const startCompare = (options: CompareOptions, taskConfigId?: string) =>
+  post<{ taskID: string }>("/api/compare", { options, taskConfigId })
+
+export const getCompareResult = (taskID: string) =>
+  request<CompareResult>(`/api/compare/result?taskID=${encodeURIComponent(taskID)}`)
 
 export const uploadImportFile = async (file: File): Promise<{ path: string; name?: string; info?: ImportFileInfo }> => {
   const form = new FormData()

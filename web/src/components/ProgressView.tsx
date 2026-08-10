@@ -29,6 +29,10 @@ interface Props {
   taskType: string
   onSaveTask?: () => void
   onBack: () => void
+  // 宽度与外层结果视图对齐（去掉本组件的 max-w 限制）
+  wide?: boolean
+  // 日志区固定限高：下方还有结果视图时使用，避免进度面板独占视口
+  compactLog?: boolean
 }
 
 function formatDuration(sec: number): string {
@@ -51,7 +55,7 @@ function StatBlock({ label, value, sub, title }: { label: string; value: string;
 }
 
 // 任务执行进度视图（SSE 实时推送）
-export default function ProgressView({ taskID, taskType, onSaveTask, onBack }: Props) {
+export default function ProgressView({ taskID, taskType, onSaveTask, onBack, wide, compactLog }: Props) {
   const [progress, setProgress] = useState<ProgressInfo | null>(null)
   const [errorMsg, setErrorMsg] = useState("")
   const [errDetailOpen, setErrDetailOpen] = useState(false)
@@ -160,7 +164,7 @@ export default function ProgressView({ taskID, taskType, onSaveTask, onBack }: P
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl min-h-0 flex-1 flex-col gap-3">
+    <div className={cn("mx-auto flex w-full min-h-0 flex-col gap-3", !compactLog && "flex-1", !wide && "max-w-3xl")}>
       {/* 状态横幅 */}
       <div className={cn("flex shrink-0 items-start gap-3 rounded-lg border px-4 py-2.5", meta.cls)}>
         {meta.icon}
@@ -204,7 +208,7 @@ export default function ProgressView({ taskID, taskType, onSaveTask, onBack }: P
         </DialogContent>
       </Dialog>
 
-      <Card className="flex min-h-0 flex-1 flex-col gap-3.5 p-4">
+      <Card className={cn("flex flex-col gap-3.5 p-4", !compactLog && "min-h-0 flex-1")}>
         {/* 进度行：百分比 + 进度条占满剩余宽度，取消按钮内联不再独占一行 */}
         <div className="flex shrink-0 items-center gap-3">
           <span className="w-14 shrink-0 text-2xl font-semibold tabular-nums">{percent}%</span>
@@ -245,14 +249,17 @@ export default function ProgressView({ taskID, taskType, onSaveTask, onBack }: P
           </div>
         )}
 
-        {/* 日志（终端风格）：弹性填满剩余高度，内部滚动 */}
-        <div className="flex min-h-0 flex-1 flex-col">
+        {/* 日志（终端风格）：默认弹性填满剩余高度；紧凑模式下限高内滚，为下方结果视图让位 */}
+        <div className={cn("flex flex-col", !compactLog && "min-h-0 flex-1")}>
           <div className="mb-1.5 flex shrink-0 items-center gap-1.5 text-sm font-medium">
             <Terminal className="h-4 w-4 text-muted-foreground" /> 实时日志
           </div>
           <div
             ref={logRef}
-            className="scrollbar-thin min-h-[180px] flex-1 overflow-y-auto rounded-md bg-slate-950 p-3 text-slate-200"
+            className={cn(
+              "scrollbar-thin overflow-y-auto rounded-md bg-slate-950 p-3 text-slate-200",
+              compactLog ? "max-h-44" : "min-h-[180px] flex-1",
+            )}
           >
             <div className="space-y-0.5 text-xs leading-relaxed">
               {logs.length === 0 && !isRunning && (

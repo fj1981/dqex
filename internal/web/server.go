@@ -41,6 +41,11 @@ func RunWeb(svc *service.Service, port int) {
 		eb.GROUP("/migrate", []cygin.APIHandler{
 			eb.POST("", handleMigrate(svc)),
 		}),
+		// 对比
+		eb.GROUP("/compare", []cygin.APIHandler{
+			eb.POST("", handleCompare(svc)),
+			eb.GET("/result", handleCompareResult(svc)),
+		}),
 		// 任务配置（避免与 :id 通配路由冲突，全部使用非通配路径）
 		eb.GROUP("/tasks", []cygin.APIHandler{
 			eb.GET("", handleListTasks(svc)),
