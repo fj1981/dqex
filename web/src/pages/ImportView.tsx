@@ -174,19 +174,27 @@ function defaultOptions(): ImportOptions {
 // 导入页：四步向导
 export default function ImportView() {
   const [searchParams, setSearchParams] = useSearchParams()
+  // 会话内缓存的最近应用配置：挂载时同步初始化，避免空配置闪现后再回填
+  const cachedTask = useAppStore((s) => s.lastTasks["import"])
+  const setLastTask = useAppStore((s) => s.setLastTask)
+  const clearLastTask = useAppStore((s) => s.clearLastTask)
   const [step, setStep] = useState(0)
-  const [opts, setOpts] = useState<ImportOptions>(defaultOptions())
+  const [opts, setOpts] = useState<ImportOptions>(() =>
+    cachedTask?.importOpts ? { ...defaultOptions(), ...cachedTask.importOpts } : defaultOptions())
   const [fileInfo, setFileInfo] = useState<ImportFileInfo | null>(null)
   const [inspecting, setInspecting] = useState(false)
   const [uploading, setUploading] = useState(false)
-  const [taskConfigId, setTaskConfigId] = useState<string | undefined>()
+  const [taskConfigId, setTaskConfigId] = useState<string | undefined>(cachedTask?.id)
   const [runningTaskID, setRunningTaskID] = useState("")
   const [savedTasks, setSavedTasks] = useState<TaskConfig[]>([])
   const [saveOpen, setSaveOpen] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   // 输入框展示名：隐藏服务器路径，上传/应用任务后仅显示文件名；
   // opts.inputPath 仍保存真实路径供接口使用，用户手动编辑时清空回到路径模式
-  const [inputLabel, setInputLabel] = useState("")
+  const [inputLabel, setInputLabel] = useState(() => {
+    const p = cachedTask?.importOpts?.inputPath || ""
+    return p && /[\\/]/.test(p) ? baseName(p) : ""
+  })
   const [tableFilter, setTableFilter] = useState("")
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const fileRef = useRef<HTMLInputElement>(null)
@@ -203,6 +211,7 @@ export default function ImportView() {
     if (task.importOpts) {
       setOpts({ ...defaultOptions(), ...task.importOpts })
       setTaskConfigId(task.id)
+      setLastTask(task)
       setFileInfo(null)
       const p = task.importOpts.inputPath || ""
       setInputLabel(p && /[\\/]/.test(p) ? baseName(p) : "")
@@ -210,7 +219,7 @@ export default function ImportView() {
         api.inspectImportFile(task.importOpts.inputPath).then(setFileInfo).catch(() => {})
       }
     }
-  }, [])
+  }, [setLastTask])
 
   // URL 参数消费（task=编辑配置 / running=进行中任务）：依赖 searchParams，
   // 保证已挂载页面内点击历史记录跳转（同路由仅参数变化）也能生效
@@ -229,10 +238,15 @@ export default function ImportView() {
 
   useEffect(() => {
     loadSavedTasks()
-    // 无 URL 参数时才回填上次配置，避免覆盖参数恢复的状态
-    if (!searchParams.get("task") && !searchParams.get("running")) {
-      api.getLastTask("import").then(({ task }) => task && applyTask(task)).catch(() => {})
+    // URL 参数优先（由上方 effect 消费）；其余按会话缓存/上次配置回填
+    if (searchParams.get("task") || searchParams.get("running")) return
+    if (cachedTask) {
+      // 缓存命中：配置已同步初始化，仅需补拉文件解析信息
+      const p = cachedTask.importOpts?.inputPath
+      if (p) api.inspectImportFile(p).then(setFileInfo).catch(() => {})
+      return
     }
+    api.getLastTask("import").then(({ task }) => task && applyTask(task)).catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 解析文件变化时重置筛选与分组折叠状态
@@ -301,7 +315,7 @@ export default function ImportView() {
             savedTasks={savedTasks}
             taskConfigId={taskConfigId}
             onApply={applyTask}
-            onClear={() => { setOpts(defaultOptions()); setTaskConfigId(undefined); setFileInfo(null); setInputLabel("") }}
+            onClear={() => { setOpts(defaultOptions()); setTaskConfigId(undefined); setFileInfo(null); setInputLabel(""); clearLastTask("import") }}
             onSave={() => setSaveOpen(true)}
           />
         }

@@ -25,9 +25,15 @@ type DirConfig struct {
 	Compares string `yaml:"compares"` // ⑤ 对比报告目录
 }
 
+// WebConfig Web 服务安全配置
+type WebConfig struct {
+	Allow []string `yaml:"allow"` // 允许访问的来源白名单（IP/CIDR/域名），留空 = 不限制；本机回环始终放行
+}
+
 // AppConfig 全局独立配置（config.yaml）
 type AppConfig struct {
 	Dirs DirConfig `yaml:"dirs"`
+	Web  WebConfig `yaml:"web"`
 }
 
 // ResolvedDirs 解析后的最终目录

@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -21,7 +22,7 @@ import {
 import * as api from "@/api"
 import { useAppStore } from "@/stores/app"
 import { cn } from "@/lib/utils"
-import { emptyConn, type DBConn } from "@/types"
+import { emptyConn, DB_SUBTYPE_LABEL, type DBConn } from "@/types"
 
 const DEFAULT_PORTS: Record<string, number> = {
   mysql: 3306,
@@ -140,11 +141,11 @@ export default function ConnectionDrawer() {
           <DialogTitle>连接管理</DialogTitle>
         </DialogHeader>
 
-        {/* 左右分栏（Navicat 式）：左侧连接列表独立滚动，弹窗高度仅由右侧表单决定 */}
-        <div className="grid grid-cols-[220px_1fr] gap-5">
+        {/* 左右分栏（Navicat 式）：items-stretch 两列等高，左侧面板拉伸至与右侧表单同高 */}
+        <div className="grid grid-cols-[220px_1fr] items-stretch gap-5">
           <div className="flex flex-col overflow-hidden rounded-md border">
             <div className="border-b bg-muted/40 px-3 py-2 text-xs text-muted-foreground">已保存连接</div>
-            <ScrollArea className="scrollbar-thin max-h-[440px] flex-1">
+            <ScrollArea className="scrollbar-thin min-h-0 flex-1">
               {connections.length === 0 && (
                 <div className="px-3 py-6 text-center text-xs text-muted-foreground">暂无连接，点击下方新建</div>
               )}
@@ -163,7 +164,14 @@ export default function ConnectionDrawer() {
                     )}
                   >
                     <div className="min-w-0">
-                      <div className={cn("truncate text-sm", active && "font-medium text-primary")}>{c.name}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className={cn("truncate text-sm", active && "font-medium text-primary")}>{c.name}</span>
+                        {c.conn.SubType && !c.conn.SubType.toLowerCase().startsWith(c.conn.Type) && (
+                          <Badge variant="secondary" className="shrink-0 rounded px-1 py-0 text-[10px] font-normal leading-4">
+                            {DB_SUBTYPE_LABEL[c.conn.SubType] || c.conn.SubType}
+                          </Badge>
+                        )}
+                      </div>
                       <div className="truncate text-xs text-muted-foreground">
                         {c.conn.Type} · {c.conn.Host}:{c.conn.Port}
                       </div>
@@ -191,18 +199,17 @@ export default function ConnectionDrawer() {
             </div>
           </div>
 
-          {/* 连接配置表单 */}
+          {/* 连接配置表单：12 列栅格统一各行比例，避免单字段独占半行 */}
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="text-xs text-muted-foreground">{isNew ? "新建连接" : `编辑连接：${loadedName}`}</div>
-            </div>
+            <div className="text-xs text-muted-foreground">{isNew ? "新建连接" : `编辑连接：${loadedName}`}</div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
+            {/* 连接名称 + 数据库类型 + 数据库产品（产品从属于类型，切换类型时联动重置） */}
+            <div className="grid grid-cols-12 gap-3">
+              <div className="col-span-4 space-y-1.5">
                 <Label>连接名称</Label>
                 <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="如：MySQL-生产" />
               </div>
-              <div className="space-y-1.5">
+              <div className="col-span-4 space-y-1.5">
                 <Label>数据库类型</Label>
                 <Select value={conn.Type} onValueChange={changeType}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -213,14 +220,28 @@ export default function ConnectionDrawer() {
                   </SelectContent>
                 </Select>
               </div>
+              {subTypes.length > 1 && (
+                <div className="col-span-4 space-y-1.5">
+                  <Label>数据库产品</Label>
+                  <Select value={conn.SubType || ""} onValueChange={(v) => set({ SubType: v })}>
+                    <SelectTrigger><SelectValue placeholder="选择产品" /></SelectTrigger>
+                    <SelectContent>
+                      {subTypes.map((s) => (
+                        <SelectItem key={s} value={s}>{DB_SUBTYPE_LABEL[s] || s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
 
-            <div className="grid grid-cols-[1fr_110px] gap-3">
-              <div className="space-y-1.5">
+            {/* 主机 + 端口 */}
+            <div className="grid grid-cols-12 gap-3">
+              <div className="col-span-7 space-y-1.5">
                 <Label>主机</Label>
                 <Input value={conn.Host} onChange={(e) => set({ Host: e.target.value })} placeholder="127.0.0.1" />
               </div>
-              <div className="space-y-1.5">
+              <div className="col-span-5 space-y-1.5">
                 <Label>端口</Label>
                 <Input
                   type="number"
@@ -230,12 +251,13 @@ export default function ConnectionDrawer() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
+            {/* 用户名 + 密码 */}
+            <div className="grid grid-cols-12 gap-3">
+              <div className="col-span-7 space-y-1.5">
                 <Label>用户名</Label>
                 <Input value={conn.Un} onChange={(e) => set({ Un: e.target.value })} />
               </div>
-              <div className="space-y-1.5">
+              <div className="col-span-5 space-y-1.5">
                 <Label>密码</Label>
                 <div className="relative">
                   <Input
@@ -257,29 +279,33 @@ export default function ConnectionDrawer() {
               </div>
             </div>
 
-            {isOracle ? (
-              <div className="space-y-1.5">
-                <Label>Service Name</Label>
-                <Input value={conn.Service || ""} onChange={(e) => set({ Service: e.target.value })} placeholder="ORCL" />
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                <Label>数据库</Label>
-                <Input
-                  value={conn.DBName || ""}
-                  onChange={(e) => set({ DBName: e.target.value })}
-                  placeholder="库名，可留空（后续按库选择）"
-                />
-              </div>
-            )}
+            {/* 数据库 / Service Name */}
+            <div className="space-y-1.5">
+              {isOracle ? (
+                <>
+                  <Label>Service Name</Label>
+                  <Input value={conn.Service || ""} onChange={(e) => set({ Service: e.target.value })} placeholder="ORCL" />
+                </>
+              ) : (
+                <>
+                  <Label>数据库</Label>
+                  <Input
+                    value={conn.DBName || ""}
+                    onChange={(e) => set({ DBName: e.target.value })}
+                    placeholder="库名，可留空（后续按库选择）"
+                  />
+                </>
+              )}
+            </div>
 
+            {/* Schema + SSL Mode（仅 PostgreSQL） */}
             {conn.Type === "postgresql" && (
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
+              <div className="grid grid-cols-12 gap-3">
+                <div className="col-span-6 space-y-1.5">
                   <Label>Schema</Label>
                   <Input value={conn.Schema || ""} onChange={(e) => set({ Schema: e.target.value })} placeholder="public" />
                 </div>
-                <div className="space-y-1.5">
+                <div className="col-span-6 space-y-1.5">
                   <Label>SSL Mode</Label>
                   <Select value={conn.SSLMode || "disable"} onValueChange={(v) => set({ SSLMode: v })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -288,22 +314,6 @@ export default function ConnectionDrawer() {
                       <SelectItem value="require">require</SelectItem>
                       <SelectItem value="verify-ca">verify-ca</SelectItem>
                       <SelectItem value="verify-full">verify-full</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
-
-            {subTypes.length > 1 && (
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>版本</Label>
-                  <Select value={conn.SubType || ""} onValueChange={(v) => set({ SubType: v })}>
-                    <SelectTrigger><SelectValue placeholder="选择版本" /></SelectTrigger>
-                    <SelectContent>
-                      {subTypes.map((s) => (
-                        <SelectItem key={s} value={s}>{s}</SelectItem>
-                      ))}
                     </SelectContent>
                   </Select>
                 </div>

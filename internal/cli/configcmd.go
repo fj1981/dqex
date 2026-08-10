@@ -5,6 +5,7 @@ import (
 	. "dbimpex/internal/service"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -41,6 +42,11 @@ var configCmd = &cobra.Command{
 		fmt.Printf("任务临时目录: %s\n", dirs.Tmp)
 		fmt.Printf("上传临时目录: %s\n", dirs.Uploads)
 		fmt.Printf("最终产物目录: %s\n", dirs.Exports)
+		if len(cfg.Web.Allow) > 0 {
+			fmt.Printf("访问来源白名单: %s（本机回环始终放行）\n", strings.Join(cfg.Web.Allow, ", "))
+		} else {
+			fmt.Println("访问来源白名单: （未配置，不限制来源）")
+		}
 		return nil
 	},
 }
@@ -58,4 +64,10 @@ dirs:
   tmp: ""         # ② 任务处理临时目录，默认 <data>/tmp
   uploads: ""     # ③ Web 上传临时目录，默认 <data>/uploads
   exports: ""     # ④ 最终生成产物目录，默认 <data>/exports
+web:
+  allow: []       # ⑤ 允许访问的来源白名单（IP/CIDR/域名），留空不限制；本机回环始终放行
+  # allow:        # 示例：对外暴露时收紧来源（--allow 命令行参数优先于此配置）
+  #   - 192.168.1.0/24
+  #   - 10.20.16.170
+  #   - dbx.example.com
 `

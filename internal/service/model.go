@@ -40,11 +40,13 @@ const (
 	ResetDrop     = engine.ResetDrop
 )
 
-// SupportedDBTypes 支持的数据库类型及子类型
+// SupportedDBTypes 支持的数据库类型及子类型。
+// SubType 不代表版本号，而是标识“使用该类型兼容模式的具体数据库产品”（彼此存在语法差异）：
+// 首项为原生标准库（值等于类型名），其余为兼容库产品。
 var SupportedDBTypes = map[string][]string{
-	"mysql":      {"5.7", "8.0", "mariadb"},
-	"postgresql": {"12", "13", "14", "15", "16"},
-	"oracle":     {"11g", "12c", "19c", "21c"},
+	"mysql":      {"mysql", "oceanbase", "mariadb"},
+	"postgresql": {"postgresql", "gaussdb", "kingbase"},
+	"oracle":     {"oracle", "dameng"},
 }
 
 // TaskConfig 任务配置（可保存/加载，自动记忆上次配置）
@@ -93,5 +95,5 @@ type ConnInfo struct {
 	ID       string     `json:"id"`
 	Name     string     `json:"name"`
 	Conn     DBConnInfo `json:"conn"`
-	SubTypes []string   `json:"subTypes"` // 该类型可用的子类型
+	SubTypes []string   `json:"subTypes"` // 该类型可用的子类型（兼容数据库产品）
 }

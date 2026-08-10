@@ -17,11 +17,16 @@ import type {
 
 // ---- 访问令牌（Web 服务默认启用 token 认证） ----
 // 优先取 URL ?token=（启动日志给出的带令牌链接）并存入 sessionStorage，
+// 随后从地址栏移除令牌，避免经浏览器历史 / Referer 泄漏；
 // 后续页面导航不丢令牌；SSE/下载等无法自定义请求头的场景用 ?token= 携带
 function resolveToken(): string {
-  const urlToken = new URLSearchParams(window.location.search).get("token")
+  const params = new URLSearchParams(window.location.search)
+  const urlToken = params.get("token")
   if (urlToken) {
     sessionStorage.setItem("dbx_token", urlToken)
+    params.delete("token")
+    const qs = params.toString()
+    window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : ""))
     return urlToken
   }
   return sessionStorage.getItem("dbx_token") || ""

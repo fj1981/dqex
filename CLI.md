@@ -75,8 +75,9 @@ dbx                      # 启动 Web 服务（默认端口 8181，仅监听 127
 dbx version              # 查看版本号
 dbx --port 9000          # 指定 Web 端口
 dbx --host 0.0.0.0       # 对外暴露（默认仅本机；启动日志给出带 token 的访问链接）
+dbx --allow 192.168.1.0/24,10.20.16.170   # 访问来源白名单（IP/CIDR/域名，优先于配置 web.allow）
 dbx --no-browser         # 启动时不自动打开浏览器（远程/无头环境）
-dbx --no-auth            # 禁用 token 认证（仅限可信环境，不推荐）
+dbx --no-auth            # 禁用 token 认证（仅限监听本机回环，不推荐）
 dbx url                  # 输出带 token 的 Web 访问链接（令牌有效期 24 小时）
 dbx url --token-only     # 仅输出 token，便于 curl/脚本调试
 dbx --data-dir /data/x   # 指定数据根目录（优先于全局配置）
@@ -86,9 +87,17 @@ dbx <命令> --help        # 查看任意命令帮助
 
 > **Web 安全**：默认仅监听本机并启用令牌认证，令牌持久化于数据目录 `web-access.json`（0600），
 > **有效期 24 小时**：未过期时重启复用，运行中超期 API 返回 401 并提示重启服务刷新，重启后自动换新；
-> 删除该文件可强制重新生成。启动时自动打开带 `?token=` 的浏览器链接（令牌存入 sessionStorage，
-> 后续页面导航不丢失）；`dbx url` 可随时取回访问链接及剩余有效期；API 也可手动携带
+> 删除该文件可强制重新生成。启动时自动打开带 `?token=` 的浏览器链接（令牌存入 sessionStorage 后
+> 会自动从地址栏移除，后续页面导航不丢失）；`dbx url` 可随时取回访问链接及剩余有效期；API 也可手动携带
 > `Authorization: Bearer <token>` / `X-Auth-Token` 头或 `?token=` 参数（SSE/下载走查询参数）。
+>
+> 对外暴露（`--host 0.0.0.0`）时的多层防护：
+> - **来源白名单**：`--allow` 或配置 `web.allow`（支持 IP/CIDR/域名，域名按需解析比对），
+>   白名单外来源直接 403；本机回环始终放行，不会误锁自己
+> - **强制认证**：`--no-auth` 与对外暴露互斥，同时给出时拒绝启动
+> - **暴力破解防护**：认证失败按真实来源 IP 限速（1 分钟 10 次后锁定 5 分钟，返回 429），
+>   不信任 X-Forwarded-For 等可伪造头
+> - **安全响应头**：`Referrer-Policy: no-referrer`（防令牌经 Referer 泄漏）/ `nosniff` / API 响应 `no-store`
 
 > ⚠️ Web 模式下的 `--port` 是 **Web 服务端口**；`export` / `import` 子命令中的
 > `--port` 是 **数据库端口**（mysqldump 风格别名），两者作用域不同。
@@ -167,7 +176,8 @@ scp dbx-*-linux-amd64.zip ops@server:/opt/
 ssh ops@server 'cd /opt && unzip dbx-*-linux-amd64.zip -d dbx && cd dbx && ./install.sh'
 
 # 2. 登记常用连接（一次登记，后续所有命令复用；密码加密落盘）
-dbx conn add --name "生产库" --type mysql --subtype "8.0" \
+# --subtype 指定兼容数据库产品（如 oceanbase/mariadb、gaussdb/kingbase、dameng），省略=原生标准库
+dbx conn add --name "生产库" --type mysql --subtype oceanbase \
   --host 10.20.16.170 --port 3317 --un backup_user --pw 'xxx'
 dbx conn add --name "测试库" --type mysql --host 10.20.16.20 --port 3306 --un root --pw 'xxx'
 
@@ -580,6 +590,12 @@ dirs:
   tmp: ""         # ② 任务处理临时目录，默认 <data>/tmp
   uploads: ""     # ③ 上传临时目录，默认 <data>/uploads
   exports: ""     # ④ 最终产物目录，默认 <data>/exports
+web:
+  allow: []       # ⑤ 访问来源白名单（IP/CIDR/域名），留空不限制；本机回环始终放行
+  # allow:        # 示例：对外暴露时收紧来源（--allow 命令行参数优先）
+  #   - 192.168.1.0/24
+  #   - 10.20.16.170
+  #   - dbx.example.com
 ```
 
 **配置文件查找顺序**：`--config-file` 参数 > 环境变量 `DBIMPEX_CONFIG` > `~/.dbimpex/config.yaml`

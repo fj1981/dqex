@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { FileDown, FileUp, ArrowLeftRight, ClipboardList, Eye, Pencil, Play, Search, Trash2 } from "lucide-react"
+import { FileDown, FileUp, ArrowLeftRight, Scale, ClipboardList, Eye, Pencil, Play, Search, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -25,6 +25,7 @@ const TYPE_ICON: Record<string, { icon: React.ReactNode; cls: string }> = {
   export: { icon: <FileDown className="h-5 w-5" />, cls: "bg-blue-50 text-blue-500" },
   import: { icon: <FileUp className="h-5 w-5" />, cls: "bg-green-50 text-green-500" },
   migrate: { icon: <ArrowLeftRight className="h-5 w-5" />, cls: "bg-purple-50 text-purple-500" },
+  compare: { icon: <Scale className="h-5 w-5" />, cls: "bg-orange-50 text-orange-500" },
 }
 
 // 连接主键（或旧配置中的连接名）转显示名，未命中时回退原值
@@ -61,6 +62,18 @@ function taskSummary(task: TaskConfig, conns: ConnInfo[]): string[] {
     const tbl = tablesSummary(o.tables)
     if (tbl) lines.push(`表: ${tbl}`)
     lines.push(`模式: ${o.schemaOnly ? "仅结构" : o.dataOnly ? "仅数据" : "结构+数据"}，重置: ${o.resetMode || "不重置"}`)
+  } else if (task.type === "compare" && task.compareOpts) {
+    const o = task.compareOpts
+    lines.push(`${connLabel(o.sourceConn, conns)} ↔ ${connLabel(o.targetConn, conns)}`)
+    const tbl = tablesSummary(o.tables)
+    if (tbl) lines.push(`表: ${tbl}`)
+    if (o.aliases?.length) lines.push(`别名配对: ${o.aliases.length} 组`)
+    const extras: string[] = []
+    extras.push(o.structureOnly ? "仅结构" : o.dataOnly ? "仅数据" : "结构+数据")
+    if (!o.structureOnly) extras.push(`阈值 ${o.threshold}`)
+    if (o.ignoreColumns?.length) extras.push(`忽略 ${o.ignoreColumns.length} 列`)
+    if (o.forceData) extras.push("强制对比数据")
+    lines.push(extras.join("，"))
   }
   return lines
 }
@@ -149,6 +162,7 @@ export default function TaskView() {
           <TabsTrigger value="export">导出</TabsTrigger>
           <TabsTrigger value="import">导入</TabsTrigger>
           <TabsTrigger value="migrate">迁移</TabsTrigger>
+          <TabsTrigger value="compare">对比</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -156,7 +170,7 @@ export default function TaskView() {
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed bg-background py-16 text-center">
           <ClipboardList className="h-8 w-8 text-muted-foreground/50" />
           <div className="text-sm text-muted-foreground">暂无任务配置</div>
-          <div className="text-xs text-muted-foreground">可在「导出 / 导入 / 迁移」页保存配置后在此统一管理</div>
+          <div className="text-xs text-muted-foreground">可在「导出 / 导入 / 迁移 / 对比」页保存配置后在此统一管理</div>
         </div>
       )}
 
@@ -239,6 +253,30 @@ export default function TaskView() {
                   </div>
                 )
               })()}
+
+              {/* 对比任务：表别名配对与忽略列 */}
+              {detail.compareOpts && (detail.compareOpts.aliases?.length || detail.compareOpts.ignoreColumns?.length) ? (
+                <div>
+                  {detail.compareOpts.aliases && detail.compareOpts.aliases.length > 0 && (
+                    <div className="mb-2">
+                      <div className="mb-1 font-medium">表别名配对:</div>
+                      <ScrollArea className="max-h-28 rounded border p-2">
+                        {detail.compareOpts.aliases.map((a) => (
+                          <div key={`${a.source}-${a.target}`} className="break-all text-xs">
+                            {a.source} ↔ {a.target}
+                            {a.ignoreColumns?.length ? `（忽略: ${a.ignoreColumns.join(",")}）` : ""}
+                          </div>
+                        ))}
+                      </ScrollArea>
+                    </div>
+                  )}
+                  {detail.compareOpts.ignoreColumns && detail.compareOpts.ignoreColumns.length > 0 && (
+                    <div className="break-all text-xs text-muted-foreground">
+                      全局忽略列: {detail.compareOpts.ignoreColumns.join(", ")}
+                    </div>
+                  )}
+                </div>
+              ) : null}
 
               <div>
                 <div className="mb-1 font-medium">执行历史:</div>

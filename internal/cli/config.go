@@ -332,7 +332,7 @@ func migrateFromLegacy(o *MigrateOptions) *migrateConfig {
 
 const tplConn = `# 内联连接配置；也可删除本段改用 source_ref: 已保存连接名（dbx conn add 保存）
 type: mysql            # mysql / postgresql / oracle
-subtype: "8.0"         # 可选：版本子类型
+subtype: ""            # 可选：兼容数据库产品（如 oceanbase/mariadb、gaussdb/kingbase、dameng），留空=原生
 host: 127.0.0.1
 port: 3306
 user: root

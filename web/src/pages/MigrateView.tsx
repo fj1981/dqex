@@ -42,9 +42,14 @@ function defaultOptions(): MigrateOptions {
 // 迁移页：四步向导（支持跨数据库类型：数据以行数据中转，结构自动转换）
 export default function MigrateView() {
   const [searchParams, setSearchParams] = useSearchParams()
+  // 会话内缓存的最近应用配置：挂载时同步初始化，避免空配置闪现后再回填
+  const cachedTask = useAppStore((s) => s.lastTasks["migrate"])
+  const setLastTask = useAppStore((s) => s.setLastTask)
+  const clearLastTask = useAppStore((s) => s.clearLastTask)
   const [step, setStep] = useState(0)
-  const [opts, setOpts] = useState<MigrateOptions>(defaultOptions())
-  const [taskConfigId, setTaskConfigId] = useState<string | undefined>()
+  const [opts, setOpts] = useState<MigrateOptions>(() =>
+    cachedTask?.migrateOpts ? { ...defaultOptions(), ...cachedTask.migrateOpts } : defaultOptions())
+  const [taskConfigId, setTaskConfigId] = useState<string | undefined>(cachedTask?.id)
   const [runningTaskID, setRunningTaskID] = useState("")
   const [savedTasks, setSavedTasks] = useState<TaskConfig[]>([])
   const [saveOpen, setSaveOpen] = useState(false)
@@ -92,8 +97,9 @@ export default function MigrateView() {
     if (task.migrateOpts) {
       setOpts({ ...defaultOptions(), ...task.migrateOpts })
       setTaskConfigId(task.id)
+      setLastTask(task)
     }
-  }, [])
+  }, [setLastTask])
 
   // URL 参数消费（task=编辑配置 / running=任务详情）：依赖 searchParams，
   // 保证已挂载页面内点击历史记录跳转（同路由仅参数变化）也能生效
@@ -112,10 +118,10 @@ export default function MigrateView() {
 
   useEffect(() => {
     loadSavedTasks()
-    // 无 URL 参数时才回填上次配置，避免覆盖参数恢复的状态
-    if (!searchParams.get("task") && !searchParams.get("running")) {
-      api.getLastTask("migrate").then(({ task }) => task && applyTask(task)).catch(() => {})
-    }
+    // URL 参数优先（由上方 effect 消费）；其次会话缓存已同步初始化，无需异步回填；
+    // 两者皆无才拉取上次配置（首次进入该页面）
+    if (searchParams.get("task") || searchParams.get("running") || cachedTask) return
+    api.getLastTask("migrate").then(({ task }) => task && applyTask(task)).catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const startRun = async () => {
@@ -159,7 +165,7 @@ export default function MigrateView() {
             savedTasks={savedTasks}
             taskConfigId={taskConfigId}
             onApply={applyTask}
-            onClear={() => { setOpts(defaultOptions()); setTaskConfigId(undefined) }}
+            onClear={() => { setOpts(defaultOptions()); setTaskConfigId(undefined); clearLastTask("migrate") }}
             onSave={() => setSaveOpen(true)}
           />
         }

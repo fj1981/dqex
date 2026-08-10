@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import * as api from "@/api"
-import type { ConnInfo, DBConn, ExecutionRecord } from "@/types"
+import type { ConnInfo, DBConn, ExecutionRecord, TaskConfig } from "@/types"
 
 interface AppState {
   // 连接
@@ -24,6 +24,12 @@ interface AppState {
   setPanelOpen: (open: boolean) => void
   history: ExecutionRecord[]
   loadHistory: () => Promise<void>
+
+  // 各任务类型最近应用的任务配置缓存：切换导航页面重挂载时同步初始化，
+  // 避免“空配置闪一下再回填上次配置”
+  lastTasks: Record<string, TaskConfig>
+  setLastTask: (task: TaskConfig) => void
+  clearLastTask: (type: string) => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -77,4 +83,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       console.error(e)
     }
   },
+
+  lastTasks: {},
+  setLastTask: (task) =>
+    set((s) => ({ lastTasks: { ...s.lastTasks, [task.type]: task } })),
+  clearLastTask: (type) =>
+    set((s) => {
+      const next = { ...s.lastTasks }
+      delete next[type]
+      return { lastTasks: next }
+    }),
 }))

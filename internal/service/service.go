@@ -23,6 +23,7 @@ import (
 type Service struct {
 	persist *PersistMgr
 	runner  *TaskRunner
+	cfg     *AppConfig
 }
 
 // NewService 创建业务服务（自动发现全局配置 config.yaml）
@@ -43,11 +44,15 @@ func NewServiceWith(dataDirFlag, configFile string) (*Service, error) {
 	return &Service{
 		persist: persist,
 		runner:  newTaskRunner(),
+		cfg:     cfg,
 	}, nil
 }
 
 // Persist 返回持久化管理器
 func (s *Service) Persist() *PersistMgr { return s.persist }
+
+// Config 返回全局配置
+func (s *Service) Config() *AppConfig { return s.cfg }
 
 // ---- 连接管理 ----
 

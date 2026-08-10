@@ -4,6 +4,7 @@ package cli
 import (
 	. "dbimpex/internal/service"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
@@ -63,7 +64,7 @@ var connListCmd = &cobra.Command{
 				addr += "/" + c.Conn.DBName
 			}
 			typ := c.Conn.Type
-			if c.Conn.SubType != "" {
+			if c.Conn.SubType != "" && !strings.EqualFold(c.Conn.SubType, c.Conn.Type) {
 				typ += " " + c.Conn.SubType
 			}
 			fmt.Printf("%-26s %-16s %-10s %s\n", c.ID, c.Name, typ, addr)

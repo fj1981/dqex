@@ -69,9 +69,14 @@ const bareName = (t: string) => (t.includes(".") ? t.slice(t.indexOf(".") + 1) :
 // 对比页：四步向导（作用域为单个库对，支持表别名配对）
 export default function CompareView() {
   const [searchParams, setSearchParams] = useSearchParams()
+  // 会话内缓存的最近应用配置：挂载时同步初始化，避免空配置闪现后再回填
+  const cachedTask = useAppStore((s) => s.lastTasks["compare"])
+  const setLastTask = useAppStore((s) => s.setLastTask)
+  const clearLastTask = useAppStore((s) => s.clearLastTask)
   const [step, setStep] = useState(0)
-  const [opts, setOpts] = useState<CompareOptions>(defaultOptions())
-  const [taskConfigId, setTaskConfigId] = useState<string | undefined>()
+  const [opts, setOpts] = useState<CompareOptions>(() =>
+    cachedTask?.compareOpts ? { ...defaultOptions(), ...cachedTask.compareOpts } : defaultOptions())
+  const [taskConfigId, setTaskConfigId] = useState<string | undefined>(cachedTask?.id)
   const [runningTaskID, setRunningTaskID] = useState("")
   const [savedTasks, setSavedTasks] = useState<TaskConfig[]>([])
   const [saveOpen, setSaveOpen] = useState(false)
@@ -124,8 +129,9 @@ export default function CompareView() {
     if (task.compareOpts) {
       setOpts({ ...defaultOptions(), ...task.compareOpts })
       setTaskConfigId(task.id)
+      setLastTask(task)
     }
-  }, [])
+  }, [setLastTask])
 
   // URL 参数消费（task=编辑配置 / running=任务详情）
   useEffect(() => {
@@ -143,10 +149,10 @@ export default function CompareView() {
 
   useEffect(() => {
     loadSavedTasks()
-    // 无 URL 参数时才回填上次配置，避免覆盖参数恢复的状态
-    if (!searchParams.get("task") && !searchParams.get("running")) {
-      api.getLastTask("compare").then(({ task }) => task && applyTask(task)).catch(() => {})
-    }
+    // URL 参数优先（由上方 effect 消费）；其次会话缓存已同步初始化，无需异步回填；
+    // 两者皆无才拉取上次配置（首次进入该页面）
+    if (searchParams.get("task") || searchParams.get("running") || cachedTask) return
+    api.getLastTask("compare").then(({ task }) => task && applyTask(task)).catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 进入选项步骤时加载目标库表清单（别名配置辅助输入）
@@ -344,7 +350,7 @@ export default function CompareView() {
             savedTasks={savedTasks}
             taskConfigId={taskConfigId}
             onApply={applyTask}
-            onClear={() => { setOpts(defaultOptions()); setTaskConfigId(undefined) }}
+            onClear={() => { setOpts(defaultOptions()); setTaskConfigId(undefined); clearLastTask("compare") }}
             onSave={() => setSaveOpen(true)}
           />
         }

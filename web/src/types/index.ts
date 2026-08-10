@@ -22,7 +22,19 @@ export interface ConnInfo {
 }
 
 export function emptyConn(): DBConn {
-  return { Type: "mysql", SubType: "8.0", Host: "", Port: 3306, Un: "", Pw: "", DBName: "" }
+  return { Type: "mysql", SubType: "mysql", Host: "", Port: 3306, Un: "", Pw: "", DBName: "" }
+}
+
+// 数据库子类型展示名：SubType 非版本号，而是兼容数据库产品；值等于类型名时为原生标准库
+export const DB_SUBTYPE_LABEL: Record<string, string> = {
+  mysql: "MySQL（原生）",
+  oceanbase: "OceanBase",
+  mariadb: "MariaDB",
+  postgresql: "PostgreSQL（原生）",
+  gaussdb: "GaussDB",
+  kingbase: "KingbaseES",
+  oracle: "Oracle（原生）",
+  dameng: "达梦 Dameng",
 }
 
 // ---- 选项 ----

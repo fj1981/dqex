@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"dbimpex/internal/cli"
 	"dbimpex/internal/service"
@@ -29,5 +30,15 @@ func runWeb(args *cli.WebArgs) {
 		fmt.Fprintf(os.Stderr, "初始化服务失败: %v\n", err)
 		os.Exit(1)
 	}
-	web.RunWeb(svc, args.Host, args.Port, args.NoAuth, args.NoBrowser)
+	// 访问来源白名单：--allow flag 优先，未给出时取配置文件 web.allow
+	allow := []string{}
+	for _, item := range strings.Split(args.Allow, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			allow = append(allow, item)
+		}
+	}
+	if len(allow) == 0 {
+		allow = svc.Config().Web.Allow
+	}
+	web.RunWeb(svc, args.Host, args.Port, allow, args.NoAuth, args.NoBrowser)
 }

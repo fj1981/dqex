@@ -8,7 +8,9 @@ import (
 )
 
 // DBConnInfo 应用层连接信息。
-// def.DBConnection 已包含 SubType 字段（子类型，如 "5.7"/"8.0"/"mariadb"、"12c"/"19c"），
+// def.DBConnection 已包含 SubType 字段：它不是版本号，而是“使用该类型兼容模式的具体数据库产品”
+// （如 mysql 兼容的 "oceanbase"/"mariadb"、postgresql 兼容的 "gaussdb"/"kingbase"、oracle 兼容的 "dameng"），
+// 供方言层按产品语法差异生成 SQL；空值或等于类型名表示原生标准库。
 // 此处内嵌复用，JSON/YAML 序列化时字段平铺。
 type DBConnInfo struct {
 	def.DBConnection `json:",inline" yaml:",inline"`

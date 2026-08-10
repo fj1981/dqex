@@ -41,11 +41,16 @@ const tokenTTL = 24 * time.Hour
 //   - 接受 Authorization: Bearer <token>、X-Auth-Token 头或 ?token= 查询参数
 //     （SSE EventSource 与文件下载无法自定义请求头，必须支持查询参数）
 //   - OPTIONS 预检与 /api 之外的路由（页面/健康检查）放行
-//   - 常量时间比较防时序探测
-func tokenAuth(token string, expireAt time.Time) gin.HandlerFunc {
+//   - 常量时间比较防时序探测；失败按真实 TCP 对端 IP 限速，防暴力破解
+func tokenAuth(token string, expireAt time.Time, limiter *authLimiter) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method == http.MethodOptions || !strings.HasPrefix(c.Request.URL.Path, "/api/") {
 			c.Next()
+			return
+		}
+		ip := remoteIP(c).String()
+		if !limiter.allow(ip) {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"code": http.StatusTooManyRequests, "msg": "认证失败过于频繁，来源已临时锁定，请稍后重试"})
 			return
 		}
 		if time.Now().After(expireAt) {
@@ -60,11 +65,67 @@ func tokenAuth(token string, expireAt time.Time) gin.HandlerFunc {
 			got = c.Query("token")
 		}
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1 {
+			limiter.pass(ip)
 			c.Next()
 			return
 		}
+		limiter.fail(ip)
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": http.StatusUnauthorized, "msg": "认证失败：缺少访问令牌或令牌无效"})
 	}
+}
+
+// remoteIP 取 TCP 对端 IP（不信任 X-Forwarded-For 等可伪造头，避免白名单/限速被绕过）
+func remoteIP(c *gin.Context) net.IP {
+	host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
+	if err != nil {
+		return net.ParseIP(c.Request.RemoteAddr)
+	}
+	return net.ParseIP(host)
+}
+
+// accessControl 访问来源白名单中间件：仅放行白名单内的来源 IP（回环始终放行）
+func accessControl(f *accessFilter) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ip := remoteIP(c)
+		if f.allow(ip) {
+			c.Next()
+			return
+		}
+		cylog.Warnf("拒绝白名单外访问: %s %s（来源 %s）", c.Request.Method, c.Request.URL.Path, ip)
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": http.StatusForbidden, "msg": "访问被拒绝：当前来源不在允许访问的 IP/域名白名单内"})
+			return
+		}
+		c.AbortWithStatus(http.StatusForbidden)
+	}
+}
+
+// securityHeaders 安全响应头：
+//   - Referrer-Policy: no-referrer 防令牌经 Referer 泄漏（令牌可出现在 ?token= 中）
+//   - X-Content-Type-Options: nosniff 防 MIME 嗅探
+//   - /api 响应 no-store，防浏览器/代理缓存留存敏感数据（SSE 由 handler 自行覆盖）
+func securityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		h := c.Writer.Header()
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("X-Content-Type-Options", "nosniff")
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			h.Set("Cache-Control", "no-store")
+		}
+		c.Next()
+	}
+}
+
+// isLoopback 监听地址是否仅本机回环（空按默认回环处理）
+func isLoopback(host string) bool {
+	switch host {
+	case "", "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // openBrowser 打开系统默认浏览器（失败静默忽略，如远程/无头环境）
@@ -81,13 +142,17 @@ func openBrowser(url string) {
 	_ = cmd.Start()
 }
 
-// RunWeb 启动 Web 服务。
+// RunWeb 启动 Web 服务。allow 为访问来源白名单（IP/CIDR/域名），空 = 不限制。
 //
 // 安全默认：
 //   - host 默认 127.0.0.1 仅本机访问，需对外暴露时显式传 0.0.0.0 等
-//   - 默认启用随机令牌认证（noAuth=true 关闭，仅限可信环境）
+//   - 默认启用随机令牌认证（noAuth=true 关闭，且仅限监听回环地址）
 //   - 前端与 API 同源部署，不开启 CORS 通配
-func RunWeb(svc *service.Service, host string, port int, noAuth, noBrowser bool) {
+func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth, noBrowser bool) {
+	if noAuth && !isLoopback(host) {
+		cylog.Errorf("安全限制: --no-auth 仅允许监听本机回环地址；对外暴露（--host %s）必须启用令牌认证，请去掉 --no-auth 后重启", host)
+		return
+	}
 	eb := cygin.NewEndpointBuilder("/api", "dbx API", []string{"dbx"})
 	apiGroup := eb.Build(
 		// 连接管理
@@ -148,6 +213,11 @@ func RunWeb(svc *service.Service, host string, port int, noAuth, noBrowser bool)
 		// 前端资源：直接内嵌 web/dist（构建前需先 npm run build）
 		cygin.WithEmbeddedFiles("/", webui.DistFS, "dist"),
 	}
+	middlewares := []gin.HandlerFunc{securityHeaders()}
+	if filter := newAccessFilter(allow); len(filter.rules) > 0 {
+		middlewares = append(middlewares, accessControl(filter))
+		cylog.Infof("访问来源白名单已启用: %d 条规则（本机回环始终放行）", len(filter.rules))
+	}
 	token := ""
 	issuedAt := time.Now()
 	if !noAuth {
@@ -164,8 +234,9 @@ func RunWeb(svc *service.Service, host string, port int, noAuth, noBrowser bool)
 				return
 			}
 		}
-		opts = append(opts, cygin.WithGlobalMiddlewares(tokenAuth(token, issuedAt.Add(tokenTTL))))
+		middlewares = append(middlewares, tokenAuth(token, issuedAt.Add(tokenTTL), newAuthLimiter()))
 	}
+	opts = append(opts, cygin.WithGlobalMiddlewares(middlewares...))
 
 	server := cygin.NewServer(opts...)
 	// 绑定地址（WithPort 仅设置端口且默认全网卡，此处显式覆盖为 host:port）
@@ -180,6 +251,9 @@ func RunWeb(svc *service.Service, host string, port int, noAuth, noBrowser bool)
 		browserHost = "127.0.0.1"
 	}
 	openURL := "http://" + net.JoinHostPort(browserHost, strconv.Itoa(port)) + "/"
+	if !isLoopback(host) {
+		cylog.Warnf("服务已对外暴露（监听 %s）：请确保仅面向可信网络，必要时用 --allow / 配置 web.allow 收紧来源", server.Config.Address)
+	}
 	if token != "" {
 		openURL += "?token=" + token
 		cylog.Infof("dbx Web 服务启动: %s", openURL)
