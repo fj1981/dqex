@@ -82,6 +82,10 @@ function parseSelect(query: string): { cols: string[]; where: string; ok: boolea
 interface Props {
   connId: string
   db?: string
+  // 附加连接（如对比场景的目标库）：仅存在于该连接的表会合并展示并加标记，使其可被勾选
+  extraConnId?: string
+  extraDb?: string
+  extraLabel?: string // 附加来源标记文案，默认「仅目标库有」
   selected: string[]
   // 选中的对象（格式 _views/名称）
   selectedObjects?: string[]
@@ -105,6 +109,9 @@ const OBJECT_GROUPS = [
 export default function TablePicker({
   connId,
   db,
+  extraConnId,
+  extraDb,
+  extraLabel = "仅目标库有",
   selected,
   selectedObjects = [],
   showObjects = true,
@@ -114,6 +121,7 @@ export default function TablePicker({
   onChange,
 }: Props) {
   const [tree, setTree] = useState<DBTables[]>([])
+  const [extraTree, setExtraTree] = useState<DBTables[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [keyword, setKeyword] = useState("")
@@ -166,10 +174,20 @@ export default function TablePicker({
       .finally(() => setLoading(false))
   }, [connId, db])
 
+  // 附加连接树加载（对比场景：目标库独有表也可勾选）
+  useEffect(() => {
+    if (!extraConnId) {
+      setExtraTree([])
+      return
+    }
+    api
+      .getTableTree(extraConnId, extraDb)
+      .then((r) => setExtraTree(r.databases || []))
+      .catch(() => setExtraTree([]))
+  }, [extraConnId, extraDb])
+
   const dbKey = (db: string) => `db:${db}`
   const grpKey = (db: string, dir: string) => `grp:${db}:${dir}`
-
-  const singleMode = tree.length <= 1
 
   // 选择项 ID 统一用限定形式 "库.表" / "库.目录/名"，避免跨库同名串选
   const qual = (dbName: string, id: string) => `${dbName}.${id}`
@@ -184,15 +202,40 @@ export default function TablePicker({
     return i > 0 ? id.slice(i + 1) : id
   }
 
+  // 合并附加连接树：同名库（大小写不敏感）并入，库不存在时整库追加；附加来源表记入 extraSet
+  const { mergedTree, extraSet } = useMemo(() => {
+    const set = new Set<string>()
+    if (extraTree.length === 0) return { mergedTree: tree, extraSet: set }
+    const merged = tree.map((d) => ({ ...d, tables: [...d.tables] }))
+    for (const ed of extraTree) {
+      const md = merged.find((d) => d.name.toLowerCase() === ed.name.toLowerCase())
+      if (md) {
+        const have = new Set(md.tables.map((t) => t.toLowerCase()))
+        for (const t of ed.tables) {
+          if (!have.has(t.toLowerCase())) {
+            md.tables.push(t)
+            set.add(qual(md.name, t))
+          }
+        }
+      } else {
+        merged.push({ name: ed.name, tables: [...ed.tables] })
+        ed.tables.forEach((t) => set.add(qual(ed.name, t)))
+      }
+    }
+    return { mergedTree: merged, extraSet: set }
+  }, [tree, extraTree])
+
+  const singleMode = mergedTree.length <= 1
+
   // 某库的全部对象 ID（多库模式为限定形式 库._views/名）
   const dbObjectIds = (d: DBTables): string[] =>
     showObjects ? OBJECT_GROUPS.flatMap((g) => (d.objects?.[g.dir] || []).map((n) => qual(d.name, `${g.dir}/${n}`))) : []
 
   // 关键字过滤：表名与对象名同时匹配，保留有命中的库与分组
   const filteredTree = useMemo<DBTables[]>(() => {
-    if (!keyword) return tree
+    if (!keyword) return mergedTree
     const kw = keyword.toLowerCase()
-    return tree
+    return mergedTree
       .map((d) => {
         const tables = d.tables.filter((t) => t.toLowerCase().includes(kw))
         const objects: Record<string, string[]> = {}
@@ -203,9 +246,9 @@ export default function TablePicker({
         return { ...d, tables, objects: showObjects ? objects : undefined }
       })
       .filter((d) => d.tables.length > 0 || Object.keys(d.objects || {}).length > 0)
-  }, [tree, keyword, showObjects])
+  }, [mergedTree, keyword, showObjects])
 
-  const totalTables = tree.reduce((n, d) => n + d.tables.length, 0)
+  const totalTables = mergedTree.reduce((n, d) => n + d.tables.length, 0)
   const totalObjects = showObjects ? tree.reduce((n, d) => n + dbObjectIds(d).length, 0) : 0
 
   const allVisibleTables = filteredTree.flatMap((d) => d.tables.map((t) => qual(d.name, t)))
@@ -216,23 +259,23 @@ export default function TablePicker({
 
   const findDBOf = (tableId: string) => {
     const dbName = entryDB(tableId)
-    return dbName ? tree.find((d) => d.name === dbName) : tree.find((d) => d.tables.includes(tableId))
+    return dbName ? mergedTree.find((d) => d.name === dbName) : mergedTree.find((d) => d.tables.includes(tableId))
   }
   const findDBOfObject = (id: string) => {
     const dbName = entryDB(id)
-    return dbName ? tree.find((d) => d.name === dbName) : tree.find((d) => dbObjectIds(d).includes(id))
+    return dbName ? mergedTree.find((d) => d.name === dbName) : mergedTree.find((d) => dbObjectIds(d).includes(id))
   }
 
   // 归一化裸名条目（旧格式选择/恢复的任务配置）：升级为限定名，树中无法解析的清除
   useEffect(() => {
-    if (loading || tree.length === 0) return
+    if (loading || mergedTree.length === 0) return
     if (!selected.some((t) => !entryDB(t)) && !selectedObjects.some((o) => !entryDB(o))) return
     const upTable = (t: string) => {
-      const d = tree.find((x) => x.tables.includes(t))
+      const d = mergedTree.find((x) => x.tables.includes(t))
       return d ? qual(d.name, t) : ""
     }
     const upObj = (o: string) => {
-      const d = tree.find((x) => dbObjectIds(x).some((id) => stripDB(id) === o))
+      const d = mergedTree.find((x) => dbObjectIds(x).some((id) => stripDB(id) === o))
       return d ? qual(d.name, o) : ""
     }
     const nextTables = Array.from(new Set(selected.map((t) => (entryDB(t) ? t : upTable(t))).filter(Boolean)))
@@ -241,7 +284,7 @@ export default function TablePicker({
       .map((c) => (entryDB(c.tableName) ? c : { ...c, tableName: upTable(c.tableName) }))
       .filter((c) => c.tableName)
     onChange(nextTables, nextObjs, nextConds)
-  }, [loading, tree, selected, selectedObjects, conditions, onChange])
+  }, [loading, mergedTree, selected, selectedObjects, conditions, onChange])
 
   // 同步 selectedDBs（多库导出模式）：勾选项→纳入所属库；取消最后一项→移除库
   const syncDBs = (nextSelected: string[], nextObjects: string[]) => {
@@ -249,7 +292,7 @@ export default function TablePicker({
     const cur = selectedDBs || []
     const allItems = [...nextSelected, ...nextObjects]
     const keep: string[] = []
-    for (const d of tree) {
+    for (const d of mergedTree) {
       const hasTable = nextSelected.some((t) => {
         const dbName = entryDB(t)
         return dbName ? dbName === d.name : d.tables.includes(t)
@@ -263,7 +306,7 @@ export default function TablePicker({
       }
     }
     // 保留显式选中的库（selectedDBs 中有但当前无子项选中 = 整库导出）
-    for (const name of cur) if (!keep.includes(name) && tree.some((d) => d.name === name)) keep.push(name)
+    for (const name of cur) if (!keep.includes(name) && mergedTree.some((d) => d.name === name)) keep.push(name)
     void allItems
     onDBsChange(keep)
   }
@@ -305,7 +348,7 @@ export default function TablePicker({
   // 库节点勾选：选中/取消该库下所有表与对象（无 onDBsChange 时仅级联子项，不记录库）
   const toggleDB = (name: string, checked: boolean) => {
     const cur = selectedDBs || []
-    const d = tree.find((x) => x.name === name)
+    const d = mergedTree.find((x) => x.name === name)
     if (!d) return
     const dbTables = d.tables.map((t) => qual(d.name, t))
     const dbObjs = dbObjectIds(d)
@@ -376,14 +419,15 @@ export default function TablePicker({
         setWhereMode("sql")
       }
     }
-    // 查找表所属库并加载列信息
+    // 查找表所属库并加载列信息（附加来源表从附加连接取列）
     const dbEntry = findDBOf(table)
     const dbName = dbEntry?.name || db || ""
+    const colsConnId = extraSet.has(table) && extraConnId ? extraConnId : connId
     setColumns([])
     setColsError("")
     setColsLoading(true)
     api
-      .getTableColumns(connId, dbName, stripDB(table))
+      .getTableColumns(colsConnId, dbName, stripDB(table))
       .then((r) => {
         setColumns(r.columns || [])
         // 如果可视化条件中有空列名，用第一个列填充
@@ -521,6 +565,9 @@ export default function TablePicker({
           <Table2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           {/* 树中库名已由父节点体现，仅显示裸表名；title 保留限定名便于悬停确认 */}
           <span className="truncate" title={t}>{stripDB(t)}</span>
+          {extraSet.has(t) && (
+            <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] text-amber-600">{extraLabel}</span>
+          )}
           {dataMode === "skip" && (
             <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">不导出数据</span>
           )}

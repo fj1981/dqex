@@ -14,6 +14,8 @@ import (
 	"unicode/utf8"
 
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
+	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
+	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/dialect"
 )
 
 // DefaultCompareThreshold 数据逐行比较默认阈值：行数不超过该值的表逐行比较，超过仅比较行数
@@ -51,6 +53,15 @@ func RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*Com
 	if threshold <= 0 {
 		threshold = DefaultCompareThreshold
 	}
+	// 忽略列归一化（列名大小写不敏感），数据内容对比时排除这些列
+	ignore := make(map[string]bool, len(opts.IgnoreColumns))
+	for _, c := range opts.IgnoreColumns {
+		if c = strings.TrimSpace(c); c != "" {
+			ignore[strings.ToLower(c)] = true
+		}
+	}
+	// 清空表结构元数据缓存：对比要求两侧实时结构，避免复用陈旧/他实例缓存
+	cydb.FlushTableInfoCache()
 	t := newTracker(cb)
 
 	sourceCli, err := Connect(*opts.Source)
@@ -95,20 +106,27 @@ func RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*Com
 			Status:     pair.Status,
 		}
 		if pair.Status == compareStatusBoth {
+			structDiff := false
 			if !opts.DataOnly {
 				cols, err := compareColumns(sourceCli, targetCli, pair.SourceName, pair.TargetName)
 				if err != nil {
 					t.log("表 %s 结构对比失败（已跳过）: %v", pair.Name, err)
 				} else {
 					tr.Columns = cols
+					structDiff = !cols.Matched
 				}
 			}
 			if !opts.StructureOnly {
-				data, err := compareTableData(ctx, sourceCli, targetCli, pair.SourceName, pair.TargetName, threshold, t)
-				if err != nil {
-					t.log("表 %s 数据对比失败（已跳过）: %v", pair.Name, err)
+				if structDiff && !opts.ForceData {
+					// 结构不一致时默认不对比数据（列定义都不同，数据对比意义有限）；--force-data 可强制
+					tr.Data = &DataDiff{Mode: "skipped", SkippedReason: "结构不一致，已跳过数据对比（--force-data 可强制）"}
 				} else {
-					tr.Data = data
+					data, err := compareTableData(ctx, sourceCli, targetCli, pair.SourceName, pair.TargetName, threshold, ignore, t)
+					if err != nil {
+						t.log("表 %s 数据对比失败（已跳过）: %v", pair.Name, err)
+					} else {
+						tr.Data = data
+					}
 				}
 			}
 		}
@@ -157,7 +175,8 @@ func listCompareTables(cli *cydb.DBCli, conn *DBConnInfo, wanted []string) ([]st
 }
 
 // filterTablesBare 按裸表名过滤：nil=全部，空数组=无表。
-// "库.表" 限定名条目剥离库前缀后按裸名比较（仅库名匹配时生效），避免源/目标库名不同时失配
+// "库.表" 限定名条目：库前缀匹配时按裸名比较；前缀不匹配时降级按裸名比较
+// （对比作用域为单个库对，目标独有表的限定前缀可能与源侧库名不同，不能因此失配）
 func filterTablesBare(all []string, wanted []string, db string) []string {
 	if wanted == nil {
 		return all
@@ -165,10 +184,8 @@ func filterTablesBare(all []string, wanted []string, db string) []string {
 	bare := make(map[string]bool, len(wanted))
 	for _, w := range wanted {
 		w = strings.TrimSpace(w)
-		if d, tbl, ok := splitQualifiedName(w); ok {
-			if strings.EqualFold(d, db) {
-				bare[strings.ToLower(tbl)] = true
-			}
+		if _, tbl, ok := splitQualifiedName(w); ok {
+			bare[strings.ToLower(tbl)] = true
 		} else if w != "" {
 			bare[strings.ToLower(w)] = true
 		}
@@ -280,7 +297,7 @@ func sortedKeys(m map[string]string) []string {
 
 // ---- 结构对比 ----
 
-// compareColumns 对比两侧表的列结构（列名大小写不敏感匹配）
+// compareColumns 对比两侧表的列结构（列名大小写不敏感匹配，类型按各方言归一化后对比）
 func compareColumns(sourceCli, targetCli *cydb.DBCli, srcTable, tgtTable string) (*ColumnDiff, error) {
 	srcCols, err := tableColumns(sourceCli, srcTable)
 	if err != nil {
@@ -290,7 +307,17 @@ func compareColumns(sourceCli, targetCli *cydb.DBCli, srcTable, tgtTable string)
 	if err != nil {
 		return nil, fmt.Errorf("获取目标表列信息失败: %w", err)
 	}
-	return diffColumns(srcCols, tgtCols), nil
+	return diffColumns(srcCols, tgtCols, typeNormalizer(sourceCli), typeNormalizer(targetCli)), nil
+}
+
+// typeNormalizer 返回 cli 方言的列类型归一化函数（对比语义：如 MySQL 剥离整数显示宽度，
+// bigint(20) ≡ bigint），与 cydb 自动迁移共用同一实现；方言不可得时退化为恒等
+func typeNormalizer(cli *cydb.DBCli) func(string) string {
+	md, ok := dialect.GetMigrationDialect(cli.DBType())
+	if !ok {
+		return func(dt string) string { return dt }
+	}
+	return func(dt string) string { return string(md.NormalizeColumnType(def.StandardFieldType(dt))) }
 }
 
 func tableColumns(cli *cydb.DBCli, table string) ([]ColumnItem, error) {
@@ -311,8 +338,15 @@ func tableColumns(cli *cydb.DBCli, table string) ([]ColumnItem, error) {
 	return ret, nil
 }
 
-// diffColumns 列级差异计算（纯函数）：类型按原始字符串对比，跨库类型时为参考性结论
-func diffColumns(srcCols, tgtCols []ColumnItem) *ColumnDiff {
+// diffColumns 列级差异计算（纯函数）：类型按 normSrc/normTgt 归一化后的字符串对比
+// （剩余差异为参考性结论），列项保留原始类型供明细展示；normalizer 为 nil 时不归一化
+func diffColumns(srcCols, tgtCols []ColumnItem, normSrc, normTgt func(string) string) *ColumnDiff {
+	if normSrc == nil {
+		normSrc = func(dt string) string { return dt }
+	}
+	if normTgt == nil {
+		normTgt = normSrc
+	}
 	srcMap := make(map[string]ColumnItem, len(srcCols))
 	for _, c := range srcCols {
 		srcMap[strings.ToLower(c.Name)] = c
@@ -328,7 +362,7 @@ func diffColumns(srcCols, tgtCols []ColumnItem) *ColumnDiff {
 			d.SourceOnly = append(d.SourceOnly, c)
 			continue
 		}
-		if c.DataType != tc.DataType || c.Nullable != tc.Nullable || c.PrimaryKey != tc.PrimaryKey {
+		if normSrc(c.DataType) != normTgt(tc.DataType) || c.Nullable != tc.Nullable || c.PrimaryKey != tc.PrimaryKey {
 			d.Different = append(d.Different, ColumnItemDiff{Name: c.Name, Source: c, Target: tc})
 		}
 	}
@@ -343,8 +377,10 @@ func diffColumns(srcCols, tgtCols []ColumnItem) *ColumnDiff {
 
 // ---- 数据对比 ----
 
-// compareTableData 单表数据对比：超阈值仅比较行数；否则按两侧公共列交集逐行归一化后做多重集比较
-func compareTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, srcTable, tgtTable string, threshold int, t *tracker) (*DataDiff, error) {
+// compareTableData 单表数据对比：超阈值仅比较行数；有主键时走 PK 模式
+// （主键判断有无：缺失/多出，内容对比判断变化），无主键回退整行归一化多重集比较；
+// ignore 为数据内容对比忽略的列（小写归一）
+func compareTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, srcTable, tgtTable string, threshold int, ignore map[string]bool, t *tracker) (*DataDiff, error) {
 	srcRows, err := countTableRows(sourceCli, srcTable)
 	if err != nil {
 		return nil, fmt.Errorf("统计源表行数失败: %w", err)
@@ -379,12 +415,33 @@ func compareTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, src
 		dd.SkippedReason = "无公共列，跳过数据对比"
 		return dd, nil
 	}
+	// 内容列 = 公共列 − 忽略列（主键列不可忽略，否则无法判断有无）
+	pk := matchPKColumns(sourceCli, targetCli, srcTable, tgtTable, common)
+	content := make([]string, 0, len(common))
+	for _, c := range common {
+		if !ignore[c] || isPKColumn(c, pk) {
+			content = append(content, c)
+		}
+	}
+	if len(content) == 0 {
+		dd.SkippedReason = "公共列均被忽略，跳过数据对比"
+		return dd, nil
+	}
 
-	srcSet, srcSamples, err := loadRowMultiset(ctx, sourceCli, srcTable, common, t)
+	// PK 模式：主键判断有无（missing/extra），内容对比判断变化（changed）
+	if len(pk) > 0 {
+		if err := compareByKey(ctx, sourceCli, targetCli, srcTable, tgtTable, dd, content, pk, t); err != nil {
+			return nil, err
+		}
+		return dd, nil
+	}
+
+	// 无主键回退：整行归一化多重集比较（无法区分「变化」与「缺失+多出」）
+	srcSet, srcSamples, err := loadRowMultiset(ctx, sourceCli, srcTable, content, t)
 	if err != nil {
 		return nil, fmt.Errorf("读取源表数据失败: %w", err)
 	}
-	tgtSet, tgtSamples, err := loadRowMultiset(ctx, targetCli, tgtTable, common, t)
+	tgtSet, tgtSamples, err := loadRowMultiset(ctx, targetCli, tgtTable, content, t)
 	if err != nil {
 		return nil, fmt.Errorf("读取目标表数据失败: %w", err)
 	}
@@ -394,10 +451,181 @@ func compareTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, src
 	dd.MissingSamples = collectSamples(missing, srcSamples)
 	dd.ExtraSamples = collectSamples(extra, tgtSamples)
 	if dd.MissingSamples != nil || dd.ExtraSamples != nil {
-		dd.SampleColumns = common
+		dd.SampleColumns = content
 	}
 	dd.Equal = dd.Missing == 0 && dd.Extra == 0
 	return dd, nil
+}
+
+// matchPKColumns 两侧主键集一致（列数/顺序/列名大小写不敏感）且均在公共列中时返回主键列（小写），
+// 否则返回空（回退整行比较）；复合主键按约束定义顺序整体作为存在性键
+func matchPKColumns(sourceCli, targetCli *cydb.DBCli, srcTable, tgtTable string, common []string) []string {
+	srcPKs, err1 := sourceCli.GetPrimaryKeys(srcTable)
+	tgtPKs, err2 := targetCli.GetPrimaryKeys(tgtTable)
+	if err1 != nil || err2 != nil || len(srcPKs) == 0 || len(srcPKs) != len(tgtPKs) {
+		return nil
+	}
+	commonSet := make(map[string]bool, len(common))
+	for _, c := range common {
+		commonSet[c] = true
+	}
+	pk := make([]string, 0, len(srcPKs))
+	for i, c := range srcPKs {
+		lc := strings.ToLower(c)
+		if lc != strings.ToLower(tgtPKs[i]) || !commonSet[lc] {
+			return nil
+		}
+		pk = append(pk, lc)
+	}
+	return pk
+}
+
+func isPKColumn(col string, pk []string) bool {
+	for _, c := range pk {
+		if c == col {
+			return true
+		}
+	}
+	return false
+}
+
+// compareByKey PK 模式数据对比：主键判断有无（missing=源有目标无，extra=目标有源无），
+// 内容列逐列归一化对比判断变化（changed），结果写入 dd
+func compareByKey(ctx context.Context, sourceCli, targetCli *cydb.DBCli, srcTable, tgtTable string, dd *DataDiff, content, pk []string, t *tracker) error {
+	dd.KeyColumns = pk
+	srcRows, err := loadRowsByPK(ctx, sourceCli, srcTable, pk, content, t)
+	if err != nil {
+		return fmt.Errorf("读取源表数据失败: %w", err)
+	}
+	tgtRows, err := loadRowsByPK(ctx, targetCli, tgtTable, pk, content, t)
+	if err != nil {
+		return fmt.Errorf("读取目标表数据失败: %w", err)
+	}
+
+	missingKeys := make([]string, 0)
+	extraKeys := make([]string, 0)
+	changedKeys := make([]string, 0)
+	changedDiffs := make(map[string][]ValueDiff)
+	for k, srcRow := range srcRows {
+		tgtRow, ok := tgtRows[k]
+		if !ok {
+			missingKeys = append(missingKeys, k)
+			continue
+		}
+		if diffs := diffRowValues(srcRow, tgtRow, content); len(diffs) > 0 {
+			changedKeys = append(changedKeys, k)
+			changedDiffs[k] = diffs
+		}
+	}
+	for k := range tgtRows {
+		if _, ok := srcRows[k]; !ok {
+			extraKeys = append(extraKeys, k)
+		}
+	}
+
+	dd.Missing = len(missingKeys)
+	dd.Extra = len(extraKeys)
+	dd.Changed = len(changedKeys)
+	dd.MissingSamples = collectKeySamples(missingKeys, srcRows)
+	dd.ExtraSamples = collectKeySamples(extraKeys, tgtRows)
+	if len(changedKeys) > 0 {
+		sort.Strings(changedKeys)
+		samples := make([]ChangedRow, 0, compareSampleLimit)
+		for _, k := range changedKeys {
+			if len(samples) >= compareSampleLimit {
+				break
+			}
+			key := make(map[string]any, len(pk))
+			for _, c := range pk {
+				key[c] = srcRows[k][c]
+			}
+			samples = append(samples, ChangedRow{Key: key, Diffs: changedDiffs[k]})
+		}
+		dd.ChangedSamples = samples
+	}
+	if dd.MissingSamples != nil || dd.ExtraSamples != nil || dd.ChangedSamples != nil {
+		dd.SampleColumns = content
+	}
+	dd.Equal = dd.Missing == 0 && dd.Extra == 0 && dd.Changed == 0
+	return nil
+}
+
+// loadRowsByPK 流式读取全表，以主键归一化值为索引（主键唯一，无需计数），
+// 保留 content 列行数据供采样展示与内容对比
+func loadRowsByPK(ctx context.Context, cli *cydb.DBCli, table string, pk, content []string, t *tracker) (map[string]map[string]any, error) {
+	rows := make(map[string]map[string]any)
+	selectSQL := fmt.Sprintf("SELECT * FROM %s", EscapeTable(cli.DBType(), cli.DBSubType(), table))
+	err := cli.ForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("任务已取消")
+		}
+		obj, err := rd.AsObject()
+		if err != nil {
+			return err
+		}
+		lower := make(map[string]any, len(obj))
+		for k, v := range obj {
+			lower[strings.ToLower(k)] = v
+		}
+		key := pkKey(lower, pk)
+		if _, ok := rows[key]; !ok {
+			sample := make(map[string]any, len(content))
+			for _, c := range content {
+				sample[c] = lower[c]
+			}
+			rows[key] = sample
+		}
+		t.p.DoneRows++
+		if t.p.DoneRows%200 == 0 {
+			t.emit(false)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// pkKey 由主键列（含复合主键）构造存在性键
+func pkKey(row map[string]any, pk []string) string {
+	var sb strings.Builder
+	for i, c := range pk {
+		if i > 0 {
+			sb.WriteByte(0x1f)
+		}
+		sb.WriteString(normalizeValue(row[c]))
+	}
+	return sb.String()
+}
+
+// diffRowValues 逐列归一化对比，返回取值不一致的列（主键列在匹配行中必然一致，无需排除）
+func diffRowValues(src, tgt map[string]any, content []string) []ValueDiff {
+	var diffs []ValueDiff
+	for _, c := range content {
+		if normalizeValue(src[c]) != normalizeValue(tgt[c]) {
+			diffs = append(diffs, ValueDiff{Column: c, Source: src[c], Target: tgt[c]})
+		}
+	}
+	return diffs
+}
+
+// collectKeySamples PK 模式差异采样：按主键键排序保证确定性，最多取 compareSampleLimit 条
+func collectKeySamples(keys []string, rows map[string]map[string]any) []map[string]any {
+	if len(keys) == 0 {
+		return nil
+	}
+	sort.Strings(keys)
+	ret := make([]map[string]any, 0, compareSampleLimit)
+	for _, k := range keys {
+		if len(ret) >= compareSampleLimit {
+			break
+		}
+		if row, ok := rows[k]; ok {
+			ret = append(ret, row)
+		}
+	}
+	return ret
 }
 
 // countTableRows 统计表行数（COUNT 结果在不同驱动下可能是数值/字符串/[]byte，统一按文本解析）
@@ -678,7 +906,8 @@ func buildCompareSummary(tables []CompareTableResult) CompareSummary {
 		if tr.Columns != nil && !tr.Columns.Matched {
 			s.StructureDiff++
 		}
-		if tr.Data != nil && !tr.Data.Equal {
+		// 跳过类（结构不一致/无公共列等）不计入数据差异，避免与结构差异重复计数
+		if tr.Data != nil && !tr.Data.Equal && tr.Data.Mode != "skipped" {
 			s.DataDiff++
 		}
 		if structOK && dataOK {
@@ -707,7 +936,7 @@ func tableResultDesc(tr *CompareTableResult) string {
 	}
 	if tr.Data != nil {
 		switch {
-		case tr.Data.SkippedReason != "" && tr.Data.Mode == "rows":
+		case tr.Data.SkippedReason != "" && tr.Data.Mode != "count":
 			parts = append(parts, tr.Data.SkippedReason)
 		case tr.Data.Equal:
 			parts = append(parts, fmt.Sprintf("数据一致(%d行)", tr.Data.SourceRows))

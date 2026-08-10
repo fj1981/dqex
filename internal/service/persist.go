@@ -12,59 +12,50 @@ import (
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
 )
 
-// PersistMgr 统一持久化管理：连接配置 + 任务配置 + 执行历史（JSON 文件存储于 ~/.dbimpex/）
+// PersistMgr 统一持久化管理：连接配置 + 任务配置 + 执行历史（JSON 文件存储于数据根目录）
 type PersistMgr struct {
-	baseDir string
-	mu      sync.Mutex
+	baseDir                      string
+	tmpDir, uploadDir, exportDir string
+	mu                           sync.Mutex
 }
 
-// ExportDirName 默认导出目录名（二进制同级目录下的隐藏目录，与配置目录分离）
-const ExportDirName = ".dbimpex-exports"
+// 数据根目录（默认 ~/.dbimpex，--data-dir 可覆盖）下的子目录规划：
+//   - 根目录：配置存储（connections/tasks/history JSON）
+//   - uploads：Web 上传文件临时目录
+//   - tmp：任务处理临时目录（如 zip 解压，任务结束自动清理）
+//   - exports：最终生成产物目录（导出 zip/目录、对比报告 JSON）
+const (
+	UploadDirName = "uploads"
+	TempDirName   = "tmp"
+	ExportDirName = "exports"
+)
 
-// NewPersistMgr 创建持久化管理器（默认 ~/.dbimpex/）
+// NewPersistMgr 创建持久化管理器（默认 ~/.dbimpex/，子目录由 data 目录派生）
 func NewPersistMgr(baseDir string) (*PersistMgr, error) {
-	if baseDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
+	return NewPersistMgrWith(ResolveDirs(baseDir, nil))
+}
+
+// NewPersistMgrWith 按解析后的四类目录创建持久化管理器
+func NewPersistMgrWith(dirs ResolvedDirs) (*PersistMgr, error) {
+	for _, d := range []string{dirs.Data, dirs.Tmp, dirs.Uploads, dirs.Exports} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, err
 		}
-		baseDir = filepath.Join(home, ".dbimpex")
 	}
-	if err := os.MkdirAll(baseDir, 0o755); err != nil {
-		return nil, err
-	}
-	// 导出产物目录与配置目录分离：位于二进制同级目录下
-	if err := os.MkdirAll(filepath.Join(filepath.Dir(executablePath()), ExportDirName), 0o755); err != nil {
-		return nil, err
-	}
-	return &PersistMgr{baseDir: baseDir}, nil
+	return &PersistMgr{baseDir: dirs.Data, tmpDir: dirs.Tmp, uploadDir: dirs.Uploads, exportDir: dirs.Exports}, nil
 }
 
-// executablePath 返回当前可执行文件路径。
-// dev 模式（go run / dlv debug）下可执行文件位于系统临时目录，此时回退到当前工作目录，
-// 保证导出产物目录落在项目目录而非临时目录。
-func executablePath() string {
-	exe, err := os.Executable()
-	if err == nil {
-		if resolved, err2 := filepath.EvalSymlinks(exe); err2 == nil {
-			exe = resolved
-		}
-		if !strings.Contains(exe, string(os.PathSeparator)+"go-build") &&
-			!strings.Contains(exe, "debug") {
-			return exe
-		}
-	}
-	wd, _ := os.Getwd()
-	return filepath.Join(wd, "dbimpex")
-}
-
-// BaseDir 返回存储根目录
+// BaseDir 返回存储根目录（配置存储）
 func (p *PersistMgr) BaseDir() string { return p.baseDir }
 
-// ExportDir 返回导出文件默认目录：二进制同级目录下的隐藏目录（如 ./dbimpex 旁的 .dbimpex-exports/）
-func (p *PersistMgr) ExportDir() string {
-	return filepath.Join(filepath.Dir(executablePath()), ExportDirName)
-}
+// UploadDir 返回 Web 上传文件临时目录
+func (p *PersistMgr) UploadDir() string { return p.uploadDir }
+
+// TempDir 返回任务处理临时目录（zip 解压等，任务结束自动清理）
+func (p *PersistMgr) TempDir() string { return p.tmpDir }
+
+// ExportDir 返回最终生成产物目录（导出文件、对比报告）
+func (p *PersistMgr) ExportDir() string { return p.exportDir }
 
 func (p *PersistMgr) path(name string) string { return filepath.Join(p.baseDir, name) }
 

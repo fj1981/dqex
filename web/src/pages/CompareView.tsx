@@ -28,6 +28,7 @@ import TablePicker from "@/components/TablePicker"
 import { useAppStore } from "@/stores/app"
 import { cn } from "@/lib/utils"
 import type {
+  ChangedRow,
   CompareColumnItem,
   CompareOptions,
   CompareResult,
@@ -54,6 +55,8 @@ function defaultOptions(): CompareOptions {
     structureOnly: false,
     dataOnly: false,
     threshold: 1000,
+    ignoreColumns: [],
+    forceData: false,
   }
 }
 
@@ -210,6 +213,8 @@ export default function CompareView() {
       const payload: CompareOptions = {
         ...opts,
         tables: (opts.tables || []).length > 0 ? opts.tables : undefined,
+        ignoreColumns: (opts.ignoreColumns || []).length > 0 ? opts.ignoreColumns : undefined,
+        forceData: opts.forceData || undefined,
       }
       const { taskID } = await api.startCompare(payload, taskConfigId)
       setRunningTaskID(taskID)
@@ -300,10 +305,12 @@ export default function CompareView() {
       {step === 1 && (
         <div className="space-y-4">
           <Hint>
-            从源库勾选要对比的表；勾选库节点将级联选中库下所有表。不勾选任何表则对比库内全部表。
+            勾选要对比的表；仅目标库有的表也可勾选（带标记，对比时报告为「仅目标有」）。勾选库节点将级联选中库下所有表，不勾选任何表则对比库内全部表。
           </Hint>
           <TablePicker
             connId={opts.sourceConn}
+            extraConnId={opts.targetConn}
+            extraDb={targetDB || undefined}
             selected={opts.tables || []}
             showObjects={false}
             selectedDBs={opts.databases || []}
@@ -356,6 +363,24 @@ export default function CompareView() {
                   />
                   <span className="text-muted-foreground">行以内逐行比，超出仅比行数</span>
                 </div>
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="mr-0.5 text-sm font-medium">忽略列</span>
+                  <Input
+                    className="h-8 w-56 text-xs"
+                    placeholder="created_at,updated_at"
+                    value={(opts.ignoreColumns || []).join(",")}
+                    onChange={(e) => set({ ignoreColumns: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+                  />
+                  <span className="text-muted-foreground">内容对比时跳过这些列</span>
+                </div>
+                <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+                  <Checkbox
+                    checked={opts.forceData || false}
+                    onCheckedChange={(v) => set({ forceData: v === true })}
+                  />
+                  <span className="mr-0.5 text-sm font-medium">结构不一致时强制对比数据</span>
+                  <span className="text-muted-foreground">默认结构有差异则跳过数据对比</span>
+                </label>
               </div>
               <div className="text-xs text-muted-foreground">逐行对比基于两侧公共列，差异明细每侧最多 20 条</div>
             </div>
@@ -543,7 +568,8 @@ function matchesFilter(t: CompareTableResult, f: string): boolean {
   if (t.status !== "both") return false
   if (f === "matched") return (t.columns?.matched ?? true) && (t.data?.equal ?? true)
   if (f === "structure") return !!t.columns && !t.columns.matched
-  if (f === "data") return !!t.data && !t.data.equal
+  // 跳过类（结构不一致等）不计入数据差异，与后端汇总口径一致
+  if (f === "data") return !!t.data && !t.data.equal && t.data.mode !== "skipped"
   return true
 }
 
@@ -571,6 +597,7 @@ function tableDataDesc(d: NonNullable<CompareTableResult["data"]>): string {
   const parts: string[] = []
   if (d.missing) parts.push(`缺失${d.missing}行`)
   if (d.extra) parts.push(`多出${d.extra}行`)
+  if (d.changed) parts.push(`变化${d.changed}行`)
   return parts.join(" / ") || "有差异"
 }
 
@@ -604,6 +631,46 @@ function SampleTable({ title, rows, colOrder }: { title: string; rows?: Record<s
                 ))}
               </tr>
             ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// 变化行采样表格（PK 模式）：主键取值 + 差异列源/目标对照
+function ChangedTable({ rows }: { rows?: ChangedRow[] }) {
+  if (!rows || rows.length === 0) return null
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 text-xs font-medium text-muted-foreground">
+        主键匹配但内容不同（变化）（{rows.length} 条）
+      </div>
+      <div className="scrollbar-thin max-h-80 overflow-auto rounded-md border">
+        <table className="w-max min-w-full text-xs">
+          <thead className="sticky top-0 bg-muted">
+            <tr>
+              <th className="whitespace-nowrap px-2 py-1 text-left font-medium">主键</th>
+              <th className="whitespace-nowrap px-2 py-1 text-left font-medium">差异列</th>
+              <th className="whitespace-nowrap px-2 py-1 text-left font-medium">源</th>
+              <th className="whitespace-nowrap px-2 py-1 text-left font-medium">目标</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.flatMap((r, i) =>
+              r.diffs.map((d, j) => (
+                <tr key={`${i}-${j}`} className="border-t">
+                  {j === 0 && (
+                    <td rowSpan={r.diffs.length} className="max-w-52 truncate px-2 py-1 align-top font-mono" title={Object.entries(r.key).map(([k, v]) => `${k}=${v}`).join("  ")}>
+                      {Object.entries(r.key).map(([k, v]) => `${k}=${cellPreview(v)}`).join("  ")}
+                    </td>
+                  )}
+                  <td className="whitespace-nowrap px-2 py-1 font-mono">{d.column}</td>
+                  <td className="max-w-52 truncate px-2 py-1" title={cellPreview(d.source)}>{cellPreview(d.source)}</td>
+                  <td className="max-w-52 truncate px-2 py-1" title={cellPreview(d.target)}>{cellPreview(d.target)}</td>
+                </tr>
+              )),
+            )}
           </tbody>
         </table>
       </div>
@@ -675,11 +742,19 @@ function TableDiffDetail({ t }: { t: CompareTableResult }) {
             <div className="text-xs text-muted-foreground">{t.data.skippedReason}</div>
           )}
           {t.data.mode === "rows" && (
+            <div className="text-xs text-muted-foreground">
+              {t.data.keyColumns && t.data.keyColumns.length > 0
+                ? `按主键 ${t.data.keyColumns.join(",")} 判断有无，内容对比判断变化`
+                : "无主键，整行对比（变化会表现为缺失+多出）"}
+            </div>
+          )}
+          {t.data.mode === "rows" && (
             <div className={cn("grid gap-3", hasMissing && hasExtra && "lg:grid-cols-2")}>
               <SampleTable title="源有目标无（缺失）" rows={t.data.missingSamples} colOrder={t.data.sampleColumns} />
               <SampleTable title="目标有源无（多出）" rows={t.data.extraSamples} colOrder={t.data.sampleColumns} />
             </div>
           )}
+          {t.data.mode === "rows" && <ChangedTable rows={t.data.changedSamples} />}
         </div>
       )}
     </div>

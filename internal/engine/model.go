@@ -37,7 +37,7 @@ type TableCondition struct {
 type ExportOptions struct {
 	SourceConn string           `json:"sourceConn" yaml:"sourceConn"` // 已保存连接名（与 Source 二选一）
 	Source     *DBConnInfo      `json:"source,omitempty" yaml:"source,omitempty"`
-	OutputDir  string           `json:"outputDir" yaml:"outputDir"` // 导出根目录，默认二进制同级目录下的 .dbimpex-exports/
+	OutputDir  string           `json:"outputDir" yaml:"outputDir"` // 导出根目录，默认数据目录下 exports/
 	TaskName   string           `json:"taskName" yaml:"taskName"`   // 用于生成 zip 文件名
 	Databases  []string         `json:"databases" yaml:"databases"` // 指定库（空=连接配置的库）
 	Tables     []string         `json:"tables" yaml:"tables"`       // 指定表（nil=全部，空数组=不导出）
@@ -66,6 +66,7 @@ type ImportOptions struct {
 	ResetMode  ResetMode   `json:"resetMode" yaml:"resetMode"` // 重置模式: "" / "truncate" / "drop"
 	Backup     bool        `json:"backup" yaml:"backup"`       // 重置前在目标库创建备份表（默认 true，仅 reset != none 时生效）
 	BatchSize  int         `json:"batchSize" yaml:"batchSize"`
+	TempDir    string      `json:"-" yaml:"-"` // 任务处理临时目录（zip 解压），空=系统临时目录；运行时注入不入任务配置
 }
 
 // MigrateOptions 迁移选项
@@ -120,9 +121,11 @@ type CompareOptions struct {
 	Target        *DBConnInfo  `json:"target,omitempty" yaml:"target,omitempty"`
 	Tables        []string     `json:"tables,omitempty" yaml:"tables,omitempty"`
 	Aliases       []TableAlias `json:"aliases,omitempty" yaml:"aliases,omitempty"`
-	StructureOnly bool         `json:"structureOnly" yaml:"structureOnly"` // 仅比结构
-	DataOnly      bool         `json:"dataOnly" yaml:"dataOnly"`           // 仅比数据
-	Threshold     int          `json:"threshold" yaml:"threshold"`         // 数据逐行比较阈值，默认 1000
+	StructureOnly bool         `json:"structureOnly" yaml:"structureOnly"`                     // 仅比结构
+	DataOnly      bool         `json:"dataOnly" yaml:"dataOnly"`                               // 仅比数据
+	Threshold     int          `json:"threshold" yaml:"threshold"`                             // 数据逐行比较阈值，默认 1000
+	IgnoreColumns []string     `json:"ignoreColumns,omitempty" yaml:"ignoreColumns,omitempty"` // 数据内容对比忽略的列（如 created_at/updated_at，列名大小写不敏感）
+	ForceData     bool         `json:"forceData,omitempty" yaml:"forceData,omitempty"`         // 结构不一致时仍强制对比数据（默认跳过）
 }
 
 // TableAlias 表别名配对：源表 ↔ 目标表（不同名但逻辑对应的表）
@@ -189,13 +192,29 @@ type DataDiff struct {
 	Mode           string           `json:"mode"`
 	SourceRows     int64            `json:"sourceRows"`
 	TargetRows     int64            `json:"targetRows"`
-	Equal          bool             `json:"equal"`             // count 模式：行数相等；rows 模式：无差异
-	Missing        int              `json:"missing,omitempty"` // 源有目标无的行数（rows 模式）
-	Extra          int              `json:"extra,omitempty"`   // 目标有源无的行数（rows 模式）
+	Equal          bool             `json:"equal"`                // count 模式：行数相等；rows 模式：无差异
+	KeyColumns     []string         `json:"keyColumns,omitempty"` // 有无判断依据的主键列（PK 模式）；空=无主键整行比较
+	Missing        int              `json:"missing,omitempty"`    // 源有目标无的行数（rows 模式）
+	Extra          int              `json:"extra,omitempty"`      // 目标有源无的行数（rows 模式）
+	Changed        int              `json:"changed,omitempty"`    // 主键匹配但内容不同的行数（PK 模式）
 	MissingSamples []map[string]any `json:"missingSamples,omitempty"`
 	ExtraSamples   []map[string]any `json:"extraSamples,omitempty"`
-	SampleColumns  []string         `json:"sampleColumns,omitempty"` // 采样行列序（按源表列定义顺序），供前端按序渲染
-	SkippedReason  string           `json:"skippedReason,omitempty"` // 未逐行比较的原因说明
+	ChangedSamples []ChangedRow     `json:"changedSamples,omitempty"` // 变化行样例（主键值 + 差异列双侧取值）
+	SampleColumns  []string         `json:"sampleColumns,omitempty"`  // 采样行列序（按源表列定义顺序），供前端按序渲染
+	SkippedReason  string           `json:"skippedReason,omitempty"`  // 未逐行比较的原因说明
+}
+
+// ChangedRow 变化行样例：主键取值 + 差异列双侧取值（PK 模式：主键匹配但内容不同）
+type ChangedRow struct {
+	Key   map[string]any `json:"key"`   // 主键列取值
+	Diffs []ValueDiff    `json:"diffs"` // 取值不一致的列
+}
+
+// ValueDiff 单列取值差异
+type ValueDiff struct {
+	Column string `json:"column"`
+	Source any    `json:"source"`
+	Target any    `json:"target"`
 }
 
 // ExportDesc 导出描述文件（.desc）内容，与 .sql 文件同名，JSON 格式

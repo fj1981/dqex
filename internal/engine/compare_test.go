@@ -3,6 +3,10 @@ package engine
 import (
 	"testing"
 	"time"
+
+	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
+	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/dialect"
+	_ "gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/dialect/mysql" // 注册 mysql 方言供归一化测试使用
 )
 
 // ---- 值归一化 ----
@@ -214,7 +218,7 @@ func TestDiffColumns(t *testing.T) {
 		{Name: "name", DataType: "varchar(128)", Nullable: true},         // 类型不同
 		{Name: "extra", DataType: "int", Nullable: true},
 	}
-	d := diffColumns(src, tgt)
+	d := diffColumns(src, tgt, nil, nil)
 	if d.Matched {
 		t.Error("存在差异时 Matched 应为 false")
 	}
@@ -229,9 +233,43 @@ func TestDiffColumns(t *testing.T) {
 	}
 
 	// 完全一致
-	d2 := diffColumns(src, src)
+	d2 := diffColumns(src, src, nil, nil)
 	if !d2.Matched {
 		t.Error("相同列应 Matched")
+	}
+
+	// 整数显示宽度归一化（与 cydb 自动迁移共用方言归一化）：bigint vs bigint(20) 应视为一致
+	md, ok := dialect.GetMigrationDialect("mysql")
+	if !ok {
+		t.Fatal("mysql 方言未注册")
+	}
+	norm := func(dt string) string { return string(md.NormalizeColumnType(def.StandardFieldType(dt))) }
+	d3 := diffColumns(
+		[]ColumnItem{{Name: "id", DataType: "bigint", Nullable: false, PrimaryKey: true}},
+		[]ColumnItem{{Name: "id", DataType: "bigint(20)", Nullable: false, PrimaryKey: true}},
+		norm, norm,
+	)
+	if !d3.Matched {
+		t.Errorf("整数显示宽度差异应被方言归一化: %+v", d3.Different)
+	}
+}
+
+func TestMysqlDialectNormalize(t *testing.T) {
+	md, ok := dialect.GetMigrationDialect("mysql")
+	if !ok {
+		t.Fatal("mysql 方言未注册")
+	}
+	cases := []struct{ in, want string }{
+		{"bigint(20)", "bigint"},
+		{"int(11) unsigned", "int unsigned"},
+		{"tinyint(1)", "tinyint"},
+		{"varchar(64)", "varchar(64)"},         // 长度是存储语义，不剥离
+		{"int(5) zerofill", "int(5) zerofill"}, // ZEROFILL 不剥离
+	}
+	for _, c := range cases {
+		if got := string(md.NormalizeColumnType(def.StandardFieldType(c.in))); got != c.want {
+			t.Errorf("NormalizeColumnType(%q) = %q, 期望 %q", c.in, got, c.want)
+		}
 	}
 }
 
@@ -278,12 +316,90 @@ func TestFilterTablesBare(t *testing.T) {
 	if got := filterTablesBare(all, []string{"db1.users"}, "db1"); len(got) != 1 || got[0] != "users" {
 		t.Errorf("限定名过滤失败: %v", got)
 	}
-	// 其他库的限定名不生效
-	if got := filterTablesBare(all, []string{"other.users"}, "db1"); len(got) != 0 {
-		t.Errorf("其他库限定名不应生效: %v", got)
+	// 其他库前缀的限定名降级按裸名生效（对比作用域为单个库对，目标独有表的限定前缀可能与当前侧库名不同）
+	if got := filterTablesBare(all, []string{"other.users"}, "db1"); len(got) != 1 || got[0] != "users" {
+		t.Errorf("其他库限定名应降级按裸名过滤: %v", got)
 	}
 	// 大小写不敏感
 	if got := filterTablesBare(all, []string{"USERS"}, "db1"); len(got) != 1 {
 		t.Errorf("大小写不敏感过滤失败: %v", got)
+	}
+}
+
+// ---- PK 模式数据对比 ----
+
+func TestPkKey(t *testing.T) {
+	// 复合主键：多列拼接有序
+	row := map[string]any{"id": int64(1), "tenant": "a", "v": "x"}
+	k1 := pkKey(row, []string{"id", "tenant"})
+	k2 := pkKey(map[string]any{"id": int64(1), "tenant": "a", "v": "y"}, []string{"id", "tenant"})
+	if k1 != k2 {
+		t.Errorf("主键相同应得到相同键: %q vs %q", k1, k2)
+	}
+	// 列顺序不同 → 键不同（避免 (1,a) 与 (a,1) 串键）
+	if pkKey(row, []string{"id", "tenant"}) == pkKey(map[string]any{"id": "a", "tenant": int64(1)}, []string{"id", "tenant"}) {
+		t.Errorf("不同主键取值不应碰撞")
+	}
+}
+
+func TestDiffRowValues(t *testing.T) {
+	src := map[string]any{"id": int64(2), "k": "region", "v": "cn", "updated_at": "2024-01-01 00:00:00"}
+	tgt := map[string]any{"id": int64(2), "k": "region", "v": "us", "updated_at": "2024-06-01 00:00:00"}
+
+	// 全列对比：v 与 updated_at 差异都应命中
+	diffs := diffRowValues(src, tgt, []string{"id", "k", "v", "updated_at"})
+	if len(diffs) != 2 {
+		t.Fatalf("期望 2 列差异，实际 %d: %+v", len(diffs), diffs)
+	}
+
+	// 忽略 updated_at 后仅剩 v（忽略列不传入 content）
+	diffs = diffRowValues(src, tgt, []string{"id", "k", "v"})
+	if len(diffs) != 1 || diffs[0].Column != "v" {
+		t.Fatalf("忽略时间列后期望仅 v 差异，实际 %+v", diffs)
+	}
+	if diffs[0].Source != "cn" || diffs[0].Target != "us" {
+		t.Errorf("差异取值不正确: %+v", diffs[0])
+	}
+
+	// 完全一致无差异
+	if d := diffRowValues(src, src, []string{"id", "k", "v"}); len(d) != 0 {
+		t.Errorf("相同行不应有差异: %+v", d)
+	}
+}
+
+func TestIsPKColumn(t *testing.T) {
+	pk := []string{"id", "tenant"}
+	if !isPKColumn("id", pk) || !isPKColumn("tenant", pk) {
+		t.Error("主键列应命中")
+	}
+	if isPKColumn("v", pk) {
+		t.Error("非主键列不应命中")
+	}
+	if isPKColumn("id", nil) {
+		t.Error("无主键时不应命中")
+	}
+}
+
+func TestCollectKeySamples(t *testing.T) {
+	keys := []string{}
+	rows := map[string]map[string]any{}
+	for i := 0; i < 30; i++ {
+		key := string(rune('a' + i))
+		keys = append(keys, key)
+		rows[key] = map[string]any{"id": i}
+	}
+	// 空键返回 nil
+	if s := collectKeySamples(nil, rows); s != nil {
+		t.Errorf("空键应返回 nil: %v", s)
+	}
+	s1 := collectKeySamples(keys, rows)
+	s2 := collectKeySamples(keys, rows)
+	if len(s1) != compareSampleLimit {
+		t.Fatalf("样本数期望 %d，实际 %d", compareSampleLimit, len(s1))
+	}
+	for i := range s1 {
+		if s1[i]["id"] != s2[i]["id"] {
+			t.Fatalf("样本不确定: 第%d条 %v vs %v", i, s1[i], s2[i])
+		}
 	}
 }

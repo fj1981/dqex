@@ -216,7 +216,7 @@ export default function ExportView() {
                     <Input
                       value={opts.outputDir}
                       onChange={(e) => set({ outputDir: e.target.value })}
-                      placeholder="留空使用默认（程序目录下的 .dbimpex-exports）"
+                      placeholder="留空使用默认（数据目录下的 exports）"
                     />
                   </div>
                 </div>

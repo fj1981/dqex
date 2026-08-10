@@ -16,7 +16,7 @@ func nowMillis() int64 { return time.Now().UnixMilli() }
 
 // RunWeb 启动 Web 服务
 func RunWeb(svc *service.Service, port int) {
-	eb := cygin.NewEndpointBuilder("/api", "dbimpex API", []string{"dbimpex"})
+	eb := cygin.NewEndpointBuilder("/api", "dbx API", []string{"dbx"})
 	apiGroup := eb.Build(
 		// 连接管理
 		eb.GROUP("/connections", []cygin.APIHandler{
@@ -79,6 +79,6 @@ func RunWeb(svc *service.Service, port int) {
 	}
 
 	server := cygin.NewServer(opts...)
-	cylog.Infof("dbimpex Web 服务启动: http://localhost:%d", port)
+	cylog.Infof("dbx Web 服务启动: http://localhost:%d", port)
 	_ = server.Run(context.Background())
 }

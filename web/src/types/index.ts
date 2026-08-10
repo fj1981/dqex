@@ -122,6 +122,8 @@ export interface CompareOptions {
   structureOnly: boolean
   dataOnly: boolean
   threshold: number // 数据逐行比较阈值，默认 1000
+  ignoreColumns?: string[] // 数据内容对比忽略的列（如 created_at/updated_at）
+  forceData?: boolean // 结构不一致时仍强制对比数据（默认跳过）
 }
 
 export interface CompareColumnItem {
@@ -139,16 +141,25 @@ export interface CompareColumnDiff {
 }
 
 export interface CompareDataDiff {
-  mode: "rows" | "count" // rows=逐行比较 / count=仅比较行数
+  mode: "rows" | "count" | "skipped" // rows=逐行比较 / count=仅比较行数 / skipped=已跳过（如结构不一致）
   sourceRows: number
   targetRows: number
   equal: boolean
+  keyColumns?: string[] // 有无判断依据的主键列（PK 模式）；空=无主键整行比较
   missing?: number // 源有目标无（rows 模式）
   extra?: number   // 目标有源无（rows 模式）
+  changed?: number // 主键匹配但内容不同（PK 模式）
   missingSamples?: Record<string, unknown>[]
   extraSamples?: Record<string, unknown>[]
+  changedSamples?: ChangedRow[] // 变化行样例（主键值 + 差异列双侧取值）
   sampleColumns?: string[] // 采样行列序（按源表列定义顺序）
   skippedReason?: string
+}
+
+// 变化行样例：主键取值 + 取值不一致的列双侧对照
+export interface ChangedRow {
+  key: Record<string, unknown>
+  diffs: { column: string; source: unknown; target: unknown }[]
 }
 
 export interface CompareTableResult {

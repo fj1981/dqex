@@ -25,9 +25,18 @@ type Service struct {
 	runner  *TaskRunner
 }
 
-// NewService 创建业务服务
-func NewService(baseDir string) (*Service, error) {
-	persist, err := NewPersistMgr(baseDir)
+// NewService 创建业务服务（自动发现全局配置 config.yaml）
+func NewService(dataDirFlag string) (*Service, error) {
+	return NewServiceWith(dataDirFlag, "")
+}
+
+// NewServiceWith 创建业务服务：configFile 显式指定全局配置，空则按默认顺序发现
+func NewServiceWith(dataDirFlag, configFile string) (*Service, error) {
+	cfg, err := LoadAppConfig(FindConfigFile(configFile))
+	if err != nil {
+		return nil, err
+	}
+	persist, err := NewPersistMgrWith(ResolveDirs(dataDirFlag, cfg))
 	if err != nil {
 		return nil, err
 	}
@@ -174,6 +183,7 @@ func (s *Service) RunImport(ctx context.Context, opts ImportOptions, cb Progress
 	opts.Target = target
 	opts.BatchSize = normalizeBatchSize(opts.BatchSize)
 	opts.ResetMode = normalizeReset(opts.ResetMode)
+	opts.TempDir = s.persist.TempDir() // 任务处理临时目录（zip 解压）
 	_, err = engine.RunImport(ctx, opts, cb)
 	return err
 }
@@ -215,6 +225,39 @@ func (s *Service) RunCompare(ctx context.Context, opts CompareOptions, cb Progre
 		return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("请先选择对比的库"))
 	}
 	return engine.RunCompare(ctx, opts, cb)
+}
+
+// RunCompareRecorded 执行对比并记录历史：结果落盘 exports/compare-<ID>.json，
+// 返回记录 ID，供 `compare show --id <ID>` 回看差异明细（CLI 同步执行路径用）
+func (s *Service) RunCompareRecorded(ctx context.Context, opts CompareOptions, cb ProgressFunc, taskConfigID string) (string, *CompareResult, error) {
+	taskID := newTaskID()
+	record := ExecutionRecord{ID: taskID, TaskType: "compare", TaskConfigID: taskConfigID, Status: "running", StartedAt: time.Now().UnixMilli(),
+		Target: fmt.Sprintf("%s → %s · %s", s.connLabel(opts.SourceConn, opts.Source), s.connLabel(opts.TargetConn, opts.Target), targetTables(nil, opts.Tables))}
+	_ = s.persist.SaveHistory(record)
+
+	result, err := s.RunCompare(ctx, opts, cb)
+
+	record.FinishedAt = time.Now().UnixMilli()
+	record.Duration = record.FinishedAt - record.StartedAt
+	if err != nil {
+		record.Status = "error"
+		record.ErrorMsg = err.Error()
+	} else {
+		record.Status = "done"
+		outputPath := filepath.Join(s.persist.ExportDir(), "compare-"+taskID+".json")
+		if e := saveCompareResult(outputPath, result); e != nil {
+			cylog.Errorf("保存对比结果失败: %v", e)
+		} else {
+			record.OutputPath = outputPath
+		}
+		sm := result.Summary
+		record.Summary = fmt.Sprintf("%d项, 一致%d, 结构差异%d, 数据差异%d", sm.Total, sm.Matched, sm.StructureDiff, sm.DataDiff)
+		record.TotalUnits = sm.Total
+	}
+	if e := s.persist.SaveHistory(record); e != nil {
+		cylog.Errorf("保存执行历史失败: %v", e)
+	}
+	return taskID, result, err
 }
 
 func normalizeReset(mode ResetMode) ResetMode {

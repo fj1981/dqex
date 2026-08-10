@@ -152,7 +152,7 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 		files = []importFile{{db: opts.Target.DBName, name: dbName, path: opts.InputPath}}
 	case ".zip":
 		var err error
-		tempDir, err = os.MkdirTemp("", "dbimpex_import_*")
+		tempDir, err = os.MkdirTemp(opts.TempDir, "dbimpex_import_*")
 		if err != nil {
 			return nil, err
 		}

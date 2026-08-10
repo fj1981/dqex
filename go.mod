@@ -6,7 +6,9 @@ require (
 	github.com/gin-gonic/gin v1.10.1
 	github.com/pingcap/tidb/parser v0.0.0-20231013125129-93a834a6bf8d
 	github.com/rs/xid v1.6.0
+	github.com/spf13/cobra v1.10.1
 	gitlab.mycyclone.com/rpa-platform/pk-infrakit-g v0.1.0
+	golang.org/x/term v0.37.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -43,6 +45,7 @@ require (
 	github.com/huandu/go-clone v1.7.3 // indirect
 	github.com/huandu/go-sqlbuilder v1.38.1 // indirect
 	github.com/huandu/xstrings v1.4.0 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jmoiron/sqlx v1.4.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
@@ -64,6 +67,7 @@ require (
 	github.com/sony/sonyflake v1.3.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
+	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/swaggo/files v1.0.1 // indirect
 	github.com/swaggo/gin-swagger v1.6.0 // indirect
 	github.com/swaggo/swag v1.8.12 // indirect
@@ -84,3 +88,5 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
+
+replace gitlab.mycyclone.com/rpa-platform/pk-infrakit-g => /Users/fanjun/project/pk-infrakit-g

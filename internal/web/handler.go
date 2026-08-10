@@ -171,7 +171,7 @@ func handleImportUpload(svc *service.Service) gin.HandlerFunc {
 		if ext != ".sql" && ext != ".zip" {
 			return nil, cygin.NewError(service.ErrFileType, cygin.WithErrPrint(), cygin.WithErrDetailf("仅支持 .sql 或 .zip 文件: %s", name))
 		}
-		dir := filepath.Join(svc.Persist().BaseDir(), "uploads")
+		dir := svc.Persist().UploadDir()
 		saveTo := filepath.Join(dir, fmt.Sprintf("%d%s", nowMillis(), ext))
 		if err := c.SaveUploadedFile(req.File, saveTo); err != nil {
 			return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetailf("保存上传文件失败: %v", err))

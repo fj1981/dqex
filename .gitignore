@@ -9,9 +9,11 @@ web/node_modules/
 
 # 运行期导出/构建产物
 .dbimpex-exports/
-web/tsconfig.app.tsbuildinfo
+/exports/
+*.tsbuildinfo
 
 # IDE / 系统
 .vscode/
 .qoder/
 .DS_Store
+dbx

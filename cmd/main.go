@@ -1,10 +1,10 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 
+	"dbimpex/internal/cli"
 	"dbimpex/internal/service"
 	"dbimpex/internal/web"
 
@@ -12,27 +12,22 @@ import (
 )
 
 func main() {
-	// CLI 子命令优先
-	if len(os.Args) > 1 && service.IsCLISubcommand(os.Args[1]) {
-		service.RunCLI(os.Args[1:])
+	// CLI 子命令优先：Execute 返回 nil 表示已执行 CLI 子命令（或 help），直接退出
+	args := cli.Execute()
+	if args == nil {
 		return
 	}
-	runWeb()
+	runWeb(args)
 }
 
 // runWeb 启动 Web 服务（默认模式）
-func runWeb() {
-	fs := flag.NewFlagSet("web", flag.ExitOnError)
-	port := fs.Int("port", 8181, "Web 服务端口")
-	dataDir := fs.String("data-dir", "", "数据存储目录（默认 ~/.dbimpex）")
-	_ = fs.Parse(os.Args[1:])
-
+func runWeb(args *cli.WebArgs) {
 	cylog.InitDefault()
 
-	svc, err := service.NewService(*dataDir)
+	svc, err := service.NewServiceWith(args.DataDir, args.ConfigFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "初始化服务失败: %v\n", err)
 		os.Exit(1)
 	}
-	web.RunWeb(svc, *port)
+	web.RunWeb(svc, args.Port)
 }

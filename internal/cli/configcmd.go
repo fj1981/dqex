@@ -1,0 +1,61 @@
+package cli
+
+// 点导入：CLI 层大量复用 service 包的模型别名与入口（NewService/选项模型/错误码）
+import (
+	. "dbimpex/internal/service"
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+)
+
+var configCmd = &cobra.Command{
+	Use:     "config",
+	Aliases: []string{"cfg"},
+	Short:   "查看全局配置（数据目录等）",
+	Long: `查看解析后的全局配置（四类数据目录）。
+
+全局配置文件为 config.yaml，查找顺序：
+  --config-file > 环境变量 DBIMPEX_CONFIG > ~/.dbimpex/config.yaml
+
+目录优先级：--data-dir > 配置文件 dirs.data > 默认 ~/.dbimpex；
+其余目录：配置文件显式值 > 由 data 目录派生。
+使用 dbx config --gen 输出配置模板。`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if v, _ := cmd.Flags().GetBool("gen"); v {
+			os.Stdout.WriteString(appConfigTemplate)
+			return nil
+		}
+		cfgPath := FindConfigFile(webArgs.ConfigFile)
+		cfg, err := LoadAppConfig(cfgPath)
+		if err != nil {
+			return err
+		}
+		dirs := ResolveDirs(webArgs.DataDir, cfg)
+		if cfgPath == "" {
+			fmt.Println("配置文件: （未发现，使用默认值；dbx config --gen 可生成模板）")
+		} else {
+			fmt.Printf("配置文件:     %s\n", cfgPath)
+		}
+		fmt.Printf("配置保存目录: %s\n", dirs.Data)
+		fmt.Printf("任务临时目录: %s\n", dirs.Tmp)
+		fmt.Printf("上传临时目录: %s\n", dirs.Uploads)
+		fmt.Printf("最终产物目录: %s\n", dirs.Exports)
+		return nil
+	},
+}
+
+func init() {
+	configCmd.Flags().Bool("gen", false, "输出全局配置模板到标准输出")
+	rootCmd.AddCommand(configCmd)
+}
+
+const appConfigTemplate = `# dbx 全局配置
+# 默认位置 ~/.dbimpex/config.yaml，可用 --config-file 或环境变量 DBIMPEX_CONFIG 指定
+# 留空的项由 data 目录派生
+dirs:
+  data: ""        # ① 配置保存目录（connections/tasks/history），默认 ~/.dbimpex
+  tmp: ""         # ② 任务处理临时目录，默认 <data>/tmp
+  uploads: ""     # ③ Web 上传临时目录，默认 <data>/uploads
+  exports: ""     # ④ 最终生成产物目录，默认 <data>/exports
+`
