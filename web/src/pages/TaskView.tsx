@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { FileDown, FileUp, ArrowLeftRight, Scale, ClipboardList, Eye, Pencil, Play, Search, Trash2 } from "lucide-react"
+import { FileDown, FileUp, ArrowLeftRight, Scale, BookOpenText, ClipboardList, Eye, Pencil, Play, Search, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -26,6 +26,7 @@ const TYPE_ICON: Record<string, { icon: React.ReactNode; cls: string }> = {
   import: { icon: <FileUp className="h-5 w-5" />, cls: "bg-green-50 text-green-500" },
   migrate: { icon: <ArrowLeftRight className="h-5 w-5" />, cls: "bg-purple-50 text-purple-500" },
   compare: { icon: <Scale className="h-5 w-5" />, cls: "bg-orange-50 text-orange-500" },
+  dictionary: { icon: <BookOpenText className="h-5 w-5" />, cls: "bg-cyan-50 text-cyan-600" },
 }
 
 // 连接主键（或旧配置中的连接名）转显示名，未命中时回退原值
@@ -74,6 +75,12 @@ function taskSummary(task: TaskConfig, conns: ConnInfo[]): string[] {
     if (o.ignoreColumns?.length) extras.push(`忽略 ${o.ignoreColumns.length} 列`)
     if (o.forceData) extras.push("强制对比数据")
     lines.push(extras.join("，"))
+  } else if (task.type === "dictionary" && task.dictionaryOpts) {
+    const o = task.dictionaryOpts
+    lines.push(`源: ${connLabel(o.sourceConn, conns)}`)
+    const tbl = tablesSummary(o.tables)
+    if (tbl) lines.push(`表: ${tbl}`)
+    lines.push(`模式: 结构+注释${o.compress ? "，zip 打包" : ""}`)
   }
   return lines
 }
@@ -163,6 +170,7 @@ export default function TaskView() {
           <TabsTrigger value="import">导入</TabsTrigger>
           <TabsTrigger value="migrate">迁移</TabsTrigger>
           <TabsTrigger value="compare">对比</TabsTrigger>
+          <TabsTrigger value="dictionary">字典</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -170,7 +178,7 @@ export default function TaskView() {
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed bg-background py-16 text-center">
           <ClipboardList className="h-8 w-8 text-muted-foreground/50" />
           <div className="text-sm text-muted-foreground">暂无任务配置</div>
-          <div className="text-xs text-muted-foreground">可在「导出 / 导入 / 迁移 / 对比」页保存配置后在此统一管理</div>
+          <div className="text-xs text-muted-foreground">可在「导出 / 导入 / 迁移 / 对比 / 字典」页保存配置后在此统一管理</div>
         </div>
       )}
 

@@ -278,7 +278,7 @@ export default function ProgressView({ taskID, taskType, onSaveTask, onBack, wid
         {/* 操作（终态才展示；运行中取消按钮已在进度行内联） */}
         {!isRunning && (
           <div className="flex shrink-0 items-center justify-end gap-2 border-t pt-3">
-            {state === "done" && taskType === "export" && (
+            {state === "done" && (taskType === "export" || taskType === "dictionary") && (
               <>
                 <Button variant="outline" size="sm" asChild>
                   <a href={api.downloadUrl(taskID)} download>

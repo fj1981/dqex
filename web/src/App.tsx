@@ -3,6 +3,7 @@ import { HashRouter, NavLink, Route, Routes, useLocation, useNavigate } from "re
 import { toast } from "sonner"
 import {
   ArrowLeftRight,
+  BookOpenText,
   ClipboardList,
   Database,
   FileDown,
@@ -26,6 +27,7 @@ import ExportView from "@/pages/ExportView"
 import ImportView from "@/pages/ImportView"
 import MigrateView from "@/pages/MigrateView"
 import CompareView from "@/pages/CompareView"
+import DictionaryView from "@/pages/DictionaryView"
 import { TASK_TYPE_LABEL } from "@/types"
 import { cn, formatTime, shortPaths } from "@/lib/utils"
 
@@ -35,6 +37,7 @@ const NAV = [
   { path: "/import", label: "导入", desc: "文件 → 数据库", icon: FileUp },
   { path: "/migrate", label: "迁移", desc: "数据库 → 数据库", icon: ArrowLeftRight },
   { path: "/compare", label: "对比", desc: "数据库 ↔ 数据库", icon: Scale },
+  { path: "/dictionary", label: "数据字典", desc: "结构 → Excel", icon: BookOpenText },
 ]
 
 // 历史状态样式：底色胶囊 + 状态圆点，强化状态辨识度
@@ -90,6 +93,7 @@ const TYPE_BY_PATH: Record<string, string> = {
   "/import": "import",
   "/migrate": "migrate",
   "/compare": "compare",
+  "/dictionary": "dictionary",
 }
 
 function RightPanel() {
@@ -240,6 +244,20 @@ function RightPanel() {
                       <FolderOpen className="h-3 w-3" />
                     </Button>
                   )}
+                  {h.taskType === "dictionary" && h.status === "done" && h.outputPath && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                      title="在文件管理器中定位数据字典文件"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        openDir(h.id)
+                      }}
+                    >
+                      <FolderOpen className="h-3 w-3" />
+                    </Button>
+                  )}
                   {h.status !== "running" && (
                     <Button
                       variant="ghost"
@@ -300,7 +318,7 @@ function Layout() {
             <Database className="h-4 w-4" />
           </span>
           <span className="font-medium">数据库工作台</span>
-          <Badge variant="secondary" className="ml-1 font-normal">导入 · 导出 · 迁移 · 对比</Badge>
+          <Badge variant="secondary" className="ml-1 font-normal">导入 · 导出 · 迁移 · 对比 · 字典</Badge>
         </div>
         <span className="text-xs text-muted-foreground">MySQL / PostgreSQL / Oracle</span>
       </header>
@@ -313,6 +331,7 @@ function Layout() {
             <Route path="/import" element={<ImportView />} />
             <Route path="/migrate" element={<MigrateView />} />
             <Route path="/compare" element={<CompareView />} />
+            <Route path="/dictionary" element={<DictionaryView />} />
           </Routes>
         </main>
         <RightPanel />

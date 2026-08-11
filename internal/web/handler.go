@@ -135,6 +135,31 @@ func handleExport(svc *service.Service) gin.HandlerFunc {
 	})
 }
 
+// ==================== 数据字典 ====================
+
+// DictionaryReq 数据字典请求
+type DictionaryReq struct {
+	Options      service.DictionaryOptions `json:"options"`
+	Compress     *bool                     `json:"compress"` // 未指定时默认 true
+	TaskConfigID string                    `json:"taskConfigId"`
+}
+
+func handleDictionary(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req DictionaryReq) (StartResp, error) {
+		opts := req.Options
+		if req.Compress != nil {
+			opts.Compress = *req.Compress
+		} else {
+			opts.Compress = true
+		}
+		taskID, err := svc.StartDictionary(opts, req.TaskConfigID)
+		if err != nil {
+			return StartResp{}, err
+		}
+		return StartResp{TaskID: taskID}, nil
+	})
+}
+
 // ==================== 导入 ====================
 
 // ImportReq 导入请求

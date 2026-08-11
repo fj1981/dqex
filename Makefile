@@ -83,8 +83,8 @@ dev-debug: web-deps web-stub stop
 	cd web && yarn dev
 
 # 跨平台打包：输出 release/dbx-$(VERSION)-{os}-{arch}.zip（CGO 关闭，纯静态二进制）；
-# zip 内为干净的 dbx（Windows 为 dbx.exe）+ 安装脚本（unix: install.sh / windows: install.bat），解压即用；
-# install.bat 打包时转 CRLF + GBK，避免 Windows cmd（GBK 代码页）中文乱码与解析问题
+# zip 内包含 dbx（Windows 为 dbx.exe）+ 安装/启动/停止/查看链接脚本 + CLI.md 使用手册，解压即用；
+# install.bat/start.bat/stop.bat 打包时转 CRLF + GBK，避免 Windows cmd（GBK 代码页）中文乱码与解析问题
 release: web-dist
 	@rm -rf release && mkdir -p release
 	@for p in $(PLATFORMS); do \
@@ -95,7 +95,15 @@ release: web-dist
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "$(LDFLAGS_REL)" -o $$stage/$$bin ./cmd || exit 1; \
 		if [ "$$os" = "windows" ]; then \
 			perl -pe 's/\r?\n/\r\n/' scripts/install.bat | iconv -f UTF-8 -t GBK > $$stage/install.bat || cp scripts/install.bat $$stage/install.bat; \
-		else cp scripts/install.sh $$stage/ && chmod +x $$stage/install.sh; fi; \
+			perl -pe 's/\r?\n/\r\n/' scripts/start.bat | iconv -f UTF-8 -t GBK > $$stage/start.bat || cp scripts/start.bat $$stage/start.bat; \
+			perl -pe 's/\r?\n/\r\n/' scripts/stop.bat | iconv -f UTF-8 -t GBK > $$stage/stop.bat || cp scripts/stop.bat $$stage/stop.bat; \
+		else \
+			cp scripts/install.sh $$stage/ && chmod +x $$stage/install.sh; \
+			cp scripts/start.sh $$stage/ && chmod +x $$stage/start.sh; \
+			cp scripts/stop.sh $$stage/ && chmod +x $$stage/stop.sh; \
+			cp scripts/url.sh $$stage/ && chmod +x $$stage/url.sh; \
+		fi; \
+		cp CLI.md $$stage/; \
 		(cd $$stage && zip -q ../dbx-$(VERSION)-$$os-$$arch.zip *) || exit 1; \
 		rm -rf $$stage; \
 	done

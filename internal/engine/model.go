@@ -56,6 +56,17 @@ type ExportOptions struct {
 	Gzip bool `json:"gzip" yaml:"gzip"`
 }
 
+// DictionaryOptions 数据字典导出选项：按选定库表生成单个 .xlsx 数据字典（总览 + 每库字段明细）
+type DictionaryOptions struct {
+	SourceConn string      `json:"sourceConn" yaml:"sourceConn"` // 已保存连接名（与 Source 二选一）
+	Source     *DBConnInfo `json:"source,omitempty" yaml:"source,omitempty"`
+	OutputDir  string      `json:"outputDir" yaml:"outputDir"` // 导出根目录，默认数据目录下 exports/
+	TaskName   string      `json:"taskName" yaml:"taskName"`   // 用于生成产物文件名
+	Databases  []string    `json:"databases" yaml:"databases"` // 指定库（空=连接配置的库）
+	Tables     []string    `json:"tables" yaml:"tables"`       // 指定表（nil=全部，空数组=不导出）
+	Compress   bool        `json:"compress" yaml:"compress"`   // 是否打包 zip，默认 true
+}
+
 // ResetMode 重置数据模式
 type ResetMode string
 

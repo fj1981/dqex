@@ -91,6 +91,17 @@ export interface ExportOptions {
 
 export type ResetMode = "" | "truncate" | "drop"
 
+// 数据字典导出选项：产物为单个 .xlsx（总览 + 每库字段明细）
+export interface DictionaryOptions {
+  sourceConn: string
+  source?: DBConn | null
+  outputDir: string
+  taskName: string
+  databases?: string[]
+  tables?: string[]
+  compress: boolean
+}
+
 export interface ImportOptions {
   targetConn: string
   target?: DBConn | null
@@ -224,7 +235,7 @@ export interface Progress {
 
 // ---- 任务配置 / 执行历史 ----
 
-export type TaskType = "export" | "import" | "migrate" | "compare"
+export type TaskType = "export" | "import" | "migrate" | "compare" | "dictionary"
 
 export interface TaskConfig {
   id: string
@@ -234,6 +245,7 @@ export interface TaskConfig {
   importOpts?: ImportOptions | null
   migrateOpts?: MigrateOptions | null
   compareOpts?: CompareOptions | null
+  dictionaryOpts?: DictionaryOptions | null
   createdAt: number
   updatedAt: number
   isLastUsed: boolean
@@ -287,6 +299,7 @@ export const TASK_TYPE_LABEL: Record<string, string> = {
   import: "导入",
   migrate: "迁移",
   compare: "对比",
+  dictionary: "数据字典",
 }
 
 export const RESET_MODE_LABEL: Record<string, string> = {

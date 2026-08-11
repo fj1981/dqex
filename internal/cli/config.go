@@ -88,6 +88,16 @@ type importConfig struct {
 	BatchSize int            `yaml:"batch_size"`
 }
 
+type dictionaryConfig struct {
+	Source    *cliConnConfig `yaml:"source"`
+	SourceRef string         `yaml:"source_ref"`
+	Output    string         `yaml:"output"` // 输出目录或 .zip 文件路径
+	Name      string         `yaml:"name"`   // 任务名（用于生成文件名）
+	Databases []string       `yaml:"databases"`
+	Tables    []string       `yaml:"tables"`
+	Compress  *bool          `yaml:"compress"` // 默认 true
+}
+
 type migrateConfig struct {
 	Source     *cliConnConfig `yaml:"source"`
 	Target     *cliConnConfig `yaml:"target"`
@@ -188,6 +198,21 @@ func loadExportConfig(path string) (*exportConfig, error) {
 		return nil, err
 	}
 	return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("配置文件中未找到导出配置（需包含 source 段）: %s", path))
+}
+
+func loadDictionaryConfig(path string) (*dictionaryConfig, error) {
+	data, err := readConfigFile(path)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := parseYAML(data, path, dictionaryConfig{})
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Source != nil || cfg.SourceRef != "" {
+		return cfg, nil
+	}
+	return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("配置文件中未找到数据字典配置（需包含 source 段）: %s", path))
 }
 
 func loadImportConfig(path string) (*importConfig, error) {
@@ -397,6 +422,16 @@ reset: ""              # "" 直接追加 | truncate | drop
 backup: true
 batch_size: 500
 `,
+	"dictionary": `# dbx dictionary 独立配置文件（dbx dictionary --config dictionary.yaml）
+source:
+` + indentBlock(tplConn, "  ") + `# output: ./dictionary.zip  # 输出 .zip 文件路径或目录（留空=默认导出目录）
+# name: mydict              # 任务名（用于生成文件名）
+# databases:                # 指定库，留空=连接配置的库
+#   - db1
+# tables:                   # 指定表，留空=全部
+#   - table_a
+compress: true              # 打包为 zip
+`,
 }
 
 // indentBlock 给模板非空行加缩进前缀
@@ -534,6 +569,25 @@ func exportOptsFromConfig(cfg *exportConfig) (ExportOptions, error) {
 	return opts, nil
 }
 
+func dictionaryOptsFromConfig(cfg *dictionaryConfig) (DictionaryOptions, error) {
+	opts := DictionaryOptions{Compress: true}
+	if cfg.Source != nil {
+		opts.Source = cfg.Source.toConn()
+	}
+	opts.SourceConn = cfg.SourceRef
+	if opts.Source == nil && opts.SourceConn == "" {
+		return opts, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少源连接：配置 source/source_ref 段或 --source-*/--source-conn"))
+	}
+	opts.OutputDir, _ = splitOutput(cfg.Output)
+	opts.TaskName = cfg.Name
+	opts.Databases = cfg.Databases
+	opts.Tables = cfg.Tables
+	if cfg.Compress != nil {
+		opts.Compress = *cfg.Compress
+	}
+	return opts, nil
+}
+
 func importOptsFromConfig(cfg *importConfig) (ImportOptions, error) {
 	opts := ImportOptions{Backup: true}
 	if cfg.Target != nil {
@@ -599,10 +653,10 @@ func migrateOptsFromConfig(cfg *migrateConfig) (MigrateOptions, error) {
 func detectConfigKind(data []byte, hint string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(hint)) {
 	case "":
-	case "export", "import", "migrate", "compare":
+	case "export", "import", "migrate", "compare", "dictionary":
 		return strings.ToLower(strings.TrimSpace(hint)), nil
 	default:
-		return "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("无效的任务类型: %s（可选 export/import/migrate/compare）", hint))
+		return "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("无效的任务类型: %s（可选 export/import/migrate/compare/dictionary）", hint))
 	}
 	m := map[string]any{}
 	if err := yaml.Unmarshal(data, &m); err != nil {

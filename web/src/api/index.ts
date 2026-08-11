@@ -5,6 +5,7 @@ import type {
   ConnInfo,
   DBConn,
   DBTables,
+  DictionaryOptions,
   ExecutionRecord,
   ExportOptions,
   ImportFileInfo,
@@ -116,6 +117,9 @@ export const startMigrate = (options: MigrateOptions, taskConfigId?: string) =>
 
 export const startCompare = (options: CompareOptions, taskConfigId?: string) =>
   post<{ taskID: string }>("/api/compare", { options, taskConfigId })
+
+export const startDictionary = (options: DictionaryOptions, taskConfigId?: string) =>
+  post<{ taskID: string }>("/api/dictionary", { options, compress: options.compress, taskConfigId })
 
 export const getCompareResult = (taskID: string) =>
   request<CompareResult>(`/api/compare/result?taskID=${encodeURIComponent(taskID)}`)

@@ -21,6 +21,8 @@ type (
 	MigrateOptions = engine.MigrateOptions
 	// CompareOptions 对比选项
 	CompareOptions = engine.CompareOptions
+	// DictionaryOptions 数据字典导出选项
+	DictionaryOptions = engine.DictionaryOptions
 	// TableAlias 表别名配对
 	TableAlias = engine.TableAlias
 	// CompareResult 对比结果
@@ -51,22 +53,23 @@ var SupportedDBTypes = map[string][]string{
 
 // TaskConfig 任务配置（可保存/加载，自动记忆上次配置）
 type TaskConfig struct {
-	ID          string          `json:"id" yaml:"id"`
-	Name        string          `json:"name" yaml:"name"`
-	Type        string          `json:"type" yaml:"type"` // export/import/migrate/compare
-	ExportOpts  *ExportOptions  `json:"exportOpts,omitempty" yaml:"exportOpts,omitempty"`
-	ImportOpts  *ImportOptions  `json:"importOpts,omitempty" yaml:"importOpts,omitempty"`
-	MigrateOpts *MigrateOptions `json:"migrateOpts,omitempty" yaml:"migrateOpts,omitempty"`
-	CompareOpts *CompareOptions `json:"compareOpts,omitempty" yaml:"compareOpts,omitempty"`
-	CreatedAt   int64           `json:"createdAt" yaml:"createdAt"`
-	UpdatedAt   int64           `json:"updatedAt" yaml:"updatedAt"`
-	IsLastUsed  bool            `json:"isLastUsed" yaml:"isLastUsed"`
+	ID             string             `json:"id" yaml:"id"`
+	Name           string             `json:"name" yaml:"name"`
+	Type           string             `json:"type" yaml:"type"` // export/import/migrate/compare/dictionary
+	ExportOpts     *ExportOptions     `json:"exportOpts,omitempty" yaml:"exportOpts,omitempty"`
+	ImportOpts     *ImportOptions     `json:"importOpts,omitempty" yaml:"importOpts,omitempty"`
+	MigrateOpts    *MigrateOptions    `json:"migrateOpts,omitempty" yaml:"migrateOpts,omitempty"`
+	CompareOpts    *CompareOptions    `json:"compareOpts,omitempty" yaml:"compareOpts,omitempty"`
+	DictionaryOpts *DictionaryOptions `json:"dictionaryOpts,omitempty" yaml:"dictionaryOpts,omitempty"`
+	CreatedAt      int64              `json:"createdAt" yaml:"createdAt"`
+	UpdatedAt      int64              `json:"updatedAt" yaml:"updatedAt"`
+	IsLastUsed     bool               `json:"isLastUsed" yaml:"isLastUsed"`
 }
 
 // ExecutionRecord 执行历史记录
 type ExecutionRecord struct {
 	ID           string   `json:"id"`                     // 同 taskID
-	TaskType     string   `json:"taskType"`               // export/import/migrate/compare
+	TaskType     string   `json:"taskType"`               // export/import/migrate/compare/dictionary
 	TaskConfigID string   `json:"taskConfigId,omitempty"` // 关联的任务配置 ID（可选）
 	Status       string   `json:"status"`                 // running/done/error/cancelled
 	StartedAt    int64    `json:"startedAt"`

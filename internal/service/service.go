@@ -211,6 +211,23 @@ func (s *Service) RunMigrate(ctx context.Context, opts MigrateOptions, cb Progre
 	return err
 }
 
+// RunDictionary 执行数据字典生成（同步，CLI 直接使用；Web 通过 StartDictionary 异步执行），返回产物路径
+func (s *Service) RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc) (string, error) {
+	src, err := s.resolveConn(opts.SourceConn, opts.Source)
+	if err != nil {
+		return "", err
+	}
+	opts.Source = src
+	if opts.OutputDir == "" {
+		opts.OutputDir = s.persist.ExportDir()
+	}
+	result, err := engine.RunDictionary(ctx, opts, cb)
+	if err != nil {
+		return "", err
+	}
+	return result.OutputPath, nil
+}
+
 // RunCompare 执行数据库对比（作用域为单个库对，两侧必须已选定库）
 func (s *Service) RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*CompareResult, error) {
 	src, err := s.resolveConn(opts.SourceConn, opts.Source)
@@ -443,6 +460,41 @@ func (s *Service) StartExport(opts ExportOptions, taskConfigID string) (string, 
 					r.Summary = buildSummary(last.TotalUnits, last.DoneRows, r.FileSize)
 				}
 			}
+		})
+		return err
+	})
+	return taskID, nil
+}
+
+// StartDictionary 异步启动数据字典任务，返回 taskID；摘要口径为 "X库Y表, 大小"（字典无行数）
+func (s *Service) StartDictionary(opts DictionaryOptions, taskConfigID string) (string, error) {
+	if _, err := s.resolveConn(opts.SourceConn, opts.Source); err != nil {
+		return "", err
+	}
+	taskID := newTaskID()
+	record := ExecutionRecord{ID: taskID, TaskType: "dictionary", TaskConfigID: taskConfigID, Status: "running", StartedAt: time.Now().UnixMilli(),
+		Target: fmt.Sprintf("%s · %s", s.connLabel(opts.SourceConn, opts.Source), targetTables(opts.Databases, opts.Tables))}
+	_ = s.persist.SaveHistory(record)
+
+	s.runner.Start(taskID, "dictionary", func(ctx context.Context, publish ProgressFunc) error {
+		var last ProgressInfo
+		wrapped := func(p ProgressInfo) { last = p; publish(p) }
+		outputPath, err := s.RunDictionary(ctx, opts, wrapped)
+		s.finishRecord(ctx, &record, err, last, func(r *ExecutionRecord) {
+			r.TotalUnits = last.TotalUnits
+			dbCount := len(opts.Databases)
+			if dbCount == 0 {
+				dbCount = 1 // 未显式选库时使用连接配置的库
+			}
+			summary := fmt.Sprintf("%d库%d表", dbCount, last.TotalUnits)
+			if outputPath != "" {
+				r.OutputPath = outputPath
+				if st, statErr := os.Stat(outputPath); statErr == nil {
+					r.FileSize = st.Size()
+					summary += ", " + humanSize(r.FileSize)
+				}
+			}
+			r.Summary = summary
 		})
 		return err
 	})
@@ -711,6 +763,11 @@ func (s *Service) RunTaskByID(taskID string) (string, error) {
 			return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("任务配置缺少对比选项: %s", task.ID))
 		}
 		return s.StartCompare(*task.CompareOpts, task.ID)
+	case "dictionary":
+		if task.DictionaryOpts == nil {
+			return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("任务配置缺少数据字典选项: %s", task.ID))
+		}
+		return s.StartDictionary(*task.DictionaryOpts, task.ID)
 	default:
 		return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("未知任务类型: %s", task.Type))
 	}

@@ -132,6 +132,12 @@ var taskRunCmd = &cobra.Command{
 			printCompareReport(result, false)
 			printCompareShowHint(recordID)
 			return nil
+		case "dictionary":
+			outputPath, err := svc.RunDictionary(ctx, *task.DictionaryOpts, cb)
+			if err == nil {
+				fmt.Printf("数据字典生成完成: %s\n", outputPath)
+			}
+			return err
 		}
 		return cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("未知任务类型: %s", task.Type))
 	},
@@ -198,6 +204,16 @@ var taskSaveCmd = &cobra.Command{
 				return err
 			}
 			task.CompareOpts = &opts
+		case "dictionary":
+			cfg, err := loadDictionaryConfig(configPath)
+			if err != nil {
+				return err
+			}
+			opts, err := dictionaryOptsFromConfig(cfg)
+			if err != nil {
+				return err
+			}
+			task.DictionaryOpts = &opts
 		}
 		svc, err := newCliService()
 		if err != nil {

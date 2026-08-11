@@ -183,6 +183,10 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 			eb.POST("", handleCompare(svc)),
 			eb.GET("/result", handleCompareResult(svc)),
 		}),
+		// 数据字典
+		eb.GROUP("/dictionary", []cygin.APIHandler{
+			eb.POST("", handleDictionary(svc)),
+		}),
 		// 任务配置（避免与 :id 通配路由冲突，全部使用非通配路径）
 		eb.GROUP("/tasks", []cygin.APIHandler{
 			eb.GET("", handleListTasks(svc)),
