@@ -104,6 +104,7 @@ release: web-dist
 			cp scripts/url.sh $$stage/ && chmod +x $$stage/url.sh; \
 		fi; \
 		cp CLI.md $$stage/; \
+		cp README.md $$stage/; \
 		(cd $$stage && zip -q ../dbx-$(VERSION)-$$os-$$arch.zip *) || exit 1; \
 		rm -rf $$stage; \
 	done
