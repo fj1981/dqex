@@ -192,6 +192,13 @@ func (s *session) handleMeta(cmd string) (bool, bool) {
 	case "\\e", "\\edit":
 		s.editLastSQL()
 		return true, false
+	case "\\copy":
+		if len(args) > 0 {
+			exportToFile(s, args[0])
+		} else {
+			fmt.Fprintln(os.Stderr, red("用法: \\copy <文件路径>"))
+		}
+		return true, false
 	case "\\w", "\\write":
 		if len(args) > 0 {
 			exportToFile(s, args[0])
@@ -271,6 +278,31 @@ func (s *session) descTable(name string) {
 
 func (s *session) descTableVerbose(name string) {
 	s.descTable(name)
+	// 补充索引信息
+	fmt.Println()
+	indexes, err := s.cli.GetIndexes(name)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, dim(fmt.Sprintf("(无法获取索引信息: %v)", err)))
+		return
+	}
+	if len(indexes) == 0 {
+		fmt.Println(dim("(无索引)"))
+		return
+	}
+	fmt.Println(bold("索引:"))
+	for _, idx := range indexes {
+		marker := ""
+		if idx.IsPrimary {
+			marker = " " + green("PRIMARY")
+		} else if idx.IsUnique {
+			marker = " " + yellow("UNIQUE")
+		}
+		cols := strings.Join(idx.Columns, ", ")
+		if cols == "" {
+			cols = idx.Name
+		}
+		fmt.Printf("  %s%s: %s\n", idx.Name, marker, cols)
+	}
 }
 
 func (s *session) showDatabases() {
@@ -459,7 +491,7 @@ func completeMeta(word string) []string {
 		"\\q", "\\quit", "\\dt", "\\tables", "\\d", "\\desc", "\\d+",
 		"\\l", "\\list", "\\databases", "\\c", "\\use", "\\connect",
 		"\\timing", "\\g", "\\G", "\\p", "\\print", "\\r", "\\reset",
-		"\\h", "\\help", "\\w", "\\write", "\\i", "\\include",
+		"\\h", "\\help", "\\copy", "\\w", "\\write", "\\i", "\\include",
 	}
 	var result []string
 	for _, c := range cmds {
@@ -632,7 +664,8 @@ func printHelp() {
   \r, \reset           清空缓冲区
   \h, \help            显示此帮助
   \e, \edit           用外部编辑器编辑上一条 SQL
-  \w <文件>             导出结果到 CSV
+  \copy <文件>          导出上一条查询结果到文件（CSV）
+  \w <文件>             导出上一条查询结果到文件
   \i <文件>             执行文件中的 SQL
 
 快捷键:

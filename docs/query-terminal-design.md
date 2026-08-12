@@ -203,7 +203,7 @@ dbx sql --type mysql --host 10.0.0.1 --port 3306 --un root --pw '${DB_PASSWORD}'
 | `\dt` | `\tables` | 列出当前库所有表 | `\dt` |
 | `\dt users*` | — | 按通配符过滤表名 | `\dt user*` |
 | `\d` | `\desc` | 查看表结构 | `\d users` |
-| `\d+` | `\descd` | 查看表结构（含索引/约束） | `\d+ users` |
+| `\d+` | `\descd` | 查看表结构（含索引/约束），显示索引列表及 PRIMARY/UNIQUE 标记 | `\d+ users` |
 | `\l` | `\list` `\databases` | 列出所有数据库 | `\l` |
 | `\c` | `\use` `\connect` | 切换数据库（底层重建连接池，保证所有连接一致） | `\c mydb2` |
 | `\c` | — | 查看当前连接信息（含库名、地址、TLS 状态） | `\c` |
@@ -216,7 +216,7 @@ dbx sql --type mysql --host 10.0.0.1 --port 3306 --un root --pw '${DB_PASSWORD}'
 | `\G` | — | 垂直显示（每行一个字段，类似 `mysql -E`） | `\G` |
 | `\w file` | `\write` | 将上一条查询结果写入文件 | `\w result.csv` |
 | `\i file` | `\include` | 执行文件中的 SQL | `\i script.sql` |
-| `\copy` | — | 导出查询结果为 CSV/JSON | `\copy result.csv` |
+| `\copy` | — | 导出上一条查询结果到文件（CSV），复用 \w 逻辑 | `\copy result.csv` |
 
 ### 4.5 自动补全
 
@@ -226,7 +226,7 @@ dbx sql --type mysql --host 10.0.0.1 --port 3306 --un root --pw '${DB_PASSWORD}'
 
 | 上下文 | 补全内容 | 示例 |
 |---|---|---|
-| 语句开头 | SQL 关键字 | `SEL` → `SELECT` |
+| 任意位置 | 关键字 + 表名（始终可用） | `cy_` → `cy_user` |
 | `FROM` / `JOIN` 后 | 表名 | `FROM u` → `FROM users` |
 | `SELECT` / `WHERE` / `ORDER BY` 后 | 列名（带表前缀感知） | `WHERE e` → `WHERE email` |
 | `ON` 后 | 表名.列名 | `u.` → `u.id, u.name, u.email` |
@@ -773,6 +773,39 @@ type HistoryEntry struct {
 
 ---
 
-> **文档版本**：v2.7  
+> **文档版本**：v3.0  
 > **最后更新**：2026-08-12  
-> **状态**：设计阶段，待实现
+> **状态**：已实现，持续完善
+
+
+---
+
+## 13. 实现状态
+
+| 功能 | 状态 |
+|---|---|
+| 交互式 REPL + 单次执行 + JSON 输出 | ✅ |
+| Unicode 表格渲染（tablewriter） | ✅ |
+| NULL/BLOB/布尔着色 | ✅ |
+| SQL 分类（cydb.ParseMySQL AST + 降级） | ✅ |
+| 写操作确认 + 危险函数拦截 | ✅ |
+| 元命令（\q/\dt/\d/\d+/\l/\c/\e/\g/\G/\p/
+/\h/\w/\copy/\i） | ✅ |
+| 上下文感知自动补全（关键字+表名+数据库名+SHOW子命令） | ✅ |
+| 查询历史持久化 + 敏感 SQL 过滤 | ✅ |
+| 分页器（less -SRX） | ✅ |
+| 审计日志（10MB 轮转） | ✅ |
+| 会话连接池 + 断线重连 | ✅ |
+| MySQL 语法跨库翻译（cydb preProcess） | ✅ |
+| 流式 JSON（NDJSON，>10000 行自动切换） | ✅ |
+| 外部编辑器 \e（\ 降级 notepad） | ✅ |
+| 垂直显示 \G（和 mysql CLI 规则一致） | ✅ |
+| 基础库 GetDatabases / GetIndexes | ✅ |
+| 数字右对齐 | ⏳ 待实现 |
+
+### 基础库新增 API
+
+| 方法 | 说明 |
+|---|---|
+| `DBCli.GetDatabases()` | 返回数据库列表（跨方言） |
+| `DBCli.GetIndexes(tableName)` | 返回表索引列表（跨方言） |
