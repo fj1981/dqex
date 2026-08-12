@@ -96,7 +96,7 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 				return nil, err
 			}
 			if !exist {
-				ddl, err := buildCreateTableDDL(sourceCli, targetCli, table, crossType)
+				ddl, err := buildCreateTableDDL(sourceCli, targetCli, table, crossType, opts.CompatCollation)
 				if err != nil {
 					return nil, fmt.Errorf("生成表 %s 建表语句失败: %w", table, err)
 				}
@@ -139,8 +139,9 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 }
 
 // buildCreateTableDDL 生成目标库建表语句：
-// 同类型 → 源库方言原生 DDL（含触发器等）；跨类型 → 源库标准化 TableInfo + 目标 MigrationDialect 转换（仅表结构）
-func buildCreateTableDDL(sourceCli, targetCli *cydb.DBCli, table string, crossType bool) (string, error) {
+// 同类型 → 源库方言原生 DDL（含触发器等，如果开启兼容排序规则则替换 8.0→5.7 兼容版本）；
+// 跨类型 → 源库标准化 TableInfo + 目标 MigrationDialect 转换（仅表结构）
+func buildCreateTableDDL(sourceCli, targetCli *cydb.DBCli, table string, crossType bool, compatCollation bool) (string, error) {
 	if !crossType {
 		content, err := sourceCli.GetDDLSql(dialect.FuncNameGetCreateTableSql, table)
 		if err != nil {
@@ -149,7 +150,12 @@ func buildCreateTableDDL(sourceCli, targetCli *cydb.DBCli, table string, crossTy
 		if content == nil || strings.TrimSpace(content.Content) == "" {
 			return "", fmt.Errorf("未获取到建表语句")
 		}
-		return strings.TrimRight(strings.TrimSpace(content.Content), ";"), nil
+		ddl := strings.TrimRight(strings.TrimSpace(content.Content), ";")
+		// MySQL 同类型迁移：将 8.0 特有排序规则替换为 5.7 兼容版本
+		if compatCollation && strings.EqualFold(sourceCli.DBType(), "mysql") {
+			ddl = compatCollationSQL(ddl)
+		}
+		return ddl, nil
 	}
 	tableInfo, err := sourceCli.GetTableInfo(table)
 	if err != nil {

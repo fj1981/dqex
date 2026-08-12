@@ -16,13 +16,14 @@ const DefaultConfigName = "config.yaml"
 // EnvConfigFile 指定全局配置文件的环境变量
 const EnvConfigFile = "DBIMPEX_CONFIG"
 
-// DirConfig 五类数据目录配置（留空 = 由 data 目录派生）
+// DirConfig 六类数据目录配置（留空 = 由 data 目录派生）
 type DirConfig struct {
-	Data     string `yaml:"data"`     // ① 配置保存目录（connections/tasks/history）
-	Tmp      string `yaml:"tmp"`      // ② 任务处理临时目录
-	Uploads  string `yaml:"uploads"`  // ③ Web 上传临时目录
-	Exports  string `yaml:"exports"`  // ④ 导出产物目录
-	Compares string `yaml:"compares"` // ⑤ 对比报告目录
+	Data      string `yaml:"data"`      // ① 配置保存目录（connections/tasks/history）
+	Tmp       string `yaml:"tmp"`       // ② 任务处理临时目录
+	Uploads   string `yaml:"uploads"`   // ③ Web 上传临时目录
+	Exports   string `yaml:"exports"`   // ④ 导出产物目录
+	Compares  string `yaml:"compares"`  // ⑤ 对比报告目录
+	Snapshots string `yaml:"snapshots"` // ⑥ 快照目录
 }
 
 // WebConfig Web 服务安全配置
@@ -34,15 +35,20 @@ type WebConfig struct {
 type AppConfig struct {
 	Dirs DirConfig `yaml:"dirs"`
 	Web  WebConfig `yaml:"web"`
+	// CompatCollation 全局默认：将 MySQL 8.0 特有排序规则（如 utf8mb4_0900_ai_ci）
+	// 替换为 MySQL 5.7 兼容的 utf8mb4_unicode_ci，使 DDL 可在低版本 MySQL 上执行。
+	// 可在单个迁移/导入任务中覆盖此全局默认值。
+	CompatCollation bool `yaml:"compat_collation,omitempty"`
 }
 
 // ResolvedDirs 解析后的最终目录
 type ResolvedDirs struct {
-	Data     string
-	Tmp      string
-	Uploads  string
-	Exports  string
-	Compares string
+	Data      string
+	Tmp       string
+	Uploads   string
+	Exports   string
+	Compares  string
+	Snapshots string
 }
 
 // FindConfigFile 确定全局配置文件路径：显式指定 > 环境变量 DBIMPEX_CONFIG > ~/.dbimpex/config.yaml（缺省位置不存在时返回 ""）
@@ -99,10 +105,11 @@ func ResolveDirs(dataDirFlag string, cfg *AppConfig) ResolvedDirs {
 		return fallback
 	}
 	return ResolvedDirs{
-		Data:     data,
-		Tmp:      pick(cfg.Dirs.Tmp, filepath.Join(data, TempDirName)),
-		Uploads:  pick(cfg.Dirs.Uploads, filepath.Join(data, UploadDirName)),
-		Exports:  pick(cfg.Dirs.Exports, filepath.Join(data, ExportDirName)),
-		Compares: pick(cfg.Dirs.Compares, filepath.Join(data, CompareDirName)),
+		Data:      data,
+		Tmp:       pick(cfg.Dirs.Tmp, filepath.Join(data, TempDirName)),
+		Uploads:   pick(cfg.Dirs.Uploads, filepath.Join(data, UploadDirName)),
+		Exports:   pick(cfg.Dirs.Exports, filepath.Join(data, ExportDirName)),
+		Compares:  pick(cfg.Dirs.Compares, filepath.Join(data, CompareDirName)),
+		Snapshots: pick(cfg.Dirs.Snapshots, filepath.Join(data, SnapshotDirName)),
 	}
 }

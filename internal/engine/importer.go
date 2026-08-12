@@ -255,7 +255,7 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 		t.p.CurrentTable = f.db
 		t.emit(true)
 
-		stmts, err := importSQLFile(ctx, cli, f.path, t, blockUnits)
+		stmts, err := importSQLFile(ctx, cli, f.path, t, blockUnits, opts.Target.CompatCollation)
 		if err != nil {
 			cli.Close()
 			return nil, fmt.Errorf("导入库 %s 失败: %w", f.db, err)
@@ -352,7 +352,7 @@ func countSQLBlocks(conn DBConnInfo, path string) (int, error) {
 }
 
 // importSQLFile 解析并执行单个 SQL 文件，返回语句数；blockUnits 为 true 时每执行一块推进一个进度单元
-func importSQLFile(ctx context.Context, cli *cydb.DBCli, path string, t *tracker, blockUnits bool) (int64, error) {
+func importSQLFile(ctx context.Context, cli *cydb.DBCli, path string, t *tracker, blockUnits bool, compatCollation bool) (int64, error) {
 	f, err := openSQLFile(path)
 	if err != nil {
 		return 0, err
@@ -367,6 +367,10 @@ func importSQLFile(ctx context.Context, cli *cydb.DBCli, path string, t *tracker
 		content := strings.TrimSpace(stmt.Content)
 		if content == "" {
 			return nil
+		}
+		// collation 兼容：将 MySQL 8.0 特有排序规则替换为 5.7 兼容版本
+		if compatCollation && strings.EqualFold(cli.DBType(), "mysql") {
+			content = compatCollationSQL(content)
 		}
 		if _, err := cli.DirectExecute(content); err != nil {
 			return fmt.Errorf("执行 SQL 失败(第 %d 块): %w", stmt.Index, err)
@@ -386,4 +390,27 @@ func importSQLFile(ctx context.Context, cli *cydb.DBCli, path string, t *tracker
 		return nil
 	})
 	return count, err
+}
+
+// compatCollationSQL 将 SQL 语句中的 MySQL 8.0 特有排序规则替换为 5.7 兼容版本。
+// 用于导入 SQL 文件场景（静态文本，不经过 DDL 方言处理）。
+func compatCollationSQL(sql string) string {
+	// 使用正则替换 CREATE TABLE 语句中的 COLLATE=utf8mb4_0900_* 模式
+	// 处理表级: DEFAULT COLLATE = utf8mb4_0900_ai_ci
+	// 处理列级: COLLATE utf8mb4_0900_ai_ci
+	re := regexp.MustCompile(`(?i)utf8mb4_0900_[a-z_]+`)
+	return re.ReplaceAllStringFunc(sql, func(match string) string {
+		if repl, ok := compatCollationReplace[strings.ToLower(match)]; ok {
+			return repl
+		}
+		return "utf8mb4_unicode_ci"
+	})
+}
+
+// compatCollationReplace MySQL 8.0 特有排序规则 → MySQL 5.7 兼容替代（文本替换用）
+var compatCollationReplace = map[string]string{
+	"utf8mb4_0900_ai_ci":  "utf8mb4_unicode_ci",
+	"utf8mb4_0900_as_ci":  "utf8mb4_unicode_ci",
+	"utf8mb4_0900_as_cs":  "utf8mb4_unicode_ci",
+	"utf8mb4_0900_bin":    "utf8mb4_bin",
 }

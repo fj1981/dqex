@@ -12,6 +12,9 @@ import type {
   ImportOptions,
   MigrateOptions,
   Progress,
+  SnapshotCompareOptions,
+  SnapshotDetail,
+  SnapshotInfo,
   TableColumn,
   TaskConfig,
 } from "@/types"
@@ -89,8 +92,8 @@ const post = <T>(url: string, data: unknown) =>
 export const listConnections = () => request<ConnInfo[]>("/api/connections")
 
 // 新建/更新连接（id 非空为按主键更新），返回主键
-export const saveConnection = (payload: { id?: string; name: string; conn: DBConn }) =>
-  post<{ id: string; name: string }>("/api/connections", payload)
+export const saveConnection = (payload: { id?: string; name: string; shortName?: string; env?: string; conn: DBConn }) =>
+  post<{ id: string; name: string; shortName?: string }>("/api/connections", payload)
 
 export const deleteConnection = (id: string) =>
   request<{ ok: boolean }>(`/api/connections/${encodeURIComponent(id)}`, { method: "DELETE" })
@@ -222,4 +225,39 @@ export function subscribeProgress(taskID: string, handler: ProgressHandler): () 
     es.close()
   })
   return () => es.close()
+}
+
+// ---- 快照 ----
+
+export interface CreateSnapshotParams {
+  connId: string
+  dbNames: string[]
+  name: string
+  description?: string
+  includeSamples: boolean
+  sampleLimit?: number // 每表采样行数；<=0 走后端默认 10
+}
+
+export async function createSnapshot(params: CreateSnapshotParams): Promise<{ id: string; name: string }> {
+  return post<{ id: string; name: string }>("/api/snapshots", params)
+}
+
+export async function listSnapshots(): Promise<SnapshotInfo[]> {
+  return request<SnapshotInfo[]>("/api/snapshots")
+}
+
+export async function getSnapshot(id: string): Promise<SnapshotDetail> {
+  return request<SnapshotDetail>(`/api/snapshots/${encodeURIComponent(id)}`)
+}
+
+export async function deleteSnapshot(id: string): Promise<void> {
+  return request<void>(`/api/snapshots/${encodeURIComponent(id)}`, { method: "DELETE" })
+}
+
+export async function startSnapshotCompare(opts: SnapshotCompareOptions, taskConfigId?: string): Promise<{ taskID: string }> {
+  return post<{ taskID: string }>("/api/snapshots/compare", { options: opts, taskConfigId })
+}
+
+export async function getSnapshotCompareResult(taskID: string): Promise<CompareResult> {
+  return request<CompareResult>(`/api/snapshots/compare/result?taskID=${encodeURIComponent(taskID)}`)
 }

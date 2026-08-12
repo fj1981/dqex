@@ -29,6 +29,8 @@ interface Props {
   taskType: string
   onSaveTask?: () => void
   onBack: () => void
+  // 完成（含失败/取消）回调：外部页面据此拉取最终结果
+  onDone?: (p: ProgressInfo) => void
   // 宽度与外层结果视图对齐（去掉本组件的 max-w 限制）
   wide?: boolean
   // 日志区固定限高：下方还有结果视图时使用，避免进度面板独占视口
@@ -55,7 +57,7 @@ function StatBlock({ label, value, sub, title }: { label: string; value: string;
 }
 
 // 任务执行进度视图（SSE 实时推送）
-export default function ProgressView({ taskID, taskType, onSaveTask, onBack, wide, compactLog }: Props) {
+export default function ProgressView({ taskID, taskType, onSaveTask, onBack, onDone, wide, compactLog }: Props) {
   const [progress, setProgress] = useState<ProgressInfo | null>(null)
   const [errorMsg, setErrorMsg] = useState("")
   const [errDetailOpen, setErrDetailOpen] = useState(false)
@@ -69,6 +71,7 @@ export default function ProgressView({ taskID, taskType, onSaveTask, onBack, wid
       onProgress: (p) => setProgress(p),
       onDone: (p) => {
         if (p && p.taskID) setProgress(p)
+        if (p && onDone) onDone(p)
       },
       onError: (msg) => setErrorMsg(msg),
     })

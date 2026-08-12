@@ -80,6 +80,7 @@ export default function ConnectionSelect({ title, subtitle, value, onChange, fil
                 {selected.conn.Type}
               </Badge>
               <span className="truncate font-medium">{selected.name}</span>
+              {selected.shortName && <span className="shrink-0 text-xs text-muted-foreground">({selected.shortName})</span>}
             </span>
           ) : (
             <span>选择数据库连接...</span>
@@ -96,6 +97,7 @@ export default function ConnectionSelect({ title, subtitle, value, onChange, fil
                   {c.conn.Type}
                 </Badge>
                 {c.name}
+                {c.shortName && <span className="text-xs text-muted-foreground font-mono">({c.shortName})</span>}
                 <span className="text-xs text-muted-foreground">
                   {c.conn.Host}:{c.conn.Port}
                 </span>

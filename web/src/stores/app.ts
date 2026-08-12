@@ -9,7 +9,7 @@ interface AppState {
   dbTypes: Record<string, string[]>
   loadConnections: () => Promise<void>
   loadDBTypes: () => Promise<void>
-  saveConnection: (id: string | undefined, name: string, conn: DBConn) => Promise<void>
+  saveConnection: (id: string | undefined, name: string, shortName: string, env: string, conn: DBConn) => Promise<void>
   removeConnection: (id: string) => Promise<void>
 
   // 连接管理抽屉
@@ -55,8 +55,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       console.error(e)
     }
   },
-  saveConnection: async (id, name, conn) => {
-    await api.saveConnection({ id, name, conn })
+  saveConnection: async (id, name, shortName, env, conn) => {
+    await api.saveConnection({ id, name, shortName, env, conn })
     await get().loadConnections()
   },
   removeConnection: async (id) => {

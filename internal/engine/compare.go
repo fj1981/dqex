@@ -39,15 +39,12 @@ type comparePair struct {
 	Status     string
 }
 
-// RunCompare 执行数据库对比：表清单/结构差异 + 数据差异。
-// 作用域为单个库对（Source.DBName ↔ Target.DBName），表按裸表名匹配（大小写不敏感）；
-// Aliases 别名配对优先于同名匹配，数据行数超阈值仅比较行数
+// RunCompare 执行数据库对比（多库）：解析库对（按 Databases 索引配对，DBMapping 覆盖），
+// 逐库循环对比表清单/结构/数据，结果按库分组汇总到 CompareResult.Databases。
+// 表按裸表名匹配（大小写不敏感）；Aliases 别名配对优先于同名匹配；行数超阈值仅比较行数。
 func RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*CompareResult, error) {
 	if opts.Source == nil || opts.Target == nil {
 		return nil, fmt.Errorf("未提供源或目标数据库连接")
-	}
-	if compareScopeDB(opts.Source) == "" || compareScopeDB(opts.Target) == "" {
-		return nil, fmt.Errorf("请先选择对比的库")
 	}
 	threshold := opts.Threshold
 	if threshold <= 0 {
@@ -63,38 +60,130 @@ func RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*Com
 		}
 		tableIgnore[strings.ToLower(strings.TrimSpace(a.Source))] = normalizeIgnoreColumns(a.IgnoreColumns)
 	}
+
+	dbPairs, err := resolveCompareDBPairs(opts)
+	if err != nil {
+		return nil, err
+	}
+
 	// 清空表结构元数据缓存：对比要求两侧实时结构，避免复用陈旧/他实例缓存
 	cydb.FlushTableInfoCache()
 	t := newTracker(cb)
 
-	sourceCli, err := Connect(*opts.Source)
+	// 连接走进程级池化（GetOrCreateCli），相同库复用同一实例，程序退出前无需 Close
+	sourceCli, err := ConnectPooled(*opts.Source, opts.Source.DBName)
 	if err != nil {
 		return nil, fmt.Errorf("源库连接失败: %w", err)
 	}
-	defer sourceCli.Close()
-	targetCli, err := Connect(*opts.Target)
+	targetCli, err := ConnectPooled(*opts.Target, opts.Target.DBName)
 	if err != nil {
 		return nil, fmt.Errorf("目标库连接失败: %w", err)
 	}
-	defer targetCli.Close()
 
-	srcTables, err := listCompareTables(sourceCli, opts.Source, opts.Tables)
-	if err != nil {
-		return nil, fmt.Errorf("获取源库表列表失败: %w", err)
+	result := &CompareResult{
+		Source:    fmt.Sprintf("%s (%s)", compareScopeDB(opts.Source), sourceCli.DBType()),
+		Target:    fmt.Sprintf("%s (%s)", compareScopeDB(opts.Target), targetCli.DBType()),
+		Databases: make([]CompareDatabaseResult, 0, len(dbPairs)),
+		Tables:    []CompareTableResult{},
 	}
-	tgtTables, err := listCompareTables(targetCli, opts.Target, opts.Tables)
-	if err != nil {
-		return nil, fmt.Errorf("获取目标库表列表失败: %w", err)
+	for _, dp := range dbPairs {
+		srcConn := *opts.Source
+		srcConn.DBName, srcConn.Schema = scopeDBValue(opts.Source, dp.SourceDB)
+		tgtConn := *opts.Target
+		tgtConn.DBName, tgtConn.Schema = scopeDBValue(opts.Target, dp.TargetDB)
+		// 多库对比：每个库对必须用绑定了对应库名的独立连接，否则 GetTableInfo 会查错库导致结构/数据张冠李戴
+		// 多库对比：每个库对用绑定了对应库名的独立连接（池化复用，不 Close），
+		// 否则 GetTableInfo 会查错库导致结构/数据张冠李戴
+		srcCli, err := ConnectPooled(srcConn, dp.SourceDB)
+		if err != nil {
+			return nil, fmt.Errorf("源库[%s]连接失败: %w", dp.SourceDB, err)
+		}
+		tgtCli, err := ConnectPooled(tgtConn, dp.TargetDB)
+		if err != nil {
+			return nil, fmt.Errorf("目标库[%s]连接失败: %w", dp.TargetDB, err)
+		}
+		dr, err := runCompareDatabase(ctx, &srcConn, &tgtConn, srcCli, tgtCli, dp.SourceDB, dp.TargetDB, opts, ignore, tableIgnore, t)
+		if err != nil {
+			return nil, err
+		}
+		result.Databases = append(result.Databases, *dr)
 	}
 
-	pairs, err := buildComparePairs(srcTables, tgtTables, opts.Aliases)
+	// 汇总所有库到顶层（兼容字段 + Summary）
+	for _, dr := range result.Databases {
+		result.Tables = append(result.Tables, dr.Tables...)
+		result.Summary = mergeSummary(result.Summary, dr.Summary)
+	}
+	t.finish()
+	t.log("对比完成（%d 个库）: 共%d项, 一致%d, 仅源有%d, 仅目标有%d, 结构差异%d, 数据差异%d",
+		len(result.Databases), result.Summary.Total, result.Summary.Matched, result.Summary.SourceOnly,
+		result.Summary.TargetOnly, result.Summary.StructureDiff, result.Summary.DataDiff)
+	return result, nil
+}
+
+// scopeDBValue 根据连接类型（oracle 的库= schema）返回应设置到 DBName/Schema 字段的值对
+func scopeDBValue(conn *DBConnInfo, db string) (dbName string, schema string) {
+	if strings.EqualFold(conn.Type, "oracle") {
+		return "", db
+	}
+	return db, ""
+}
+
+// resolveCompareDBPairs 解析对比库对：优先按 Databases 索引一一配对；
+// 未提供时回退到 opts.DBMapping（源库→目标库），再回退到源连接库=目标连接库（单库）
+func resolveCompareDBPairs(opts CompareOptions) ([]CompareDBPair, error) {
+	if len(opts.Databases) > 0 {
+		pairs := make([]CompareDBPair, 0, len(opts.Databases))
+		for _, p := range opts.Databases {
+			srcDB := p.SourceDB
+			tgtDB := p.TargetDB
+			if mapped, ok := opts.DBMapping[srcDB]; ok && tgtDB == "" {
+				tgtDB = mapped
+			}
+			pairs = append(pairs, CompareDBPair{SourceDB: srcDB, TargetDB: tgtDB})
+		}
+		return pairs, nil
+	}
+	if len(opts.DBMapping) > 0 {
+		pairs := make([]CompareDBPair, 0, len(opts.DBMapping))
+		for src, tgt := range opts.DBMapping {
+			pairs = append(pairs, CompareDBPair{SourceDB: src, TargetDB: tgt})
+		}
+		sort.Slice(pairs, func(i, j int) bool { return pairs[i].SourceDB < pairs[j].SourceDB })
+		return pairs, nil
+	}
+	srcDB := compareScopeDB(opts.Source)
+	tgtDB := compareScopeDB(opts.Target)
+	if srcDB == "" || tgtDB == "" {
+		return nil, fmt.Errorf("请先选择对比的库")
+	}
+	return []CompareDBPair{{SourceDB: srcDB, TargetDB: tgtDB}}, nil
+}
+
+// runCompareDatabase 对比单库对（源库 srcDB ↔ 目标库 tgtDB），返回该库分组结果
+func runCompareDatabase(ctx context.Context, srcConn, tgtConn *DBConnInfo, sourceCli, targetCli *cydb.DBCli,
+	srcDB, tgtDB string, opts CompareOptions, ignore map[string]bool, tableIgnore map[string]map[string]bool, t *tracker) (*CompareDatabaseResult, error) {
+	threshold := opts.Threshold
+	if threshold <= 0 {
+		threshold = DefaultCompareThreshold
+	}
+	srcTables, err := listCompareTables(sourceCli, srcConn, opts.Tables)
+	if err != nil {
+		return nil, fmt.Errorf("获取源库[%s]表列表失败: %w", srcDB, err)
+	}
+	tgtTables, err := listCompareTables(targetCli, tgtConn, opts.Tables)
+	if err != nil {
+		return nil, fmt.Errorf("获取目标库[%s]表列表失败: %w", tgtDB, err)
+	}
+
+	pairs, err := buildComparePairs(srcTables, tgtTables, opts.Aliases, srcDB)
 	if err != nil {
 		return nil, err
 	}
-	t.p.TotalUnits = len(pairs)
-	t.log("开始对比: %d 组表配对 (%s ↔ %s), 数据阈值=%d", len(pairs), compareScopeDB(opts.Source), compareScopeDB(opts.Target), threshold)
+	t.p.TotalUnits += len(pairs)
+	t.log("开始对比库对 %s ↔ %s: %d 组表配对, 数据阈值=%d", srcDB, tgtDB, len(pairs), threshold)
 
-	result := &CompareResult{Source: compareScopeDB(opts.Source), Target: compareScopeDB(opts.Target), Tables: []CompareTableResult{}}
+	dr := &CompareDatabaseResult{SourceDB: srcDB, TargetDB: tgtDB, Tables: []CompareTableResult{}}
 	for _, pair := range pairs {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("任务已取消")
@@ -106,6 +195,8 @@ func RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*Com
 			Name:       pair.Name,
 			SourceName: pair.SourceName,
 			TargetName: pair.TargetName,
+			SourceDB:   srcDB,
+			TargetDB:   tgtDB,
 			Status:     pair.Status,
 		}
 		if pair.Status == compareStatusBoth {
@@ -144,17 +235,12 @@ func RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*Com
 				}
 			}
 		}
-		result.Tables = append(result.Tables, tr)
+		dr.Tables = append(dr.Tables, tr)
 		t.p.DoneUnits++
 		t.log("%s: %s", pair.Name, tableResultDesc(&tr))
 	}
-
-	result.Summary = buildCompareSummary(result.Tables)
-	t.finish()
-	t.log("对比完成: 共%d项, 一致%d, 仅源有%d, 仅目标有%d, 结构差异%d, 数据差异%d",
-		result.Summary.Total, result.Summary.Matched, result.Summary.SourceOnly,
-		result.Summary.TargetOnly, result.Summary.StructureDiff, result.Summary.DataDiff)
-	return result, nil
+	dr.Summary = buildCompareSummary(dr.Tables)
+	return dr, nil
 }
 
 // compareScopeDB 返回对比作用域的库/schema 名（Oracle 的"库"语义为 schema），空表示未指定
@@ -215,8 +301,9 @@ func filterTablesBare(all []string, wanted []string, db string) []string {
 
 // buildComparePairs 构建比较配对（大小写不敏感）：
 // 别名配对优先于同名匹配；同一张表不允许出现在多个别名配对中（重复配置直接报错）；
+// Source 支持限定名 "库.表"，仅当库名与当前 sourceDB 匹配时生效；裸表名在所有库生效（兼容旧配置）。
 // 别名映射的表在对应库不存在时降级为 source_only/target_only，两侧都不存在则跳过
-func buildComparePairs(srcTables, tgtTables []string, aliases []TableAlias) ([]comparePair, error) {
+func buildComparePairs(srcTables, tgtTables []string, aliases []TableAlias, sourceDB string) ([]comparePair, error) {
 	srcMap := make(map[string]string, len(srcTables)) // 小写名 → 实际名
 	for _, tb := range srcTables {
 		srcMap[strings.ToLower(tb)] = tb
@@ -233,11 +320,20 @@ func buildComparePairs(srcTables, tgtTables []string, aliases []TableAlias) ([]c
 	seenSrc := make(map[string]bool, len(aliases))
 	seenTgt := make(map[string]bool, len(aliases))
 	for _, a := range aliases {
-		s := strings.ToLower(strings.TrimSpace(a.Source))
+		srcRaw := strings.TrimSpace(a.Source)
 		tg := strings.ToLower(strings.TrimSpace(a.Target))
-		if s == "" || tg == "" {
+		if srcRaw == "" || tg == "" {
 			continue
 		}
+		// Source 支持限定名 "库.表"，仅匹配当前源库时生效
+		srcKey := srcRaw
+		if db, tbl, ok := splitQualifiedName(srcRaw); ok {
+			if !strings.EqualFold(db, sourceDB) {
+				continue
+			}
+			srcKey = tbl
+		}
+		s := strings.ToLower(srcKey)
 		if seenSrc[s] || seenTgt[tg] {
 			return nil, fmt.Errorf("别名配对配置重复: %s ↔ %s", a.Source, a.Target)
 		}
@@ -312,6 +408,7 @@ func sortedKeys(m map[string]string) []string {
 // ---- 结构对比 ----
 
 // compareColumns 对比两侧表的列结构（列名大小写不敏感匹配，类型按各方言归一化后对比）
+// srcTable/tgtTable 为实际表名（cli 已绑定具体库，裸表名即可正确取列）
 func compareColumns(sourceCli, targetCli *cydb.DBCli, srcTable, tgtTable string) (*ColumnDiff, error) {
 	srcCols, err := tableColumns(sourceCli, srcTable)
 	if err != nil {
@@ -327,7 +424,15 @@ func compareColumns(sourceCli, targetCli *cydb.DBCli, srcTable, tgtTable string)
 // typeNormalizer 返回 cli 方言的列类型归一化函数（对比语义：如 MySQL 剥离整数显示宽度，
 // bigint(20) ≡ bigint），与 cydb 自动迁移共用同一实现；方言不可得时退化为恒等
 func typeNormalizer(cli *cydb.DBCli) func(string) string {
-	md, ok := dialect.GetMigrationDialect(cli.DBType())
+	if cli == nil {
+		return func(dt string) string { return dt }
+	}
+	return typeNormalizerByDBType(cli.DBType())
+}
+
+// typeNormalizerByDBType 根据数据库类型返回列类型归一化函数（不依赖 live cli）
+func typeNormalizerByDBType(dbType string) func(string) string {
+	md, ok := dialect.GetMigrationDialect(dbType)
 	if !ok {
 		return func(dt string) string { return dt }
 	}
@@ -339,14 +444,17 @@ func tableColumns(cli *cydb.DBCli, table string) ([]ColumnItem, error) {
 	if err != nil {
 		return nil, err
 	}
+	norm := typeNormalizer(cli)
 	cols := info.GetColumns()
 	ret := make([]ColumnItem, 0, len(cols))
 	for _, col := range cols {
+		dt := col.GetOrginalDataType()
 		ret = append(ret, ColumnItem{
-			Name:       col.GetName(),
-			DataType:   col.GetOrginalDataType(),
-			Nullable:   !col.IsNotNull(),
-			PrimaryKey: col.IsPrimaryKey(),
+			Name:           col.GetName(),
+			DataType:       dt,
+			NormalizedType: norm(dt), // 写入时固化归一类型，diff 优先用此比对
+			Nullable:       !col.IsNotNull(),
+			PrimaryKey:     col.IsPrimaryKey(),
 		})
 	}
 	return ret, nil
@@ -370,13 +478,21 @@ func diffColumns(srcCols, tgtCols []ColumnItem, normSrc, normTgt func(string) st
 		tgtMap[strings.ToLower(c.Name)] = c
 	}
 	d := &ColumnDiff{SourceOnly: []ColumnItem{}, TargetOnly: []ColumnItem{}, Different: []ColumnItemDiff{}}
+	// 优先用列项已固化的 NormalizedType 比对（写入时按方言归一，无需运行时推断）；
+	// 若未固化（兼容历史数据）则退回 normSrc/normTgt 实时归一
+	normOf := func(c ColumnItem, fallback func(string) string) string {
+		if c.NormalizedType != "" {
+			return c.NormalizedType
+		}
+		return fallback(c.DataType)
+	}
 	for _, c := range srcCols {
 		tc, ok := tgtMap[strings.ToLower(c.Name)]
 		if !ok {
 			d.SourceOnly = append(d.SourceOnly, c)
 			continue
 		}
-		if normSrc(c.DataType) != normTgt(tc.DataType) || c.Nullable != tc.Nullable || c.PrimaryKey != tc.PrimaryKey {
+		if normOf(c, normSrc) != normOf(tc, normTgt) || c.Nullable != tc.Nullable || c.PrimaryKey != tc.PrimaryKey {
 			d.Different = append(d.Different, ColumnItemDiff{Name: c.Name, Source: c, Target: tc})
 		}
 	}
@@ -940,6 +1056,18 @@ func buildCompareSummary(tables []CompareTableResult) CompareSummary {
 		}
 	}
 	return s
+}
+
+// mergeSummary 累加两个汇总计数（多库对比顶层汇总用）
+func mergeSummary(a, b CompareSummary) CompareSummary {
+	return CompareSummary{
+		Total:         a.Total + b.Total,
+		Matched:       a.Matched + b.Matched,
+		SourceOnly:    a.SourceOnly + b.SourceOnly,
+		TargetOnly:    a.TargetOnly + b.TargetOnly,
+		StructureDiff: a.StructureDiff + b.StructureDiff,
+		DataDiff:      a.DataDiff + b.DataDiff,
+	}
 }
 
 // tableResultDesc 单表结论摘要（进度日志用）

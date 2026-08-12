@@ -24,8 +24,10 @@ var connCmd = &cobra.Command{
 func init() {
 	// add：连接参数复用公共 flags（type/host/port/un/pw/db/subtype）
 	registerConnFlags(connAddCmd, "", &connAddFlags)
-	connAddCmd.Flags().StringP("name", "n", "", "连接名称")
+	connAddCmd.Flags().StringP("name", "n", "", "连接名称（展示用）")
+	connAddCmd.Flags().StringP("short-name", "s", "", "短名/简写（命令行快速引用，仅允许字母数字连字符下划线）")
 	connAddCmd.Flags().String("id", "", "按 ID 更新已有连接")
+	connAddCmd.Flags().String("env", "", "环境标签：dev/test/staging/prod")
 	_ = connAddCmd.MarkFlagRequired("name")
 	_ = connAddCmd.RegisterFlagCompletionFunc("type", fixedCompletion("mysql", "postgresql", "oracle"))
 
@@ -54,7 +56,7 @@ var connListCmd = &cobra.Command{
 			fmt.Println("（无已保存连接）")
 			return nil
 		}
-		fmt.Printf("%-26s %-16s %-10s %s\n", "ID", "名称", "类型", "地址")
+		fmt.Printf("%-26s %-16s %-14s %-10s %s\n", "ID", "名称", "短名", "类型", "地址")
 		for _, c := range conns {
 			addr := c.Conn.Host
 			if c.Conn.Port > 0 {
@@ -67,7 +69,11 @@ var connListCmd = &cobra.Command{
 			if c.Conn.SubType != "" && !strings.EqualFold(c.Conn.SubType, c.Conn.Type) {
 				typ += " " + c.Conn.SubType
 			}
-			fmt.Printf("%-26s %-16s %-10s %s\n", c.ID, c.Name, typ, addr)
+			sn := c.ShortName
+			if sn == "" {
+				sn = "-"
+			}
+			fmt.Printf("%-26s %-16s %-14s %-10s %s\n", c.ID, c.Name, sn, typ, addr)
 		}
 		return nil
 	},
@@ -82,16 +88,22 @@ var connAddCmd = &cobra.Command{
 			return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少 --type（mysql/postgresql/oracle）"))
 		}
 		name, _ := cmd.Flags().GetString("name")
+		shortName, _ := cmd.Flags().GetString("short-name")
 		id, _ := cmd.Flags().GetString("id")
+		env, _ := cmd.Flags().GetString("env")
 		svc, err := newCliService()
 		if err != nil {
 			return err
 		}
-		saved, err := svc.AddConnection(ConnRecord{ID: id, Name: name, Conn: *conn})
+		saved, err := svc.AddConnection(ConnRecord{ID: id, Name: name, ShortName: shortName, Env: env, Conn: *conn})
 		if err != nil {
 			return err
 		}
-		fmt.Printf("连接已保存: %s (%s)\n", saved.ID, saved.Name)
+		info := saved.Name
+		if saved.ShortName != "" {
+			info += fmt.Sprintf(" (短名: %s)", saved.ShortName)
+		}
+		fmt.Printf("连接已保存: %s (%s)\n", saved.ID, info)
 		return nil
 	},
 }

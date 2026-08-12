@@ -56,12 +56,54 @@ func (s *Service) Config() *AppConfig { return s.cfg }
 
 // ---- 连接管理 ----
 
+// validName 校验连接名称：非空、不含空格及控制字符、不含特殊字符（只允许字母/数字/中文/下划线/连字符/点）
+func validName(s string) bool {
+	if strings.TrimSpace(s) == "" {
+		return false
+	}
+	for _, r := range s {
+		if r <= 32 || r == 127 {
+			return false // 控制字符
+		}
+		if r == ' ' {
+			return false
+		}
+	}
+	return true
+}
+
+// validShortName 校验短名：仅允许字母、数字、连字符、下划线，长度 1-32
+func validShortName(s string) bool {
+	if s == "" || len(s) > 32 {
+		return false
+	}
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
 // AddConnection 保存连接配置：rec.ID 非空为按主键更新，否则新建（生成 xid）
 func (s *Service) AddConnection(rec ConnRecord) (ConnRecord, error) {
-	if strings.TrimSpace(rec.Name) == "" {
-		return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("连接名称不能为空"))
-	}
 	rec.Name = strings.TrimSpace(rec.Name)
+	if !validName(rec.Name) {
+		return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("连接名称不能为空，且不能包含空格或控制字符"))
+	}
+	rec.ShortName = strings.TrimSpace(rec.ShortName)
+	if rec.ShortName != "" {
+		if !validShortName(rec.ShortName) {
+			return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("短名仅允许字母、数字、连字符、下划线，长度 1-32"))
+		}
+		// 短名唯一性校验：新建或更新时不能与其他连接重复
+		conns := s.persist.LoadConns()
+		for _, existing := range conns {
+			if existing.ShortName == rec.ShortName && existing.ID != rec.ID {
+				return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("短名已存在: %s", rec.ShortName))
+			}
+		}
+	}
 	if rec.Conn.Type == "" {
 		return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("数据库类型不能为空"))
 	}
@@ -80,7 +122,7 @@ func (s *Service) ListConnections() []ConnInfo {
 	conns := s.persist.LoadConns()
 	ret := make([]ConnInfo, 0, len(conns))
 	for _, rec := range conns {
-		ret = append(ret, ConnInfo{ID: rec.ID, Name: rec.Name, Conn: rec.Conn, SubTypes: SupportedDBTypes[rec.Conn.Type]})
+		ret = append(ret, ConnInfo{ID: rec.ID, Name: rec.Name, ShortName: rec.ShortName, Env: rec.Env, Conn: rec.Conn, SubTypes: SupportedDBTypes[rec.Conn.Type]})
 	}
 	sort.Slice(ret, func(i, j int) bool { return ret[i].Name < ret[j].Name })
 	return ret
@@ -172,6 +214,10 @@ func (s *Service) RunExport(ctx context.Context, opts ExportOptions, cb Progress
 	if opts.OutputDir == "" {
 		opts.OutputDir = s.persist.ExportDir()
 	}
+	// 将 CompatCollation 传递到源连接的 DBConnection 中，使导出的 DDL 即为兼容版本
+	if opts.CompatCollation {
+		opts.Source.CompatCollation = true
+	}
 	result, err := engine.RunExport(ctx, opts, cb)
 	if err != nil {
 		return "", err
@@ -189,6 +235,10 @@ func (s *Service) RunImport(ctx context.Context, opts ImportOptions, cb Progress
 	opts.BatchSize = normalizeBatchSize(opts.BatchSize)
 	opts.ResetMode = normalizeReset(opts.ResetMode)
 	opts.TempDir = s.persist.TempDir() // 任务处理临时目录（zip 解压）
+	// 将 CompatCollation 传递到目标连接的 DBConnection 中，供底层方言 DDL 处理使用
+	if opts.CompatCollation {
+		opts.Target.CompatCollation = true
+	}
 	_, err = engine.RunImport(ctx, opts, cb)
 	return err
 }
@@ -207,6 +257,10 @@ func (s *Service) RunMigrate(ctx context.Context, opts MigrateOptions, cb Progre
 	opts.Target = target
 	opts.BatchSize = normalizeBatchSize(opts.BatchSize)
 	opts.ResetMode = normalizeReset(opts.ResetMode)
+	// 将 CompatCollation 传递到目标连接的 DBConnection 中，供底层方言 DDL 处理使用
+	if opts.CompatCollation {
+		opts.Target.CompatCollation = true
+	}
 	_, err = engine.RunMigrate(ctx, opts, cb)
 	return err
 }
@@ -243,8 +297,11 @@ func (s *Service) RunCompare(ctx context.Context, opts CompareOptions, cb Progre
 	if opts.Threshold <= 0 {
 		opts.Threshold = engine.DefaultCompareThreshold
 	}
-	if (src.DBName == "" && src.Schema == "") || (target.DBName == "" && target.Schema == "") {
-		return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("请先选择对比的库"))
+	// 多库对比通过 opts.Databases / opts.DBMapping 指定；单库对比仍需源/目标都选库
+	if len(opts.Databases) == 0 && len(opts.DBMapping) == 0 {
+		if (src.DBName == "" && src.Schema == "") || (target.DBName == "" && target.Schema == "") {
+			return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("请先选择对比的库"))
+		}
 	}
 	return engine.RunCompare(ctx, opts, cb)
 }
@@ -564,8 +621,10 @@ func (s *Service) StartCompare(opts CompareOptions, taskConfigID string) (string
 	}
 	opts.Source = src
 	opts.Target = target
-	if (src.DBName == "" && src.Schema == "") || (target.DBName == "" && target.Schema == "") {
-		return "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("请先选择对比的库"))
+	if len(opts.Databases) == 0 && len(opts.DBMapping) == 0 {
+		if (src.DBName == "" && src.Schema == "") || (target.DBName == "" && target.Schema == "") {
+			return "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("请先选择对比的库"))
+		}
 	}
 	taskID := newTaskID()
 	record := ExecutionRecord{ID: taskID, TaskType: "compare", TaskConfigID: taskConfigID, Status: "running", StartedAt: time.Now().UnixMilli(),
@@ -804,6 +863,10 @@ func (s *Service) DeleteHistory(taskID string) error {
 
 // newTaskID 生成任务主键：xid（内嵌时间戳，字典序即时间序，全局唯一），与连接配置主键风格一致
 func newTaskID() string {
+	return xid.New().String()
+}
+
+func newSnapshotID() string {
 	return xid.New().String()
 }
 

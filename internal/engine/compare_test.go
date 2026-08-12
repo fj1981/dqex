@@ -126,7 +126,7 @@ func TestBuildComparePairs(t *testing.T) {
 	tgt := []string{"users", "orders", "tb_log", "tgt_only"}
 
 	t.Run("同名匹配加别名", func(t *testing.T) {
-		pairs, err := buildComparePairs(src, tgt, []TableAlias{{Source: "t_log", Target: "tb_log"}})
+		pairs, err := buildComparePairs(src, tgt, []TableAlias{{Source: "t_log", Target: "tb_log"}}, "db1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -148,7 +148,7 @@ func TestBuildComparePairs(t *testing.T) {
 	})
 
 	t.Run("大小写不敏感", func(t *testing.T) {
-		pairs, err := buildComparePairs([]string{"USERS"}, []string{"users"}, nil)
+		pairs, err := buildComparePairs([]string{"USERS"}, []string{"users"}, nil, "db1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -158,7 +158,7 @@ func TestBuildComparePairs(t *testing.T) {
 	})
 
 	t.Run("别名目标不存在降级", func(t *testing.T) {
-		pairs, err := buildComparePairs(src, tgt, []TableAlias{{Source: "t_log", Target: "not_exist"}})
+		pairs, err := buildComparePairs(src, tgt, []TableAlias{{Source: "t_log", Target: "not_exist"}}, "db1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -180,7 +180,7 @@ func TestBuildComparePairs(t *testing.T) {
 		_, err := buildComparePairs(src, tgt, []TableAlias{
 			{Source: "t_log", Target: "tb_log"},
 			{Source: "t_log", Target: "orders"},
-		})
+		}, "db1")
 		if err == nil {
 			t.Error("同一源表参与多个别名配对应报错")
 		}
@@ -190,7 +190,7 @@ func TestBuildComparePairs(t *testing.T) {
 		// 目标侧同时存在与源同名的 t_log，但别名将 t_log 指向 tb_log
 		src2 := []string{"t_log"}
 		tgt2 := []string{"t_log", "tb_log"}
-		pairs, err := buildComparePairs(src2, tgt2, []TableAlias{{Source: "t_log", Target: "tb_log"}})
+		pairs, err := buildComparePairs(src2, tgt2, []TableAlias{{Source: "t_log", Target: "tb_log"}}, "db1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -200,6 +200,44 @@ func TestBuildComparePairs(t *testing.T) {
 		for _, p := range pairs {
 			if p.SourceName == "t_log" && p.TargetName != "tb_log" {
 				t.Errorf("别名应优先于同名匹配: %+v", p)
+			}
+		}
+	})
+
+	t.Run("限定名别名仅匹配指定源库", func(t *testing.T) {
+		// db1.t_log -> tb_log 只对 db1 生效；db2 的 t_log 应走同名匹配
+		pairs, err := buildComparePairs(
+			[]string{"t_log"},
+			[]string{"t_log", "tb_log"},
+			[]TableAlias{{Source: "db1.t_log", Target: "tb_log"}},
+			"db1",
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		foundAlias := false
+		for _, p := range pairs {
+			if p.SourceName == "t_log" && p.TargetName == "tb_log" && p.Status == compareStatusBoth {
+				foundAlias = true
+			}
+		}
+		if !foundAlias {
+			t.Errorf("限定名别名应在匹配源库时生效: %+v", pairs)
+		}
+
+		// 同一别名切换到 db2 应失效，t_log 与 t_log 同名匹配
+		pairs2, err := buildComparePairs(
+			[]string{"t_log"},
+			[]string{"t_log", "tb_log"},
+			[]TableAlias{{Source: "db1.t_log", Target: "tb_log"}},
+			"db2",
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range pairs2 {
+			if p.SourceName == "t_log" && p.TargetName == "tb_log" {
+				t.Errorf("限定名别名不应在非指定源库生效: %+v", pairs2)
 			}
 		}
 	})
@@ -401,5 +439,75 @@ func TestCollectKeySamples(t *testing.T) {
 		if s1[i]["id"] != s2[i]["id"] {
 			t.Fatalf("样本不确定: 第%d条 %v vs %v", i, s1[i], s2[i])
 		}
+	}
+}
+
+// ---- 库映射解析 ----
+
+func TestResolveCompareDBPairs_PrefersExplicitTargetDBOverMapping(t *testing.T) {
+	// 当 opts.Databases 中每条均显式给出 targetDB 时，即使 DBMapping 也给出映射，也应以 databases 为准
+	opts := CompareOptions{
+		Databases: []CompareDBPair{
+			{SourceDB: "src_a", TargetDB: "tgt_a_renamed"}, // 前端 setDBMapping 写入的映射结果
+			{SourceDB: "src_b", TargetDB: "src_b"},         // 同名默认
+		},
+		DBMapping: map[string]string{"src_b": "tgt_b_mapped"}, // 即使给了也应被忽略（targetDB 非空）
+	}
+	pairs, err := resolveCompareDBPairs(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := map[string]string{}
+	for _, p := range pairs {
+		got[p.SourceDB] = p.TargetDB
+	}
+	if got["src_a"] != "tgt_a_renamed" {
+		t.Errorf("src_a 应使用显式 targetDB (tgt_a_renamed), 实际 %q", got["src_a"])
+	}
+	// src_b 已显式同名，不应被 DBMapping 覆盖
+	if got["src_b"] != "src_b" {
+		t.Errorf("src_b 应保持显式同名 (src_b), 实际被覆盖成 %q", got["src_b"])
+	}
+}
+
+func TestResolveCompareDBPairs_FallsBackToDBMappingWhenTargetEmpty(t *testing.T) {
+	// 当 Databases 中 targetDB 为空（如旧数据 / 仅勾选库未做改名），用 DBMapping 兜底
+	opts := CompareOptions{
+		Databases: []CompareDBPair{
+			{SourceDB: "db_prod", TargetDB: ""},
+			{SourceDB: "db_test", TargetDB: ""},
+		},
+		DBMapping: map[string]string{
+			"db_prod": "db_prod_target",
+			"db_test": "db_test_target",
+		},
+	}
+	pairs, err := resolveCompareDBPairs(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pairs) != 2 {
+		t.Fatalf("期望 2 个库对, 实际 %d", len(pairs))
+	}
+	got := map[string]string{}
+	for _, p := range pairs {
+		got[p.SourceDB] = p.TargetDB
+	}
+	if got["db_prod"] != "db_prod_target" || got["db_test"] != "db_test_target" {
+		t.Errorf("空 targetDB 应用 DBMapping 兜底, 实际 %v", got)
+	}
+}
+
+func TestResolveCompareDBPairs_EmptyDatabasesFallsBackToMapping(t *testing.T) {
+	// 仅提供 DBMapping（前端可能只填 dbMapping 不填 databases）的兼容路径
+	opts := CompareOptions{
+		DBMapping: map[string]string{"a": "b"},
+	}
+	pairs, err := resolveCompareDBPairs(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pairs) != 1 || pairs[0].SourceDB != "a" || pairs[0].TargetDB != "b" {
+		t.Errorf("DBMapping-only 应生成单条配对, 实际 %+v", pairs)
 	}
 }

@@ -255,7 +255,7 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 			t.emit(true)
 
 			fmt.Fprintf(w, "-- Table: %s\n", table)
-			if err := writeTableDDL(cli, table, w); err != nil {
+			if err := writeTableDDL(cli, table, w, opts.CompatCollation); err != nil {
 				return totalRows, fmt.Errorf("导出表 %s.%s 建表语句失败: %w", db, table, err)
 			}
 			// 表进度每表只计一次：SchemaOnly 无数据段在此计数，否则留给数据段
@@ -428,14 +428,19 @@ func writeSqlBlock(w *bufio.Writer, sql string) {
 	fmt.Fprintf(w, "%s\n\n", terminateSQL(sql))
 }
 
-// writeTableDDL 将单表的 CREATE TABLE DDL（含触发器——底层库方言已一并返回）写入 bufio.Writer
-func writeTableDDL(cli *cydb.DBCli, table string, w *bufio.Writer) error {
+// writeTableDDL 将单表的 CREATE TABLE DDL（含触发器——底层库方言已一并返回）写入 bufio.Writer。
+// compatCollation=true 时，MySQL 8.0 特有排序规则（如 utf8mb4_0900_*）替换为 5.7 兼容版本
+func writeTableDDL(cli *cydb.DBCli, table string, w *bufio.Writer, compatCollation bool) error {
 	content, err := cli.GetDDLSql(dialect.FuncNameGetCreateTableSql, table)
 	if err != nil {
 		return fmt.Errorf("生成建表语句失败: %w", err)
 	}
 	if content != nil && strings.TrimSpace(content.Content) != "" {
-		fmt.Fprintf(w, "%s;\n\n", strings.TrimRight(strings.TrimSpace(content.Content), ";"))
+		ddl := strings.TrimRight(strings.TrimSpace(content.Content), ";")
+		if compatCollation && strings.EqualFold(cli.DBType(), "mysql") {
+			ddl = compatCollationSQL(ddl)
+		}
+		fmt.Fprintf(w, "%s;\n\n", ddl)
 	}
 	return nil
 }

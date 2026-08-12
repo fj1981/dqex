@@ -2,6 +2,7 @@ package cli
 
 // 点导入：CLI 层大量复用 service 包的模型别名与入口（NewService/选项模型/错误码）
 import (
+	"dbimpex/internal/engine"
 	. "dbimpex/internal/service"
 	"os"
 	"path/filepath"
@@ -51,6 +52,8 @@ type compareConfig struct {
 	TargetRef     string            `yaml:"target_ref"`
 	SourceDB      string            `yaml:"source_database"` // 覆盖源库名（连接未配库时必填）
 	TargetDB      string            `yaml:"target_database"`
+	Databases     []engine.CompareDBPair `yaml:"databases"`    // 多库对比：库对（源库↔目标库）
+	DBMap         map[string]string `yaml:"db_map"`           // 多库对比：源库名→目标库名映射
 	Tables        []string          `yaml:"tables"`         // 空=全部表
 	Aliases       map[string]string `yaml:"aliases"`        // 源表: 目标表
 	Scope         string            `yaml:"scope"`          // both|structure|data，默认 both

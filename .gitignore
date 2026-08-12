@@ -4,6 +4,9 @@
 /dbimpex
 /release/
 
+# Air 热重载配置（每个开发者可按需自定义）
+.air.toml
+
 # 前端依赖（web/dist 为前端构建产物，需随仓库追踪）
 web/node_modules/
 

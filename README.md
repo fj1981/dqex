@@ -76,3 +76,4 @@ make install           # → /usr/local/bin
 ## 文档
 
 - [CLI 使用手册](CLI.md)
+- [开发约定](docs/conventions.md)（状态建模、全链路数据流等工程约定，改动前必读）

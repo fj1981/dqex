@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import {
   ArrowLeftRight,
   BookOpenText,
+  Camera,
   ClipboardList,
   Database,
   FileDown,
@@ -28,6 +29,7 @@ import ImportView from "@/pages/ImportView"
 import MigrateView from "@/pages/MigrateView"
 import CompareView from "@/pages/CompareView"
 import DictionaryView from "@/pages/DictionaryView"
+import SnapshotView from "@/pages/SnapshotView"
 import { TASK_TYPE_LABEL } from "@/types"
 import { cn, formatTime, shortPaths } from "@/lib/utils"
 
@@ -37,6 +39,7 @@ const NAV = [
   { path: "/import", label: "导入", desc: "文件 → 数据库", icon: FileUp },
   { path: "/migrate", label: "迁移", desc: "数据库 → 数据库", icon: ArrowLeftRight },
   { path: "/compare", label: "对比", desc: "数据库 ↔ 数据库", icon: Scale },
+  { path: "/snapshots", label: "快照", desc: "数据库快照 ↔ 对比", icon: Camera },
   { path: "/dictionary", label: "数据字典", desc: "结构 → Excel", icon: BookOpenText },
 ]
 
@@ -93,7 +96,18 @@ const TYPE_BY_PATH: Record<string, string> = {
   "/import": "import",
   "/migrate": "migrate",
   "/compare": "compare",
+  "/snapshots": "snapshot_compare",
   "/dictionary": "dictionary",
+}
+
+// 历史记录 taskType → 功能页路径（snapshot_compare 共享 /snapshots 页面）
+const PATH_BY_TYPE: Record<string, string> = {
+  export: "/export",
+  import: "/import",
+  migrate: "/migrate",
+  compare: "/compare",
+  snapshot_compare: "/snapshots",
+  dictionary: "/dictionary",
 }
 
 function RightPanel() {
@@ -200,8 +214,8 @@ function RightPanel() {
               tabIndex={0}
               title="点击查看执行详情"
               className="group mb-1.5 min-w-0 cursor-pointer overflow-hidden rounded-md border bg-background px-2.5 py-1.5 text-xs transition-colors hover:border-primary/40 hover:shadow-sm"
-              onClick={() => navigate(`/${h.taskType}?running=${h.id}`)}
-              onKeyDown={(e) => e.key === "Enter" && navigate(`/${h.taskType}?running=${h.id}`)}
+              onClick={() => navigate(`${PATH_BY_TYPE[h.taskType] || "/"}?running=${h.id}`)}
+              onKeyDown={(e) => e.key === "Enter" && navigate(`${PATH_BY_TYPE[h.taskType] || "/"}?running=${h.id}`)}
             >
               <div className="flex items-center justify-between">
                 {/* 类型过滤下全部同类，省略类型名；全部视图保留以区分 */}
@@ -318,7 +332,7 @@ function Layout() {
             <Database className="h-4 w-4" />
           </span>
           <span className="font-medium">数据库工作台</span>
-          <Badge variant="secondary" className="ml-1 font-normal">导入 · 导出 · 迁移 · 对比 · 字典</Badge>
+          <Badge variant="secondary" className="ml-1 font-normal">导入 · 导出 · 迁移 · 对比 · 快照 · 字典</Badge>
         </div>
         <span className="text-xs text-muted-foreground">MySQL / PostgreSQL / Oracle</span>
       </header>
@@ -331,6 +345,7 @@ function Layout() {
             <Route path="/import" element={<ImportView />} />
             <Route path="/migrate" element={<MigrateView />} />
             <Route path="/compare" element={<CompareView />} />
+            <Route path="/snapshots" element={<SnapshotView />} />
             <Route path="/dictionary" element={<DictionaryView />} />
           </Routes>
         </main>

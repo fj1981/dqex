@@ -1,12 +1,16 @@
 GO ?= go
 DLV ?= dlv
+AIR ?= air
 PLATFORMS := darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64
 # 版本号：优先 git tag（含落后提交数），无 tag 时用短哈希，非 git 环境回退 dev-日期；可 make release VERSION=v1.2.3 覆盖
 VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev-$(shell date +%Y%m%d))
 BUILDTIME = $(shell date '+%y%m%d%H%M')
 LDFLAGS_REL := -s -w -X dbimpex/internal/cli.Version=$(VERSION) -X 'dbimpex/internal/cli.BuildTime=$(BUILDTIME)'
 
-.PHONY: all build install uninstall web web-deps web-dist web-stub dev dev-debug stop release clean
+# 检测 air 是否已安装
+HAS_AIR := $(shell command -v $(AIR) 2>/dev/null)
+
+.PHONY: all build install uninstall web web-deps web-dist web-stub dev dev-debug stop release clean air-install
 
 all: build
 
@@ -63,20 +67,37 @@ uninstall:
 stop:
 	@sh scripts/kill-dev-ports.sh
 
-# 开发模式：不构建前端，go run 启动后端 :8181 + Vite :5281（代理 /api），Ctrl+C 同时停止
+# 安装 air（Go 热重载工具）：后端代码变更时自动重新编译并重启
+air-install:
+	@echo ">> 安装 air (Go 热重载工具)..."
+	@$(GO) install github.com/air-verse/air@latest
+
+# 开发模式：后端用 air 热重载（Go 代码变更自动重启）+ 前端 Vite HMR（React 代码变更即时生效）
+# 默认访问 5281；后端 8181 仅监听 127.0.0.1，仅供 Vite 代理转发 /api，不直接对外暴露
+# OPEN_BACKEND=1 时后端启动后额外自动打开 8181 网页（带令牌，便于直接调试后端），默认仅开 5281
+OPEN_BACKEND ?=
 dev: web-deps web-stub stop
-	@echo ">> go run 启动后端 http://localhost:8181"
-	@echo ">> 启动前端 http://localhost:5281 (Ctrl+C 停止)"
+	@if [ -z "$(HAS_AIR)" ]; then \
+		echo ">> 未检测到 air，正在安装..."; \
+		$(GO) install github.com/air-verse/air@latest; \
+		echo ">> air 安装完成，启动开发模式"; \
+	fi
+	@echo ">> air 热重载启动后端（Go 代码变更自动重启，仅本机回环 127.0.0.1:8181）"
+	@echo ">> Vite HMR 启动前端 http://localhost:5281（React 代码变更即时生效）"
+	@echo ">> Ctrl+C 同时停止前后端"
+	@if [ -z "$(OPEN_BACKEND)" ]; then echo ">> 默认不打开 8181 网页；如需同步打开请加 OPEN_BACKEND=1"; fi
 	@echo ">> dev 代理自动注入令牌（读 ~/.dbimpex/web-access.json），5281 无需 ?token= 即可访问"
-	@$(GO) run ./cmd & BACKEND_PID=$$!; \
-	trap "kill $$BACKEND_PID 2>/dev/null; sh scripts/kill-dev-ports.sh" EXIT; \
+	@$(AIR) & AIR_PID=$$!; \
+	trap "kill $$AIR_PID 2>/dev/null; sh scripts/kill-dev-ports.sh" EXIT; \
 	cd web && yarn dev
 
 # 调试模式：dlv headless 启动后端（:2345），VS Code 使用 launch.json 中的
-# "Attach dbx" 配置 attach 调试；前端 Vite 同时启动
+# "Attach dbx" 配置 attach 调试；前端 Vite HMR 同时启动
+# 注意：dlv 模式下后端不支持热重载（需手动重启 dlv），前端仍然 HMR
 dev-debug: web-deps web-stub stop
-	@echo ">> dlv 调试服务: 127.0.0.1:2345（VS Code F5 attach）"
-	@echo ">> 启动前端 http://localhost:5281 (Ctrl+C 停止)"
+	@echo ">> dlv 调试服务: 127.0.0.1:2345（VS Code F5 attach，不支持热重载，需手动重启）"
+	@echo ">> Vite HMR 启动前端 http://localhost:5281（React 代码变更即时生效）"
+	@echo ">> Ctrl+C 同时停止"
 	@echo ">> dev 代理自动注入令牌（读 ~/.dbimpex/web-access.json），5281 无需 ?token= 即可访问"
 	@$(DLV) debug --headless --listen=127.0.0.1:2345 --api-version=2 --accept-multiclient ./cmd & BACKEND_PID=$$!; \
 	trap "kill $$BACKEND_PID 2>/dev/null; sh scripts/kill-dev-ports.sh" EXIT; \

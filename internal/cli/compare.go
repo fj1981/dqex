@@ -122,6 +122,13 @@ func cliCompare(cmd *cobra.Command, args []string) error {
 		}
 		opts.Target, opts.TargetConn = conn, ""
 	}
+	// 多库对比：配置文件 databases / db_map（与单库 source_database/target_database 二选一）
+	if len(cfg.Databases) > 0 {
+		opts.Databases = cfg.Databases
+	}
+	if len(cfg.DBMap) > 0 {
+		opts.DBMapping = cfg.DBMap
+	}
 	cb, _ := cliProgress()
 	fmt.Println("开始对比...")
 	taskID, _ := f.GetString("task")
@@ -250,10 +257,21 @@ func printCompareReport(result *CompareResult, showAll bool) {
 		red("数据差异"), s.DataDiff)
 
 	fmt.Println()
+	tables := result.Tables
+	if len(result.Databases) > 0 {
+		fmt.Printf("%s\n", bold(fmt.Sprintf("%d 个库参与对比", len(result.Databases))))
+		tables = nil
+		for _, db := range result.Databases {
+			fmt.Printf("\n%s %s ↔ %s（共%d项, 一致%d, 结构差异%d, 数据差异%d）\n",
+				bold("库"), bold(db.SourceDB), bold(db.TargetDB),
+				db.Summary.Total, db.Summary.Matched, db.Summary.StructureDiff, db.Summary.DataDiff)
+			tables = append(tables, db.Tables...)
+		}
+	}
 	fmt.Printf("%s  %s  %s\n", padCell("表", 32), padCell("状态", 8), "差异说明")
 	fmt.Printf("%s  %s  %s\n", strings.Repeat("-", 32), strings.Repeat("-", 8), strings.Repeat("-", 40))
 	shown := 0
-	for _, t := range result.Tables {
+	for _, t := range tables {
 		status, detail := cliTableSummary(t)
 		if !showAll && status == "一致" {
 			continue
@@ -303,7 +321,14 @@ func cliCompareShow(cmd *cobra.Command, args []string) error {
 		printCompareReport(result, true)
 		return nil
 	}
-	for _, t := range result.Tables {
+	tables := result.Tables
+	if len(result.Databases) > 0 {
+		tables = nil
+		for _, db := range result.Databases {
+			tables = append(tables, db.Tables...)
+		}
+	}
+	for _, t := range tables {
 		// 兼容三种指定方式：展示名 / 源表名 / 目标表名（别名配对场景）
 		if t.Name == table || t.SourceName == table || t.TargetName == table {
 			printTableDetail(t)

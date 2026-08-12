@@ -27,6 +27,8 @@ export default defineConfig({
   },
   server: {
     port: 5281,
+    // dev 默认打开 5281（若未打开则由 Vite 自动唤起浏览器）
+    open: true,
     proxy: {
       "/api": {
         target: "http://localhost:8181",

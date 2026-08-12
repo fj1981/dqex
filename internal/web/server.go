@@ -187,6 +187,15 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 		eb.GROUP("/dictionary", []cygin.APIHandler{
 			eb.POST("", handleDictionary(svc)),
 		}),
+		// 快照
+		eb.GROUP("/snapshots", []cygin.APIHandler{
+			eb.POST("", handleCreateSnapshot(svc)),
+			eb.GET("", handleListSnapshots(svc)),
+			eb.GET("/:id", handleGetSnapshot(svc)),
+			eb.DELETE("/:id", handleDeleteSnapshot(svc)),
+			eb.POST("/compare", handleSnapshotCompare(svc)),
+			eb.GET("/compare/result", handleSnapshotCompareResult(svc)),
+		}),
 		// 任务配置（避免与 :id 通配路由冲突，全部使用非通配路径）
 		eb.GROUP("/tasks", []cygin.APIHandler{
 			eb.GET("", handleListTasks(svc)),
@@ -225,18 +234,12 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 	token := ""
 	issuedAt := time.Now()
 	if !noAuth {
-		// 未过期的已持久化令牌可复用；已过期（或首次启动）则重新生成——重启即刷新
-		if info, ok := svc.Persist().LoadWebAccess(); ok && info.Token != "" &&
-			info.IssuedAt > 0 && time.Since(time.UnixMilli(info.IssuedAt)) < tokenTTL {
-			token = info.Token
-			issuedAt = time.UnixMilli(info.IssuedAt)
-		} else {
-			var terr error
-			token, terr = genToken()
-			if terr != nil {
-				cylog.Errorf("生成访问令牌失败，拒绝启动: %v", terr)
-				return
-			}
+		// 每次启动总是重新生成令牌（不读盘复用），重启即刷新，避免长期使用同一令牌
+		var terr error
+		token, terr = genToken()
+		if terr != nil {
+			cylog.Errorf("生成访问令牌失败，拒绝启动: %v", terr)
+			return
 		}
 		middlewares = append(middlewares, tokenAuth(token, issuedAt.Add(tokenTTL), newAuthLimiter()))
 	}

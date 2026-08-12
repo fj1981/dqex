@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { ChevronDown, Search } from "lucide-react"
 import type { TableColumn } from "@/types"
 import { Badge } from "@/components/ui/badge"
@@ -53,6 +53,19 @@ export default function ColumnMultiSelect({
 }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  // 点击外部关闭
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", onPointerDown)
+    return () => document.removeEventListener("mousedown", onPointerDown)
+  }, [open])
 
   const selected = new Set(value.map((v) => v.toLowerCase()))
   const filtered = options.filter((o) => !query || o.name.toLowerCase().includes(query.toLowerCase()))
@@ -67,7 +80,7 @@ export default function ColumnMultiSelect({
   }
 
   return (
-    <div className={cn("min-w-0 flex-1", className)}>
+    <div ref={rootRef} className={cn("relative min-w-0 flex-1", className)}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -93,7 +106,7 @@ export default function ColumnMultiSelect({
       </button>
 
       {open && (
-        <div className="mt-1 rounded-md border bg-card p-2 shadow-sm">
+        <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-md border bg-card p-2 shadow-md">
           <div className="flex items-center gap-1.5">
             <div className="relative min-w-0 flex-1">
               <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />

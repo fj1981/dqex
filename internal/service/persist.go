@@ -15,9 +15,9 @@ import (
 
 // PersistMgr 统一持久化管理：连接配置 + 任务配置 + 执行历史（JSON 文件存储于数据根目录）
 type PersistMgr struct {
-	baseDir                                  string
-	tmpDir, uploadDir, exportDir, compareDir string
-	mu                                       sync.Mutex
+	baseDir                                                string
+	tmpDir, uploadDir, exportDir, compareDir, snapshotDir  string
+	mu                                                     sync.Mutex
 }
 
 // 数据根目录（默认 ~/.dbimpex，--data-dir 可覆盖）下的子目录规划：
@@ -26,11 +26,13 @@ type PersistMgr struct {
 //   - tmp：任务处理临时目录（如 zip 解压，任务结束自动清理）
 //   - exports：导出产物目录（导出 zip/目录）
 //   - compares：对比报告目录（compare-<ID>.json）
+//   - snapshots：快照目录（index.json + <snapshot-id>.json）
 const (
-	UploadDirName  = "uploads"
-	TempDirName    = "tmp"
-	ExportDirName  = "exports"
-	CompareDirName = "compares"
+	UploadDirName   = "uploads"
+	TempDirName     = "tmp"
+	ExportDirName   = "exports"
+	CompareDirName  = "compares"
+	SnapshotDirName = "snapshots"
 )
 
 // NewPersistMgr 创建持久化管理器（默认 ~/.dbimpex/，子目录由 data 目录派生）
@@ -40,12 +42,12 @@ func NewPersistMgr(baseDir string) (*PersistMgr, error) {
 
 // NewPersistMgrWith 按解析后的五类目录创建持久化管理器
 func NewPersistMgrWith(dirs ResolvedDirs) (*PersistMgr, error) {
-	for _, d := range []string{dirs.Data, dirs.Tmp, dirs.Uploads, dirs.Exports, dirs.Compares} {
+	for _, d := range []string{dirs.Data, dirs.Tmp, dirs.Uploads, dirs.Exports, dirs.Compares, dirs.Snapshots} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, err
 		}
 	}
-	return &PersistMgr{baseDir: dirs.Data, tmpDir: dirs.Tmp, uploadDir: dirs.Uploads, exportDir: dirs.Exports, compareDir: dirs.Compares}, nil
+	return &PersistMgr{baseDir: dirs.Data, tmpDir: dirs.Tmp, uploadDir: dirs.Uploads, exportDir: dirs.Exports, compareDir: dirs.Compares, snapshotDir: dirs.Snapshots}, nil
 }
 
 // BaseDir 返回存储根目录（配置存储）
@@ -62,6 +64,9 @@ func (p *PersistMgr) ExportDir() string { return p.exportDir }
 
 // CompareDir 返回对比报告目录（compare-<ID>.json）
 func (p *PersistMgr) CompareDir() string { return p.compareDir }
+
+// SnapshotDir 返回快照目录
+func (p *PersistMgr) SnapshotDir() string { return p.snapshotDir }
 
 func (p *PersistMgr) path(name string) string { return filepath.Join(p.baseDir, name) }
 
@@ -181,7 +186,7 @@ func (p *PersistMgr) LoadConns() map[string]ConnRecord {
 	return recs
 }
 
-// GetConn 按主键 ID 查找连接；兼容按名称查找（旧任务配置引用）
+// GetConn 按主键 ID 查找连接；兼容按名称或短名查找（旧任务配置引用）
 func (p *PersistMgr) GetConn(key string) (ConnRecord, bool) {
 	conns := p.LoadConns()
 	if rec, ok := conns[key]; ok {
@@ -192,10 +197,15 @@ func (p *PersistMgr) GetConn(key string) (ConnRecord, bool) {
 			return rec, true
 		}
 	}
+	for _, rec := range conns {
+		if rec.ShortName == key {
+			return rec, true
+		}
+	}
 	return ConnRecord{}, false
 }
 
-// DeleteConn 删除连接配置（按主键 ID，兼容按名称）
+// DeleteConn 删除连接配置（按主键 ID，兼容名称或短名）
 func (p *PersistMgr) DeleteConn(key string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -206,11 +216,16 @@ func (p *PersistMgr) DeleteConn(key string) error {
 	if _, ok := conns[key]; ok {
 		delete(conns, key)
 	} else {
+		found := false
 		for id, rec := range conns {
-			if rec.Name == key {
+			if rec.Name == key || rec.ShortName == key {
 				delete(conns, id)
+				found = true
 				break
 			}
+		}
+		if !found {
+			return cygin.NewError(ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("未找到连接: %s", key))
 		}
 	}
 	return p.saveJSON("connections.json", conns)

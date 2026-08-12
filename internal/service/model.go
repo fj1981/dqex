@@ -33,6 +33,16 @@ type (
 	ProgressInfo = engine.Progress
 	// ProgressFunc 进度回调
 	ProgressFunc = engine.ProgressFunc
+	// Snapshot 快照完整数据
+	Snapshot = engine.Snapshot
+	// SnapshotInfo 快照摘要
+	SnapshotInfo = engine.SnapshotInfo
+	// SnapshotTable 单表快照
+	SnapshotTable = engine.SnapshotTable
+	// CreateSnapshotOptions 创建快照选项
+	CreateSnapshotOptions = engine.CreateSnapshotOptions
+	// SnapshotCompareOptions 快照对比选项
+	SnapshotCompareOptions = engine.SnapshotCompareOptions
 )
 
 // 重置模式常量
@@ -86,17 +96,22 @@ type ExecutionRecord struct {
 	Summary      string   `json:"summary"`          // 如 "3表, 40000行, 15.3MB"
 }
 
-// ConnRecord 连接配置存储记录：ID（xid）为主键，Name 仅为展示名（可改可重名）
+// ConnRecord 连接配置存储记录：ID（xid）为主键，Name 仅为展示名（可改可重名）；
+// ShortName 为命令行简写（唯一，不可重名），用于快速引用连接
 type ConnRecord struct {
-	ID   string     `json:"id"`
-	Name string     `json:"name"`
-	Conn DBConnInfo `json:"conn"`
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	ShortName string     `json:"shortName,omitempty"` // 命令行简写（如 prod/my-dev），可选；不填时用 Name 匹配
+	Env       string     `json:"env,omitempty"`        // dev/test/staging/prod，留空视为 prod
+	Conn      DBConnInfo `json:"conn"`
 }
 
 // ConnInfo 连接列表展示信息
 type ConnInfo struct {
-	ID       string     `json:"id"`
-	Name     string     `json:"name"`
-	Conn     DBConnInfo `json:"conn"`
-	SubTypes []string   `json:"subTypes"` // 该类型可用的子类型（兼容数据库产品）
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	ShortName string     `json:"shortName,omitempty"`
+	Env       string     `json:"env,omitempty"`
+	Conn      DBConnInfo `json:"conn"`
+	SubTypes  []string   `json:"subTypes"` // 该类型可用的子类型（兼容数据库产品）
 }

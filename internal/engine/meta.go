@@ -52,13 +52,12 @@ func GetTableTree(conn DBConnInfo) ([]DBTables, error) {
 	}
 }
 
-// mysqlTableTree MySQL：SHOW DATABASES 后逐库查表（单连接即可）
+// mysqlTableTree MySQL：SHOW DATABASES 后逐库查表（复用池化连接）
 func mysqlTableTree(conn DBConnInfo) ([]DBTables, error) {
-	cli, err := Connect(conn)
+	cli, err := ConnectPooled(conn, conn.DBName)
 	if err != nil {
 		return nil, err
 	}
-	defer cli.Close()
 
 	if conn.DBName != "" {
 		tables, err := cli.GetTables(conn.DBName, nil, nil)
@@ -82,7 +81,8 @@ func mysqlTableTree(conn DBConnInfo) ([]DBTables, error) {
 		}
 		tables, err := cli.GetTables(db, nil, nil)
 		if err != nil {
-			return nil, fmt.Errorf("获取库 %s 的表列表失败: %w", db, err)
+			// 单个库无权限/查询失败不应中断整棵树加载（与 PostgreSQL 行为一致）
+			continue
 		}
 		d := DBTables{Name: db, Tables: excludeViews(cli, db, "", tables)}
 		attachObjects(cli, db, "", &d)
@@ -91,17 +91,16 @@ func mysqlTableTree(conn DBConnInfo) ([]DBTables, error) {
 	return tree, nil
 }
 
-// postgresTableTree PostgreSQL：pg_database 枚举后逐库连接查表
+// postgresTableTree PostgreSQL：pg_database 枚举后逐库连接查表（复用池化连接）
 func postgresTableTree(conn DBConnInfo) ([]DBTables, error) {
 	base := conn
 	if base.DBName == "" {
 		base.DBName = "postgres" // 枚举需要一个可连接的库
 	}
-	cli, err := Connect(base)
+	cli, err := ConnectPooled(conn, base.DBName)
 	if err != nil {
 		return nil, err
 	}
-	defer cli.Close()
 
 	if conn.DBName != "" {
 		tables, err := cli.GetTables(conn.DBName, nil, nil)
@@ -123,30 +122,27 @@ func postgresTableTree(conn DBConnInfo) ([]DBTables, error) {
 		if db == "" {
 			continue
 		}
-		dbCli, err := ConnectDB(conn, db)
+		dbCli, err := ConnectPooled(conn, db)
 		if err != nil {
 			continue // 无权限连接的库跳过
 		}
 		tables, err := dbCli.GetTables(db, nil, nil)
 		if err != nil {
-			dbCli.Close()
 			continue
 		}
 		d := DBTables{Name: db, Tables: excludeViews(dbCli, db, conn.Schema, tables)}
 		attachObjects(dbCli, db, conn.Schema, &d)
-		dbCli.Close()
 		tree = append(tree, d)
 	}
 	return tree, nil
 }
 
-// oracleTableTree Oracle：以 schema(user) 为树节点
+// oracleTableTree Oracle：以 schema(user) 为树节点（复用池化连接）
 func oracleTableTree(conn DBConnInfo) ([]DBTables, error) {
-	cli, err := Connect(conn)
+	cli, err := ConnectPooled(conn, conn.DBName)
 	if err != nil {
 		return nil, err
 	}
-	defer cli.Close()
 
 	// 指定了 schema 时只返回该 schema
 	schema := conn.Schema
@@ -241,13 +237,12 @@ type TableColumnInfo struct {
 	AutoIncrement bool   `json:"autoIncrement,omitempty"`
 }
 
-// GetTableColumns 获取指定表的列信息（名称/类型/可空/主键/默认值）
+// GetTableColumns 获取指定表的列信息（名称/类型/可空/主键/默认值，复用池化连接）
 func GetTableColumns(conn DBConnInfo, tableName string) ([]TableColumnInfo, error) {
-	cli, err := Connect(conn)
+	cli, err := ConnectPooled(conn, conn.DBName)
 	if err != nil {
 		return nil, err
 	}
-	defer cli.Close()
 	info, err := cli.GetTableInfo(tableName)
 	if err != nil {
 		return nil, fmt.Errorf("获取表 %s 的列信息失败: %w", tableName, err)

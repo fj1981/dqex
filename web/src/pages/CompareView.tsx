@@ -1,19 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
-import { ArrowRight, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, MoveRight, Play, RotateCcw, Save, ScrollText, Search, X } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { ArrowRight, CheckCircle2, ChevronDown, ChevronUp, MoveRight, Play, ScrollText, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import Hint from "@/components/Hint"
 import TaskConfigBar from "@/components/TaskConfigBar"
 import WizardFooter from "@/components/WizardFooter"
@@ -26,11 +19,11 @@ import { Section } from "@/components/Section"
 import StepWizard from "@/components/StepWizard"
 import TablePicker from "@/components/TablePicker"
 import ColumnMultiSelect, { isTimeColumn, toColumnOptions } from "@/components/ColumnMultiSelect"
+import { CompareReport } from "@/components/CompareReport"
 import { useAppStore } from "@/stores/app"
 import { cn } from "@/lib/utils"
 import type {
-  ChangedRow,
-  CompareColumnItem,
+  CompareDBPair,
   CompareOptions,
   CompareResult,
   CompareTableResult,
@@ -63,8 +56,9 @@ function defaultOptions(): CompareOptions {
   }
 }
 
-// "库.表" 限定名剥离库前缀（对比按裸表名匹配）
+// "库.表" 限定名解析
 const bareName = (t: string) => (t.includes(".") ? t.slice(t.indexOf(".") + 1) : t)
+const dbOf = (t: string) => (t.includes(".") ? t.slice(0, t.indexOf(".")) : "")
 
 // 对比页：四步向导（作用域为单个库对，支持表别名配对）
 export default function CompareView() {
@@ -83,6 +77,12 @@ export default function CompareView() {
   const [taskState, setTaskState] = useState("running")
   const [report, setReport] = useState<CompareResult | null>(null)
   const [targetTables, setTargetTables] = useState<string[]>([])
+  const [targetDBOptions, setTargetDBOptions] = useState<string[]>([])
+  // 目标库列表加载状态：用于库映射卡片区分「正在加载 / 已加载为空 / 加载失败」三种 UI，
+  // 避免下拉为空时无法判断是后端权限问题还是仍在加载中
+  const [targetDBsLoaded, setTargetDBsLoaded] = useState(false)
+  const [targetDBsLoading, setTargetDBsLoading] = useState(false)
+  const [targetDBsError, setTargetDBsError] = useState("")
   const [tableCols, setTableCols] = useState<Record<string, TableColumn[]>>({})
   const [colsLoading, setColsLoading] = useState(false)
   const filledDefaults = useRef(false)
@@ -97,26 +97,38 @@ export default function CompareView() {
   // 按主键 id（兼容旧任务配置中的连接名）查找连接
   const findConn = (key: string) => connections.find((c) => c.id === key || c.name === key)
 
-  // 目标库当前作用域名：inline 覆盖优先，其次连接配置的库
-  const targetDB = opts.target?.DBName || findConn(opts.targetConn)?.conn.DBName || ""
+  // 选中的源库 / 目标库（多库对比）：从 databases 库对推导
+  const sourceDBs = useMemo(() => (opts.databases || []).map((d) => d.sourceDB), [opts.databases])
+  const targetDBs = useMemo(
+    () => (opts.databases || []).map((d) => d.targetDB || d.sourceDB),
+    [opts.databases],
+  )
+  // 库映射：源库名 → 目标库名（供 TablePicker 把目标库独有表归并到对应源库节点）
+  const dbMapping = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const d of opts.databases || []) m[d.sourceDB] = d.targetDB || d.sourceDB
+    return m
+  }, [opts.databases])
+  // 列信息拉取 / 单库作用域使用的主库（取第一个源库）
+  const sourceDB = sourceDBs[0] || opts.source?.DBName || findConn(opts.sourceConn)?.conn.DBName || ""
+  // 目标库树拉取 / 别名目标候选使用的主目标库（取第一个目标库）
+  const targetDB = targetDBs[0] || opts.target?.DBName || findConn(opts.targetConn)?.conn.DBName || ""
 
-  // 源库作用域（单库对）：inline 覆盖优先，其次连接配置的库，再退到选中库
-  const sourceDB = opts.source?.DBName || findConn(opts.sourceConn)?.conn.DBName || (opts.databases || [])[0] || ""
-
-  // 源连接未配置库时，以选中的第一个库 inline 覆盖源/目标库名（对比作用域为单个库对）
-  const pickSourceDB = (dbName: string) => {
-    const src = findConn(opts.sourceConn)
-    const tgt = findConn(opts.targetConn)
-    set({
-      source: src ? { ...src.conn, DBName: dbName } : opts.source,
-      target: tgt && !tgt.conn.DBName ? { ...tgt.conn, DBName: dbName } : opts.target,
-    })
+  // 库选择变化时重建库对（优先保留已有映射的目标库，否则同名）
+  const handleDBsChange = (databases: string[]) => {
+    const prevMap = new Map((opts.databases || []).map((d) => [d.sourceDB, d.targetDB]))
+    const pairs: CompareDBPair[] = databases.map((src) => ({ sourceDB: src, targetDB: prevMap.get(src) || src }))
+    set({ databases: pairs })
   }
 
-  const handleDBsChange = (databases: string[]) => {
-    set({ databases })
-    const src = findConn(opts.sourceConn)
-    if (src && !src.conn.DBName && databases.length > 0) pickSourceDB(databases[0])
+  // 设置某源库的对比目标库（同名配对时无需调用）
+  const setDBMapping = (sourceDB: string, targetDB: string) => {
+    set({
+      databases: (opts.databases || []).map((d) =>
+        d.sourceDB === sourceDB ? { ...d, targetDB } : d,
+      ),
+      dbMapping: { ...(opts.dbMapping || {}), [sourceDB]: targetDB },
+    })
   }
 
   const loadSavedTasks = useCallback(async () => {
@@ -155,14 +167,68 @@ export default function CompareView() {
     api.getLastTask("compare").then(({ task }) => task && applyTask(task)).catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 进入选项步骤时加载目标库表清单（别名配置辅助输入）
+  // 选好目标连接后加载目标库清单：供「库映射」下拉（选表步骤）与别名配对候选（选项步骤）使用
+  // 拆分为两个 effect：targetDBOptions 只依赖 targetConn（库映射卡片稳定显示，不随用户勾选表而重拉）；
+  // step=2 的表列表才依赖 targetDB/targetDBs（同名配对时只列该库的表）。
   useEffect(() => {
-    if (step !== 2 || !opts.targetConn) return
+    if (!opts.targetConn) {
+      setTargetDBOptions([])
+      setTargetDBsLoaded(false)
+      setTargetDBsLoading(false)
+      setTargetDBsError("")
+      setTargetTables([])
+      return
+    }
+    let cancelled = false
+    setTargetDBsLoading(true)
+    setTargetDBsError("")
+    api
+      .getTableTree(opts.targetConn)
+      .then(({ databases }) => {
+        if (cancelled) return
+        setTargetDBOptions(databases.map((d) => d.name))
+        setTargetDBsLoaded(true)
+      })
+      .catch((e: Error) => {
+        if (cancelled) return
+        console.error("[CompareView] targetDBList error", e)
+        setTargetDBOptions([])
+        setTargetDBsError(e.message || "加载目标库列表失败")
+        setTargetDBsLoaded(true)
+      })
+      .finally(() => {
+        if (!cancelled) setTargetDBsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [opts.targetConn])
+
+  // step=2 进入「设置对比选项」时，再按选中的目标库拉表清单，作为别名配对候选
+  useEffect(() => {
+    if (step !== 2 || !opts.targetConn) {
+      return
+    }
+    let cancelled = false
     api
       .getTableTree(opts.targetConn, targetDB || undefined)
-      .then(({ databases }) => setTargetTables(databases.flatMap((d) => d.tables)))
-      .catch(() => setTargetTables([]))
-  }, [step, opts.targetConn, targetDB])
+      .then(({ databases }) => {
+        if (cancelled) return
+        const want = new Set(targetDBs)
+        const lst = want.size
+          ? databases.filter((d) => want.has(d.name)).flatMap((d) => d.tables)
+          : databases.flatMap((d) => d.tables)
+        setTargetTables(lst)
+      })
+      .catch((e: Error) => {
+        if (cancelled) return
+        console.error("[CompareView] targetTables error", e)
+        setTargetTables([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [step, opts.targetConn, targetDB, targetDBs])
 
   // 任务状态跟踪（ProgressView 内部另有订阅，此处用于触发结果拉取与留存日志）
   useEffect(() => {
@@ -230,13 +296,21 @@ export default function CompareView() {
       seen.add(t)
     }
     try {
-      // 未勾选表 = 对比库内全部表（后端 nil=全部）
+      // 表范围完全由用户勾选决定：未勾选 = 对比库内全部表（后端 nil=全部）；
+      // 勾选了则严格只对比所选表（限定名 "源库.表"）。运行时源用源库、目标用映射库，按裸名过滤。
       const payload: CompareOptions = {
         ...opts,
         tables: (opts.tables || []).length > 0 ? opts.tables : undefined,
         ignoreColumns: (opts.ignoreColumns || []).length > 0 ? opts.ignoreColumns : undefined,
         forceData: opts.forceData || undefined,
       }
+      // 调试日志：库映射配置经过哪些层到达后端，避免修改多库对比时漏改某条链路
+      console.log("[CompareView] startCompare payload", {
+        dbs: payload.databases,
+        dbMapping: payload.dbMapping,
+        sources: sourceDBs,
+        remappedCount,
+      })
       const { taskID } = await api.startCompare(payload, taskConfigId)
       setRunningTaskID(taskID)
       setStep(3)
@@ -246,44 +320,46 @@ export default function CompareView() {
     }
   }
 
-  const selectedBareTables = (opts.tables || []).map(bareName)
+  const selectedQualifiedTables = useMemo(() => [...new Set(opts.tables || [])], [opts.tables])
 
-  // 进入选项步骤时拉取选中表的列信息（忽略列下拉候选）；
+  // 进入选项步骤时拉取选中表的列信息（忽略列下拉候选）；多库场景下按限定名对应的源库分别拉取
   // 首次进入时默认回填时间类列（创建/更新时间），全局忽略同步预选
-  const selectedTablesKey = selectedBareTables.join(",")
+  const selectedTablesKey = selectedQualifiedTables.join(",")
   useEffect(() => {
-    if (step !== 2 || !opts.sourceConn || !sourceDB || !selectedTablesKey) return
+    if (step !== 2 || !opts.sourceConn || selectedQualifiedTables.length === 0) return
     let cancelled = false
     setColsLoading(true)
     Promise.all(
-      selectedBareTables.map((t) =>
-        api
-          .getTableColumns(opts.sourceConn, sourceDB, t)
+      selectedQualifiedTables.map((q) => {
+        const db = dbOf(q) || sourceDB
+        const t = bareName(q)
+        return api
+          .getTableColumns(opts.sourceConn, db, t)
           .then((r) => r.columns || [])
-          .catch(() => [] as TableColumn[]),
-      ),
+          .catch(() => [] as TableColumn[])
+      }),
     )
       .then((colsArr) => {
         if (cancelled) return
         const map: Record<string, TableColumn[]> = {}
-        selectedBareTables.forEach((t, i) => {
-          map[t] = colsArr[i]
+        selectedQualifiedTables.forEach((q, i) => {
+          map[q] = colsArr[i]
         })
         setTableCols(map)
         if (!filledDefaults.current) {
           filledDefaults.current = true
           setOpts((prev) => {
             const aliases = [...(prev.aliases || [])]
-            selectedBareTables.forEach((t, i) => {
+            selectedQualifiedTables.forEach((q, i) => {
               const times = colsArr[i].filter(isTimeColumn).map((c) => c.name)
               if (times.length === 0) return
-              const idx = aliases.findIndex((a) => a.source === t)
+              const idx = aliases.findIndex((a) => a.source === q)
               if (idx >= 0) {
                 if ((aliases[idx].ignoreColumns || []).length === 0) {
                   aliases[idx] = { ...aliases[idx], ignoreColumns: times }
                 }
               } else {
-                aliases.push({ source: t, target: "", ignoreColumns: times })
+                aliases.push({ source: q, target: "", ignoreColumns: times })
               }
             })
             const timeUnion = [...new Set(colsArr.flat().filter(isTimeColumn).map((c) => c.name))]
@@ -312,7 +388,7 @@ export default function CompareView() {
     )
     return toColumnOptions([...seen.values()])
   }, [tableCols])
-  // 单表的表级配置条目（目标表名 + 忽略列）
+  // 单表的表级配置条目（目标表名 + 忽略列）；source 使用限定名，实现多库同名表分别配置
   const aliasEntryOf = (src: string) => (opts.aliases || []).find((a) => a.source === src)
   const aliasOf = (src: string) => aliasEntryOf(src)?.target || ""
   const ignoreOf = (src: string) => (aliasEntryOf(src)?.ignoreColumns || []).join(",")
@@ -325,14 +401,41 @@ export default function CompareView() {
     [opts.aliases],
   )
   const scopeKey = opts.structureOnly ? "structure" : opts.dataOnly ? "data" : "both"
+  // 库映射卡片：搜索过滤后的库对列表 + 已重命名数量；库多时可滚动并搜索
+  const [dbMapQuery, setDbMapQuery] = useState("")
+  const filteredDBPairs = useMemo(() => {
+    const q = dbMapQuery.trim().toLowerCase()
+    const pairs = opts.databases || []
+    if (!q) return pairs
+    return pairs.filter(
+      (p) =>
+        (p.sourceDB || "").toLowerCase().includes(q) ||
+        (p.targetDB || "").toLowerCase().includes(q),
+    )
+  }, [opts.databases, dbMapQuery])
+  const remappedCount = useMemo(
+    () => (opts.databases || []).filter((p) => p.targetDB && p.targetDB !== p.sourceDB).length,
+    [opts.databases],
+  )
   // 表级配置列表过滤：搜索关键词 + 仅看已配置；表多时无需翻长列表
-  const aliasList = selectedBareTables.filter(
+  const aliasList = selectedQualifiedTables.filter(
     (t) =>
       (!aliasOnlyConfigured || isConfigured(t)) &&
       (!aliasQuery.trim() ||
         t.toLowerCase().includes(aliasQuery.trim().toLowerCase()) ||
         aliasOf(t).toLowerCase().includes(aliasQuery.trim().toLowerCase())),
   )
+  // 按库分组展示，多库场景下可清晰看到表所属库
+  const aliasGroups = useMemo(() => {
+    const map = new Map<string, string[]>()
+    for (const q of aliasList) {
+      const db = dbOf(q)
+      const list = map.get(db) || []
+      list.push(q)
+      map.set(db, list)
+    }
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [aliasList])
   // datalist 候选：与当前输入相关的目标表（避免表多时下拉巨长）
   const aliasCandidates = useMemo(() => {
     const q = aliasQuery.trim().toLowerCase()
@@ -379,7 +482,7 @@ export default function CompareView() {
           )}
           {!!opts.sourceConn && !!opts.targetConn && opts.sourceConn !== opts.targetConn && (
             <Hint>
-              对比范围为单个库对；表按名称匹配，不同名的同义表可在下一步配置别名配对。
+              支持勾选多个库进行多库对比；表按名称匹配，不同名的同义表可在下一步配置别名配对。
             </Hint>
           )}
           <WizardFooter
@@ -403,14 +506,128 @@ export default function CompareView() {
           <TablePicker
             connId={opts.sourceConn}
             extraConnId={opts.targetConn}
-            extraDb={targetDB || undefined}
+            extraDb={undefined}
+            dbMapping={Object.keys(dbMapping).length > 0 ? dbMapping : undefined}
             selected={opts.tables || []}
             showObjects={false}
-            selectedDBs={opts.databases || []}
+            selectedDBs={sourceDBs}
             onDBsChange={handleDBsChange}
             conditions={[]}
             onChange={(tables) => set({ tables })}
           />
+
+          {/* 库级映射：每个源库指定对比的目标库（同名默认，可改为目标库的其他库） */}
+          {sourceDBs.length > 0 && (
+            <Card className="p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="text-sm font-medium">库映射</div>
+                  <div className="text-xs text-muted-foreground">
+                    源库 → 目标库（同名默认匹配）
+                    {remappedCount > 0 && (
+                      <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-primary">
+                        已重命名 {remappedCount}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {sourceDBs.length > 6 && (
+                  <div className="relative w-56">
+                    <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      className="h-7 pl-7 text-xs"
+                      placeholder="搜索源库…"
+                      value={dbMapQuery}
+                      onChange={(e) => setDbMapQuery(e.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
+              <Hint variant={targetDBsError ? "warning" : "info"}>
+                {targetDBsLoading ? (
+                  <>目标连接的库列表加载中…</>
+                ) : targetDBsError ? (
+                  <>
+                    目标库列表加载失败：{targetDBsError}。库映射将回退到同名匹配；如需映射到不同名的目标库，请检查目标连接的库访问权限（SHOW DATABASES / pg_database / all_users）后刷新。
+                  </>
+                ) : targetDBsLoaded && targetDBOptions.length === 0 ? (
+                  <>
+                    目标连接暂无可枚举的库（可能缺少全局元数据权限），当前将按同名配对；若两侧库名不同，请补全目标连接权限后刷新。
+                  </>
+                ) : targetDBOptions.length > 0 ? (
+                  <>
+                    已加载 {targetDBOptions.length} 个目标库；下拉里可改成不同名的目标库，已改的会高亮并在结果中以「源库 ↔ 目标库」展示。
+                  </>
+                ) : null}
+              </Hint>
+              <div className="scrollbar-thin mt-3 max-h-72 overflow-y-auto rounded border">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-muted/60 text-muted-foreground">
+                    <tr>
+                      <th className="w-1/2 px-3 py-1.5 text-left font-medium">源库</th>
+                      <th className="w-1/2 px-3 py-1.5 text-left font-medium">目标库</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredDBPairs.length === 0 && (
+                      <tr>
+                        <td colSpan={2} className="px-3 py-4 text-center text-xs text-muted-foreground">
+                          无匹配的源库
+                        </td>
+                      </tr>
+                    )}
+                    {filteredDBPairs.map((pair) => {
+                      const remapped = pair.targetDB && pair.targetDB !== pair.sourceDB
+                      // 下拉候选：已加载则用 loaded 列表；否则回退到当前已配置的 targetDB（同名默认），保证用户能看到当前值
+                      const candidates = targetDBOptions.length > 0
+                        ? Array.from(new Set([pair.targetDB || pair.sourceDB, ...targetDBOptions]))
+                        : [pair.targetDB || pair.sourceDB]
+                      const currentVal = pair.targetDB || pair.sourceDB
+                      return (
+                        <tr
+                          key={pair.sourceDB}
+                          className={cn(
+                            "border-t first:border-t-0",
+                            remapped ? "bg-primary/5" : "even:bg-muted/30",
+                          )}
+                        >
+                          <td
+                            className="max-w-0 truncate px-3 py-1.5 font-mono"
+                            title={pair.sourceDB}
+                          >
+                            {pair.sourceDB}
+                          </td>
+                          <td className="max-w-0 px-3 py-1.5">
+                            <Select
+                              value={currentVal}
+                              onValueChange={(v) => setDBMapping(pair.sourceDB, v)}
+                            >
+                              <SelectTrigger
+                                className={cn(
+                                  "h-7 w-full font-mono text-xs",
+                                  remapped ? "border-primary text-primary" : "",
+                                )}
+                              >
+                                <SelectValue placeholder="选择目标库" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {candidates.map((d) => (
+                                  <SelectItem key={d} value={d} className="font-mono text-xs">
+                                    {d}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+
           <WizardFooter onBack={() => setStep(0)} onNext={() => setStep(2)} />
         </div>
       )}
@@ -496,7 +713,7 @@ export default function CompareView() {
                 title={`表级配置 · 别名配对 / 忽略列${configuredAliases.length ? ` · 已配置 ${configuredAliases.length} 项` : ""}`}
                 description="源与目标表名不同时指定目标表名（留空按同名匹配）；可为单表设置忽略列，与全局忽略列合并生效"
               >
-                {selectedBareTables.length === 0 ? (
+                {selectedQualifiedTables.length === 0 ? (
                   <div className="text-xs text-muted-foreground">
                     未勾选表（将对比库内全部表）；如需为特定表配置别名/忽略列，请返回上一步勾选。
                   </div>
@@ -530,47 +747,58 @@ export default function CompareView() {
                         清空
                       </Button>
                     </div>
-                    {/* 限高内滚：表多时无需翻长页 */}
+                    {/* 限高内滚：表多时无需翻长页；多库时按库分组展示库名 */}
                     <div className="scrollbar-thin max-h-72 space-y-1.5 overflow-y-auto pr-1">
-                      {aliasList.length === 0 && (
+                      {aliasGroups.length === 0 && (
                         <div className="py-4 text-center text-xs text-muted-foreground">无匹配的表</div>
                       )}
-                      {aliasList.map((t) => (
-                        <div
-                          key={t}
-                          className={cn(
-                            "flex items-center gap-2 rounded-md border px-2.5 py-1.5",
-                            isConfigured(t) ? "border-primary/30 bg-primary/5" : "border-transparent bg-muted/30",
+                      {aliasGroups.map(([db, tables]) => (
+                        <div key={db || "default"} className="space-y-1">
+                          {db && (
+                            <div className="sticky top-0 z-10 bg-muted/50 px-2 py-1 text-xs font-medium text-muted-foreground">
+                              库: {db}
+                            </div>
                           )}
-                        >
-                          {/* 固定宽列 + 图标箭头：多行基线对齐，不再依赖文本字符 */}
-                          <span className="w-40 shrink-0 truncate font-mono text-xs" title={t}>{t}</span>
-                          <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                          <Input
-                            className="h-7 flex-1 text-xs"
-                            list="compare-alias-targets"
-                            placeholder="目标表名（默认同名）"
-                            value={aliasOf(t)}
-                            onChange={(e) => setAlias(t, e.target.value)}
-                          />
-                          <ColumnMultiSelect
-                            compact
-                            options={toColumnOptions(tableCols[t] || [])}
-                            value={aliasEntryOf(t)?.ignoreColumns || []}
-                            onChange={(cols) => setTableIgnore(t, cols)}
-                            placeholder="选择该表忽略列"
-                            loading={colsLoading && !tableCols[t]}
-                          />
-                          {isConfigured(t) && (
-                            <button
-                              type="button"
-                              className="shrink-0 text-muted-foreground hover:text-foreground"
-                              title="清除该表的别名与忽略列"
-                              onClick={() => upsertAlias(t, { target: "", ignoreColumns: [] })}
+                          {tables.map((t) => (
+                            <div
+                              key={t}
+                              className={cn(
+                                "flex items-center gap-2 rounded-md border px-2.5 py-1.5",
+                                isConfigured(t) ? "border-primary/30 bg-primary/5" : "border-transparent bg-muted/30",
+                              )}
                             >
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          )}
+                              {/* 固定宽列 + 图标箭头：多行基线对齐，不再依赖文本字符 */}
+                              <span className="w-40 shrink-0 truncate font-mono text-xs" title={t}>
+                                {dbOf(t) ? t : bareName(t)}
+                              </span>
+                              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                              <Input
+                                className="h-7 flex-1 text-xs"
+                                list="compare-alias-targets"
+                                placeholder="目标表名（默认同名）"
+                                value={aliasOf(t)}
+                                onChange={(e) => setAlias(t, e.target.value)}
+                              />
+                              <ColumnMultiSelect
+                                compact
+                                options={toColumnOptions(tableCols[t] || [])}
+                                value={aliasEntryOf(t)?.ignoreColumns || []}
+                                onChange={(cols) => setTableIgnore(t, cols)}
+                                placeholder="选择该表忽略列"
+                                loading={colsLoading && !tableCols[t]}
+                              />
+                              {isConfigured(t) && (
+                                <button
+                                  type="button"
+                                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                                  title="清除该表的别名与忽略列"
+                                  onClick={() => upsertAlias(t, { target: "", ignoreColumns: [] })}
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       ))}
                     </div>
@@ -666,363 +894,4 @@ export default function CompareView() {
 
 // ==================== 对比报告 ====================
 
-// 汇总过滤项：数值颜色与差异语义对齐，点击切换过滤
-const FILTERS = [
-  { key: "", label: "全部", cls: "" },
-  { key: "matched", label: "一致", cls: "text-green-600" },
-  { key: "source_only", label: "仅源有", cls: "text-amber-600" },
-  { key: "target_only", label: "仅目标有", cls: "text-blue-600" },
-  { key: "structure", label: "结构差异", cls: "text-red-600" },
-  { key: "data", label: "数据差异", cls: "text-red-600" },
-]
-
-function matchesFilter(t: CompareTableResult, f: string): boolean {
-  if (f === "") return true
-  if (f === "source_only") return t.status === "source_only"
-  if (f === "target_only") return t.status === "target_only"
-  if (t.status !== "both") return false
-  if (f === "matched") return (t.columns?.matched ?? true) && (t.data?.equal ?? true)
-  if (f === "structure") return !!t.columns && !t.columns.matched
-  // 跳过类（结构不一致等）不计入数据差异，与后端汇总口径一致
-  if (f === "data") return !!t.data && !t.data.equal && t.data.mode !== "skipped"
-  return true
-}
-
-function fmtVal(v: unknown): string {
-  if (v === null || v === undefined) return "NULL"
-  if (typeof v === "object") return JSON.stringify(v)
-  return String(v)
-}
-
-// 单元格预览：XML/BLOB 类大字段截断展示，避免采样表被超长内容撑坏
-function cellPreview(v: unknown): string {
-  const s = fmtVal(v)
-  return s.length > 160 ? `${s.slice(0, 160)}…` : s
-}
-
-function colDesc(c: CompareColumnItem): string {
-  return `${c.dataType}${c.primaryKey ? " · 主键" : ""}${c.nullable ? "" : " · 非空"}`
-}
-
-// 数据差异摘要：省略零值项，避免“缺失19行/多出0行”这类冗余信息
-function tableDataDesc(d: NonNullable<CompareTableResult["data"]>): string {
-  if (d.mode === "count") return `行数 ${d.sourceRows} vs ${d.targetRows}`
-  if (d.skippedReason) return d.skippedReason
-  if (d.equal) return `数据一致 (${d.sourceRows}行)`
-  const parts: string[] = []
-  if (d.missing) parts.push(`缺失${d.missing}行`)
-  if (d.extra) parts.push(`多出${d.extra}行`)
-  if (d.changed) parts.push(`变化${d.changed}行`)
-  return parts.join(" / ") || "有差异"
-}
-
-// 行明细采样表格（缺失/多出各最多 20 条）；colOrder 按源表列定义顺序渲染
-function SampleTable({ title, rows, colOrder }: { title: string; rows?: Record<string, unknown>[]; colOrder?: string[] }) {
-  if (!rows || rows.length === 0) return null
-  // 优先按后端给出的列序渲染；兼容旧数据回退到首行 key 顺序
-  const cols = colOrder && colOrder.length > 0 ? colOrder.filter((c) => c in rows[0]) : Object.keys(rows[0])
-  return (
-    <div className="min-w-0">
-      <div className="mb-1 text-xs font-medium text-muted-foreground">
-        {title}（{rows.length} 条）
-      </div>
-      {/* 列宽按内容自适应：短列窄、长文本列封顶截断；w-max+min-w-full 兼顾少列占满与多列横向滚动 */}
-      <div className="scrollbar-thin max-h-80 overflow-auto rounded-md border">
-        <table className="w-max min-w-full text-xs">
-          <thead className="sticky top-0 bg-muted">
-            <tr>
-              {cols.map((c) => (
-                <th key={c} className="whitespace-nowrap px-2 py-1 text-left font-medium">{c}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} className="border-t">
-                {cols.map((c) => (
-                  <td key={c} className="max-w-52 truncate px-2 py-1" title={cellPreview(r[c])}>
-                    {cellPreview(r[c])}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
-// 变化行采样表格（PK 模式）：主键取值 + 差异列源/目标对照
-function ChangedTable({ rows }: { rows?: ChangedRow[] }) {
-  if (!rows || rows.length === 0) return null
-  return (
-    <div className="min-w-0">
-      <div className="mb-1 text-xs font-medium text-muted-foreground">
-        主键匹配但内容不同（变化）（{rows.length} 条）
-      </div>
-      <div className="scrollbar-thin max-h-80 overflow-auto rounded-md border">
-        <table className="w-max min-w-full text-xs">
-          <thead className="sticky top-0 bg-muted">
-            <tr>
-              <th className="whitespace-nowrap px-2 py-1 text-left font-medium">主键</th>
-              <th className="whitespace-nowrap px-2 py-1 text-left font-medium">差异列</th>
-              <th className="whitespace-nowrap px-2 py-1 text-left font-medium">源</th>
-              <th className="whitespace-nowrap px-2 py-1 text-left font-medium">目标</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.flatMap((r, i) =>
-              r.diffs.map((d, j) => (
-                <tr key={`${i}-${j}`} className="border-t">
-                  {j === 0 && (
-                    <td rowSpan={r.diffs.length} className="max-w-52 truncate px-2 py-1 align-top font-mono" title={Object.entries(r.key).map(([k, v]) => `${k}=${v}`).join("  ")}>
-                      {Object.entries(r.key).map(([k, v]) => `${k}=${cellPreview(v)}`).join("  ")}
-                    </td>
-                  )}
-                  <td className="whitespace-nowrap px-2 py-1 font-mono">{d.column}</td>
-                  <td className="max-w-52 truncate px-2 py-1" title={cellPreview(d.source)}>{cellPreview(d.source)}</td>
-                  <td className="max-w-52 truncate px-2 py-1" title={cellPreview(d.target)}>{cellPreview(d.target)}</td>
-                </tr>
-              )),
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
-// 行状态徽章：列表行与明细弹窗标题共用
-function statusBadgeOf(t: CompareTableResult) {
-  if (t.status === "source_only") return <Badge variant="secondary" className="bg-amber-50 text-amber-700">仅源有</Badge>
-  if (t.status === "target_only") return <Badge variant="secondary" className="bg-blue-50 text-blue-700">仅目标有</Badge>
-  if ((t.columns?.matched ?? true) && (t.data?.equal ?? true)) return <Badge variant="secondary" className="bg-green-50 text-green-700">一致</Badge>
-  return <Badge variant="secondary" className="bg-red-50 text-red-700">有差异</Badge>
-}
-
-// 表差异明细：弹窗内容，列级差异 + 缺失/多出采样行，内部滚动
-function TableDiffDetail({ t }: { t: CompareTableResult }) {
-  // 采样表分列：仅当两侧都有数据时才双列，否则单表占满弹窗宽度
-  const hasMissing = !!(t.data?.missingSamples && t.data.missingSamples.length > 0)
-  const hasExtra = !!(t.data?.extraSamples && t.data.extraSamples.length > 0)
-  return (
-    <div className="scrollbar-thin max-h-[72vh] space-y-3 overflow-y-auto pr-1">
-      {t.columns && !t.columns.matched && (
-        <div className="space-y-2">
-          {t.columns.sourceOnly.length > 0 && (
-            <div className="text-xs">
-              <span className="font-medium text-amber-700">源有目标无：</span>
-              {t.columns.sourceOnly.map((c) => (
-                <span key={c.name} className="ml-2 font-mono">{c.name} <span className="text-muted-foreground">({colDesc(c)})</span></span>
-              ))}
-            </div>
-          )}
-          {t.columns.targetOnly.length > 0 && (
-            <div className="text-xs">
-              <span className="font-medium text-blue-700">目标多出：</span>
-              {t.columns.targetOnly.map((c) => (
-                <span key={c.name} className="ml-2 font-mono">{c.name} <span className="text-muted-foreground">({colDesc(c)})</span></span>
-              ))}
-            </div>
-          )}
-          {t.columns.different.length > 0 && (
-            <div className="scrollbar-thin overflow-auto rounded-md border">
-              <table className="w-full text-xs">
-                <thead className="bg-muted">
-                  <tr>
-                    <th className="px-2 py-1 text-left font-medium">列名</th>
-                    <th className="px-2 py-1 text-left font-medium">源</th>
-                    <th className="px-2 py-1 text-left font-medium">目标</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {t.columns.different.map((d) => (
-                    <tr key={d.name} className="border-t">
-                      <td className="px-2 py-1 font-mono">{d.name}</td>
-                      <td className="px-2 py-1 font-mono text-muted-foreground">{colDesc(d.source)}</td>
-                      <td className="px-2 py-1 font-mono text-muted-foreground">{colDesc(d.target)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {t.data && !t.data.equal && (
-        <div className="space-y-3">
-          {t.data.skippedReason && (
-            <div className="text-xs text-muted-foreground">{t.data.skippedReason}</div>
-          )}
-          {t.data.mode === "rows" && (
-            <div className="text-xs text-muted-foreground">
-              {t.data.keyColumns && t.data.keyColumns.length > 0
-                ? `按主键 ${t.data.keyColumns.join(",")} 判断有无，内容对比判断变化`
-                : "无主键，整行对比（变化会表现为缺失+多出）"}
-            </div>
-          )}
-          {t.data.mode === "rows" && (
-            <div className={cn("grid gap-3", hasMissing && hasExtra && "lg:grid-cols-2")}>
-              <SampleTable title="源有目标无（缺失）" rows={t.data.missingSamples} colOrder={t.data.sampleColumns} />
-              <SampleTable title="目标有源无（多出）" rows={t.data.extraSamples} colOrder={t.data.sampleColumns} />
-            </div>
-          )}
-          {t.data.mode === "rows" && <ChangedTable rows={t.data.changedSamples} />}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// 对比报告：汇总统计 + 表级结果列表（限高内滚，差异明细弹窗查看）
-function CompareReport({ result, onSaveTask, onRestart }: { result: CompareResult; onSaveTask?: () => void; onRestart?: () => void }) {
-  const [filter, setFilter] = useState("")
-  const [showMatched, setShowMatched] = useState(false)
-  const [detail, setDetail] = useState<CompareTableResult | null>(null)
-  const s = result.summary
-
-  const counts: Record<string, number> = {
-    "": s.total,
-    matched: s.matched,
-    source_only: s.sourceOnly,
-    target_only: s.targetOnly,
-    structure: s.structureDiff,
-    data: s.dataDiff,
-  }
-
-  const toggleDetail = (t: CompareTableResult) => setDetail(t)
-
-  const tables = result.tables.filter((t) => {
-    if (!matchesFilter(t, filter)) return false
-    // 非过滤模式下默认隐藏完全一致的表（表多时减少无信息量行）
-    if (filter === "" && !showMatched && t.status === "both" && (t.columns?.matched ?? true) && (t.data?.equal ?? true)) return false
-    return true
-  })
-
-  return (
-    <Card className="space-y-3 p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="text-sm font-medium">对比报告</div>
-        <span className="text-xs text-muted-foreground">
-          {result.source} ↔ {result.target} · 对比时点快照，期间数据变动可能影响结果
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          {onSaveTask && (
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onSaveTask}>
-              <Save className="mr-1 h-3.5 w-3.5" /> 保存为任务配置
-            </Button>
-          )}
-          {onRestart && (
-            <Button size="sm" className="h-7 text-xs" onClick={onRestart}>
-              <RotateCcw className="mr-1 h-3.5 w-3.5" /> 重新开始
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* 汇总统计卡片：与进度页 StatBlock 风格对齐，点击切换过滤；零计数灰化 */}
-      <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
-        {FILTERS.map(({ key, label, cls }) => (
-          <button
-            key={key}
-            type="button"
-            className={cn(
-              "rounded-md border px-2.5 py-2 text-left transition-colors",
-              filter === key ? "border-primary bg-primary/10" : "bg-muted/30 hover:bg-accent",
-              counts[key] === 0 && filter !== key && "opacity-50",
-            )}
-            onClick={() => setFilter(key)}
-          >
-            <div className="truncate text-xs text-muted-foreground">{label}</div>
-            <div className={cn("mt-0.5 text-base font-medium tabular-nums", cls)}>
-              {counts[key]}
-            </div>
-          </button>
-        ))}
-      </div>
-
-      {/* 一致项显示开关：默认只看差异，表多时列表更短 */}
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">
-          {filter === "" && !showMatched
-            ? `仅显示有差异的表（${tables.length}）；一致 ${s.matched} 项已隐藏`
-            : `共 ${tables.length} 项`}
-        </span>
-        <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-muted-foreground">
-          <Checkbox checked={showMatched} onCheckedChange={(v) => setShowMatched(v === true)} />
-          显示一致项
-        </label>
-      </div>
-
-      {tables.length === 0 && (
-        <div className="py-6 text-center text-xs text-muted-foreground">无符合条件的表</div>
-      )}
-
-      {/* 表列表限高内滚，避免页面被撑长 */}
-      <div className="scrollbar-thin max-h-[520px] space-y-1.5 overflow-y-auto pr-1">
-        {tables.map((t) => {
-          const hasDetail =
-            t.status === "both" &&
-            ((t.columns && !t.columns.matched) || (t.data && !t.data.equal))
-          return (
-            <div key={t.name} className="rounded-md border bg-background">
-              {/* 摘要行：有差异的行点击查看弹窗明细 */}
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm"
-                onClick={() => hasDetail && toggleDetail(t)}
-              >
-                {hasDetail ? (
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                ) : (
-                  <span className="w-3.5 shrink-0" />
-                )}
-                <span className="min-w-0 truncate font-mono text-xs" title={t.name}>{t.name}</span>
-                {statusBadgeOf(t)}
-                <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-                  {t.columns && (
-                    <span>
-                      {t.columns.matched
-                        ? "结构一致"
-                        : `结构: +${t.columns.sourceOnly.length} -${t.columns.targetOnly.length} ±${t.columns.different.length}`}
-                    </span>
-                  )}
-                  {t.data && (
-                    <span className="tabular-nums">{tableDataDesc(t.data)}</span>
-                  )}
-                </span>
-              </button>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* 差异明细弹窗：宽幅展示，采样表与列差异可容纳更多数据 */}
-      <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
-        <DialogContent className="max-w-5xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 font-mono text-base">
-              {detail?.name}
-              {detail && statusBadgeOf(detail)}
-            </DialogTitle>
-            {detail && (
-              <DialogDescription>
-                {[
-                  detail.columns
-                    ? detail.columns.matched
-                      ? "结构一致"
-                      : `结构差异 +${detail.columns.sourceOnly.length} -${detail.columns.targetOnly.length} ±${detail.columns.different.length}`
-                    : "",
-                  detail.data ? tableDataDesc(detail.data) : "",
-                ].filter(Boolean).join(" · ")}
-              </DialogDescription>
-            )}
-          </DialogHeader>
-          {detail && <TableDiffDetail t={detail} />}
-        </DialogContent>
-      </Dialog>
-    </Card>
-  )
-}
+// 对比报告组件已提取至 @/components/CompareReport，供实时对比与快照对比共用

@@ -17,6 +17,8 @@ export interface DBConn {
 export interface ConnInfo {
   id: string // 主键（xid）
   name: string
+  shortName?: string // 命令行简写/短名（如 prod/my-dev），可选
+  env?: string // dev/test/staging/prod，用户录入时手动选择；留空视为 prod
   conn: DBConn
   subTypes: string[]
 }
@@ -87,6 +89,8 @@ export interface ExportOptions {
   singleTransaction: boolean
   // SQL 文件 gzip 压缩为 .sql.gz
   gzip: boolean
+  // 兼容排序规则：将 MySQL 8.0 特有排序规则替换为 5.7 兼容版本，使导出 SQL 可导入低版本
+  compatCollation: boolean
 }
 
 export type ResetMode = "" | "truncate" | "drop"
@@ -109,6 +113,8 @@ export interface ImportOptions {
   resetMode: ResetMode
   backup: boolean
   batchSize: number
+  // 兼容排序规则：将 MySQL 8.0 特有排序规则替换为 5.7 兼容版本
+  compatCollation: boolean
 }
 
 export interface MigrateOptions {
@@ -127,6 +133,8 @@ export interface MigrateOptions {
   resetMode: ResetMode
   backup: boolean
   batchSize: number
+  // 兼容排序规则：将 MySQL 8.0 特有排序规则替换为 5.7 兼容版本
+  compatCollation: boolean
 }
 
 // ---- 对比 ----
@@ -139,13 +147,21 @@ export interface TableAlias {
   ignoreColumns?: string[]
 }
 
+export interface CompareDBPair {
+  sourceDB: string
+  targetDB: string
+}
+
 export interface CompareOptions {
   sourceConn: string
   targetConn: string
   source?: DBConn | null
   target?: DBConn | null
-  databases?: string[]
-  // 选中的表（undefined/空 = 对比库内全部表）
+  // 多库对比：库对（按索引一一配对）；为空时回退到源/目标连接的库
+  databases?: CompareDBPair[]
+  // 多库对比：源库名 → 目标库名 覆盖映射（同名配对时无需填）
+  dbMapping?: Record<string, string>
+  // 选中的表（undefined/空 = 对比库内全部表），"库.表" 限定名或裸名
   tables?: string[]
   aliases?: TableAlias[]
   structureOnly: boolean
@@ -195,6 +211,8 @@ export interface CompareTableResult {
   name: string
   sourceName?: string
   targetName?: string
+  sourceDB?: string
+  targetDB?: string
   status: "both" | "source_only" | "target_only"
   columns?: CompareColumnDiff | null
   data?: CompareDataDiff | null
@@ -212,6 +230,15 @@ export interface CompareSummary {
 export interface CompareResult {
   source: string
   target: string
+  // 多库分组结果；旧数据可能仅含扁平 tables
+  databases?: CompareDatabaseResult[]
+  tables: CompareTableResult[]
+  summary: CompareSummary
+}
+
+export interface CompareDatabaseResult {
+  sourceDB: string
+  targetDB: string
   tables: CompareTableResult[]
   summary: CompareSummary
 }
@@ -300,6 +327,60 @@ export const TASK_TYPE_LABEL: Record<string, string> = {
   migrate: "迁移",
   compare: "对比",
   dictionary: "数据字典",
+  snapshot_compare: "快照对比",
+}
+
+// ---- 快照 ----
+
+export interface SnapshotInfo {
+  id: string
+  name: string
+  description: string
+  connId: string
+  connLabel: string
+  dbName: string // 兼容字段（单库旧快照），新快照用 dbNames
+  dbNames: string[]
+  dbType: string
+  tableCount: number
+  totalRows: number
+  createdAt: number
+}
+
+export interface SnapshotDatabaseInfo {
+  dbName: string
+  tableCount: number
+  totalRows: number
+  tables: SnapshotTableInfo[]
+}
+
+export interface SnapshotDetail extends SnapshotInfo {
+  tables: SnapshotTableInfo[] // 兼容字段（单库旧快照）
+  databases?: SnapshotDatabaseInfo[]
+}
+
+export interface SnapshotTableInfo {
+  name: string
+  rowCount: number
+  columns: SnapshotColumnInfo[]
+  primaryKey: string[]
+  rowSamples?: Record<string, unknown>[]
+}
+
+export interface SnapshotColumnInfo {
+  name: string
+  dataType: string
+  nullable: boolean
+  primaryKey: boolean
+  position: number
+}
+
+export interface SnapshotCompareOptions {
+  snapshotId: string
+  targetConn: string
+  target?: DBConn | null
+  // 快照库名 → 目标库名 映射（默认同名配对）
+  dbMapping?: Record<string, string>
+  tables?: string[]
 }
 
 export const RESET_MODE_LABEL: Record<string, string> = {

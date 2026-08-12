@@ -16,7 +16,12 @@ import (
 	_ "gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/dialect/postgresql"
 )
 
-// Connect 根据连接信息建立数据库连接
+// cliPool 为进程级 cli 连接池：相同连接配置（含库名）复用同一 DBCli 实例，
+// 底层池化。对比路径使用 GetOrCreateCli 获取并复用，程序退出前不手动 Close
+// （由 CloseAllCliPool 统一释放）。导出/导入等短生命周期路径仍走 Connect，由调用方 Close。
+var cliPool = &cydb.DBMgr{}
+
+// Connect 根据连接信息建立数据库连接（每次新建，调用方需 Close）
 func Connect(info DBConnInfo) (*cydb.DBCli, error) {
 	conn := info.DBConnection
 	if conn.SubType == "" {
@@ -29,10 +34,29 @@ func Connect(info DBConnInfo) (*cydb.DBCli, error) {
 	return cli, nil
 }
 
-// ConnectDB 建立到指定库的连接（覆盖连接信息中的库名）
+// ConnectDB 建立到指定库的连接（覆盖连接信息中的库名，每次新建，调用方需 Close）
 func ConnectDB(info DBConnInfo, dbName string) (*cydb.DBCli, error) {
 	info.DBName = dbName
 	return Connect(info)
+}
+
+// ConnectPooled 池化获取绑定指定库名的连接，复用同一实例，调用方不要 Close
+func ConnectPooled(info DBConnInfo, dbName string) (*cydb.DBCli, error) {
+	conn := info.DBConnection
+	if conn.SubType == "" {
+		conn.SubType = info.SubType
+	}
+	conn.DBName = dbName
+	cli, err := cliPool.GetOrCreateCli(conn)
+	if err != nil {
+		return nil, fmt.Errorf("连接数据库失败(%s@%s:%d/%s): %w", conn.Un, conn.Host, conn.Port, dbName, err)
+	}
+	return cli, nil
+}
+
+// CloseAllCliPool 释放进程级连接池（程序退出时调用）
+func CloseAllCliPool() {
+	cliPool.CloseAll()
 }
 
 // EnsureDBExists 确保指定数据库存在，不存在则自动创建（复用 cydb 各方言实现：

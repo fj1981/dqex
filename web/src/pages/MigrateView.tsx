@@ -36,6 +36,7 @@ function defaultOptions(): MigrateOptions {
     resetMode: "",
     backup: true,
     batchSize: 500,
+    compatCollation: false,
   }
 }
 
@@ -284,6 +285,17 @@ export default function MigrateView() {
                     onChange={(e) => set({ batchSize: Number(e.target.value) })}
                   />
                 </div>
+              </Section>
+            </div>
+
+            <div className="p-5">
+              <Section title="兼容性" description="将新版本数据库特有的排序规则替换为旧版本兼容的等效规则">
+                <CheckRow
+                  checked={opts.compatCollation}
+                  onCheckedChange={(v) => set({ compatCollation: v })}
+                  label="字符集兼容"
+                  description="将 SQL 中的 utf8mb4_0900_* 系列排序规则替换为 utf8mb4_unicode_ci，避免目标库为不支持新排序规则的旧版本数据库（如 MySQL 5.7）时建表报错"
+                />
               </Section>
             </div>
           </Card>

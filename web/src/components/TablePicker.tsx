@@ -86,6 +86,8 @@ interface Props {
   extraConnId?: string
   extraDb?: string
   extraLabel?: string // 附加来源标记文案，默认「仅目标库有」
+  // 库映射：源库名 → 目标库名（大小写不敏感）。合并附加树时按映射把目标库归并到对应源库节点下
+  dbMapping?: Record<string, string>
   selected: string[]
   // 选中的对象（格式 _views/名称）
   selectedObjects?: string[]
@@ -112,6 +114,7 @@ export default function TablePicker({
   extraConnId,
   extraDb,
   extraLabel = "仅目标库有",
+  dbMapping,
   selected,
   selectedObjects = [],
   showObjects = true,
@@ -148,7 +151,9 @@ export default function TablePicker({
   }
 
   useEffect(() => {
+    console.log("[TablePicker] sourceTree effect run", { connId, db })
     if (!connId) {
+      console.log("[TablePicker] sourceTree: no connId, skip")
       setTree([])
       return
     }
@@ -157,6 +162,7 @@ export default function TablePicker({
     api
       .getTableTree(connId, db)
       .then((r) => {
+        console.log("[TablePicker] sourceTree loaded", { connId, db, dbCount: (r.databases || []).length, totalTables: (r.databases || []).reduce((n: number, d: any) => n + (d.tables?.length || 0), 0) })
         setTree(r.databases || [])
         // 初始全部折叠：库节点与各分组节点
         const c: Record<string, boolean> = {}
@@ -168,22 +174,35 @@ export default function TablePicker({
         setCollapsed(c)
       })
       .catch((e: Error) => {
+        console.error("[TablePicker] sourceTree error", { connId, db }, e)
         setTree([])
         setError(e.message)
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        console.log("[TablePicker] sourceTree finally, setLoading(false)", { connId, db })
+        setLoading(false)
+      })
   }, [connId, db])
 
   // 附加连接树加载（对比场景：目标库独有表也可勾选）
+  const [extraError, setExtraError] = useState("")
   useEffect(() => {
     if (!extraConnId) {
       setExtraTree([])
+      setExtraError("")
       return
     }
+    setExtraError("")
     api
       .getTableTree(extraConnId, extraDb)
-      .then((r) => setExtraTree(r.databases || []))
-      .catch(() => setExtraTree([]))
+      .then((r) => {
+        setExtraTree(r.databases || [])
+      })
+      .catch((e: Error) => {
+        console.error("[TablePicker] extraTree error", { extraConnId, extraDb }, e)
+        setExtraTree([])
+        setExtraError(e.message || "目标库表加载失败")
+      })
   }, [extraConnId, extraDb])
 
   const dbKey = (db: string) => `db:${db}`
@@ -202,28 +221,60 @@ export default function TablePicker({
     return i > 0 ? id.slice(i + 1) : id
   }
 
-  // 合并附加连接树：同名库（大小写不敏感）并入，库不存在时整库追加；附加来源表记入 extraSet
-  const { mergedTree, extraSet } = useMemo(() => {
-    const set = new Set<string>()
-    if (extraTree.length === 0) return { mergedTree: tree, extraSet: set }
-    const merged = tree.map((d) => ({ ...d, tables: [...d.tables] }))
-    for (const ed of extraTree) {
-      const md = merged.find((d) => d.name.toLowerCase() === ed.name.toLowerCase())
-      if (md) {
-        const have = new Set(md.tables.map((t) => t.toLowerCase()))
-        for (const t of ed.tables) {
+  // 树 = 源库全部表 ∪ 映射目标库全部表，按「映射前源库名」聚合去重。
+  // 规则（始终一致，不管是否配置映射）：
+  //  - 库节点名永远用映射前的源库名（即使该源库在目标侧被改名映射，节点名也不变）。
+  //  - 库节点下的表 = 源库该库的全部表 ∪ 该源库映射到的目标库下的全部表（按裸名去重）。
+  //  - 未配置映射时默认同名配对（源库 → 目标库同名库）。
+  //  - 仅存在于映射目标库、源库没有的表，记入 sourceOnlySet（左侧标「仅目标库有」），不参与强制选中。
+  // 注意：dbMapping 是对象引用，父组件每次渲染可能给出新引用但内容相同，直接作为依赖会
+  // 引发无限重渲染；改用其内容序列化串 dbMappingKey 作为依赖，内容不变则不重算。
+  const dbMappingKey = dbMapping ? JSON.stringify(dbMapping) : ""
+  const [mergedTree, setMergedTree] = useState<DBTables[]>([])
+  const [sourceOnlySet, setSourceOnlySet] = useState<Set<string>>(new Set<string>())
+  useEffect(() => {
+    if (extraTree.length === 0) {
+      setMergedTree(tree)
+      setSourceOnlySet(new Set<string>())
+      return
+    }
+    // 源库名(小写) → 其映射目标库们的裸名集合
+    // 优先级：显式 dbMapping > 默认同名；空对象/空值都视为未配置
+    const parsed: Record<string, string> | undefined = dbMappingKey ? JSON.parse(dbMappingKey) : undefined
+    const hasRealMapping = !!(parsed && Object.keys(parsed).length > 0)
+    const entries: [string, string][] = hasRealMapping
+      ? Object.entries(parsed).filter(([k, v]) => k && v)
+      : tree.map((d) => [d.name, d.name])
+    const targetDBsOf = new Map<string, string[]>()
+    for (const [src, tgt] of entries) {
+      const arr = targetDBsOf.get(src.toLowerCase()) || []
+      arr.push(tgt)
+      targetDBsOf.set(src.toLowerCase(), arr)
+    }
+    // 目标库名(小写) → 目标库裸表名集合
+    const extraByDB = new Map<string, string[]>()
+    for (const ed of extraTree) extraByDB.set(ed.name.toLowerCase(), ed.tables)
+
+    const merged: DBTables[] = tree.map((d) => ({ ...d, tables: [...d.tables] }))
+    const onlySet = new Set<string>()
+    for (const d of merged) {
+      const targets = targetDBsOf.get(d.name.toLowerCase()) || []
+      const have = new Set(d.tables.map((t) => t.toLowerCase()))
+      for (const tgtDB of targets) {
+        const tgtTables = extraByDB.get(tgtDB.toLowerCase())
+        if (!tgtTables) continue
+        for (const t of tgtTables) {
           if (!have.has(t.toLowerCase())) {
-            md.tables.push(t)
-            set.add(qual(md.name, t))
+            d.tables.push(t)
+            have.add(t.toLowerCase())
+            onlySet.add(qual(d.name, t)) // 库名用映射前的源库名
           }
         }
-      } else {
-        merged.push({ name: ed.name, tables: [...ed.tables] })
-        ed.tables.forEach((t) => set.add(qual(ed.name, t)))
       }
     }
-    return { mergedTree: merged, extraSet: set }
-  }, [tree, extraTree])
+    setMergedTree(merged)
+    setSourceOnlySet(onlySet)
+  }, [tree, extraTree, dbMappingKey])
 
   const singleMode = mergedTree.length <= 1
 
@@ -250,6 +301,9 @@ export default function TablePicker({
 
   const totalTables = mergedTree.reduce((n, d) => n + d.tables.length, 0)
   const totalObjects = showObjects ? tree.reduce((n, d) => n + dbObjectIds(d).length, 0) : 0
+
+  // 右侧「已选内容」严格只展示用户手动勾选的表（selected 内均为 "源库.表" 限定名）。
+  const effectiveSelected = useMemo<string[]>(() => selected, [selected])
 
   const allVisibleTables = filteredTree.flatMap((d) => d.tables.map((t) => qual(d.name, t)))
   const allVisibleObjects = showObjects ? filteredTree.flatMap((d) => dbObjectIds(d)) : []
@@ -422,7 +476,7 @@ export default function TablePicker({
     // 查找表所属库并加载列信息（附加来源表从附加连接取列）
     const dbEntry = findDBOf(table)
     const dbName = dbEntry?.name || db || ""
-    const colsConnId = extraSet.has(table) && extraConnId ? extraConnId : connId
+    const colsConnId = sourceOnlySet.has(table) && extraConnId ? extraConnId : connId
     setColumns([])
     setColsError("")
     setColsLoading(true)
@@ -565,7 +619,7 @@ export default function TablePicker({
           <Table2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           {/* 树中库名已由父节点体现，仅显示裸表名；title 保留限定名便于悬停确认 */}
           <span className="truncate" title={t}>{stripDB(t)}</span>
-          {extraSet.has(t) && (
+          {sourceOnlySet.has(t) && (
             <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] text-amber-600">{extraLabel}</span>
           )}
           {dataMode === "skip" && (
@@ -720,6 +774,16 @@ export default function TablePicker({
             全选
           </label>
         </div>
+        {extraConnId && extraError && (
+          <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
+            目标库表加载失败：{extraError}，无法合并「仅目标库有」的表（树与已选内容仅含源端）。
+          </div>
+        )}
+        {extraConnId && !extraError && extraTree.length === 0 && !loading && (
+          <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
+            目标库返回为空，未合并「仅目标库有」的表（请确认目标连接与库映射是否正确）。
+          </div>
+        )}
         <Input
           placeholder="搜索表名/对象名..."
           value={keyword}
@@ -744,19 +808,25 @@ export default function TablePicker({
       {/* 右：已选表及条件 + 已选对象 */}
       <Card className="flex flex-col p-3">
         <div className="mb-2 text-sm font-medium">
-          已选内容（{selected.length} 张表{showObjects ? ` · ${selectedObjects.length} 个对象` : ""}）
+          已选内容（{effectiveSelected.length} 张表{showObjects ? ` · ${selectedObjects.length} 个对象` : ""}）
         </div>
         <ScrollArea className="h-[388px] rounded border pr-3">
-          {selected.length === 0 && selectedObjects.length === 0 && (
+          {effectiveSelected.length === 0 && selectedObjects.length === 0 && (
             <div className="py-8 text-center text-sm text-muted-foreground">未选择任何内容（空 = 不处理）</div>
           )}
-          {selected.map((t) => {
+          {effectiveSelected.map((t) => {
+            const isExtra = sourceOnlySet.has(t)
             const cond = conditions.find((c) => c.tableName === t)
             return (
               <div key={t} className="border-b px-2 py-2 last:border-0">
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-1.5 text-sm font-medium" title={t}>
                     <Table2 className="h-3.5 w-3.5 text-muted-foreground" /> {t}
+                    {isExtra && (
+                      <span className="flex items-center gap-0.5 rounded bg-amber-50 px-1 py-0.5 text-[10px] font-normal text-amber-600">
+                        {extraLabel}
+                      </span>
+                    )}
                     {cond && (
                       <span className="flex items-center gap-0.5 rounded bg-blue-50 px-1 py-0.5 text-[10px] font-normal text-blue-600">
                         <Filter className="h-2.5 w-2.5" /> 有条件
@@ -767,9 +837,11 @@ export default function TablePicker({
                     <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" title="设置条件" onClick={() => openEdit(t)}>
                       <Settings2 className="h-3 w-3" />
                     </Button>
-                    <Button variant="ghost" size="sm" className="h-6 px-2" title="移除" onClick={() => toggleTable(t, false)}>
-                      <Trash2 className="h-3 w-3 text-destructive" />
-                    </Button>
+                    {!isExtra && (
+                      <Button variant="ghost" size="sm" className="h-6 px-2" title="移除" onClick={() => toggleTable(t, false)}>
+                        <Trash2 className="h-3 w-3 text-destructive" />
+                      </Button>
+                    )}
                   </div>
                 </div>
                 <div className="mt-1 break-all text-xs text-muted-foreground">

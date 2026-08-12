@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"dbimpex/internal/cli/sqlcmd"
+
 	"github.com/spf13/cobra"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
@@ -31,6 +33,10 @@ var (
 	webArgs     = &WebArgs{Host: "127.0.0.1", Port: 8181}
 	cliExecuted bool // 执行过任一 CLI 子命令（含 help）时为 true
 )
+
+func init() {
+	rootCmd.AddCommand(sqlcmd.Command())
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "dbx",
@@ -95,16 +101,20 @@ func newCliService() (*Service, error) {
 
 // ---- Shell 动态补全（配合 dbx completion 生成的补全脚本） ----
 
-// completeConnNames 补全已保存连接（名称，Tab 描述附 ID）
+// completeConnNames 补全已保存连接（名称+短名，Tab 描述附 ID 和地址）
 func completeConnNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	svc, err := newCliService()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	conns := svc.Persist().LoadConns()
-	names := make([]string, 0, len(conns))
+	names := make([]string, 0, len(conns)*2)
 	for _, rec := range conns {
-		names = append(names, rec.Name+"\tID: "+rec.ID)
+		desc := fmt.Sprintf("ID: %s  %s:%d", rec.ID, rec.Conn.Host, rec.Conn.Port)
+		names = append(names, rec.Name+"\t"+desc)
+		if rec.ShortName != "" {
+			names = append(names, rec.ShortName+"\t"+desc+" ("+rec.Name+")")
+		}
 	}
 	sort.Strings(names)
 	return names, cobra.ShellCompDirectiveNoFileComp
@@ -267,6 +277,34 @@ func splitCSV(s string) []string {
 		if p = strings.TrimSpace(p); p != "" {
 			ret = append(ret, p)
 		}
+	}
+	return ret
+}
+
+// parseDBMap 解析 "src=tgt,src2=tgt2" 形式的库映射为 map
+func parseDBMap(s string) map[string]string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	ret := make(map[string]string)
+	for _, pair := range strings.Split(s, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		kv := strings.SplitN(pair, "=", 2)
+		src := strings.TrimSpace(kv[0])
+		if src == "" {
+			continue
+		}
+		tgt := ""
+		if len(kv) == 2 {
+			tgt = strings.TrimSpace(kv[1])
+		}
+		ret[src] = tgt
+	}
+	if len(ret) == 0 {
+		return nil
 	}
 	return ret
 }

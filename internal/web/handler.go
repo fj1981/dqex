@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"mime/multipart"
 	"path/filepath"
@@ -22,18 +23,20 @@ type StartResp struct {
 
 // SaveConnReq 新建/更新连接请求（id 非空为按主键更新）
 type SaveConnReq struct {
-	ID   string             `json:"id"`
-	Name string             `json:"name" binding:"required"`
-	Conn service.DBConnInfo `json:"conn"`
+	ID        string             `json:"id"`
+	Name      string             `json:"name" binding:"required"`
+	ShortName string             `json:"shortName"` // 命令行简写
+	Env       string             `json:"env"`        // dev/test/staging/prod
+	Conn      service.DBConnInfo `json:"conn"`
 }
 
 func handleCreateConn(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req SaveConnReq) (any, error) {
-		rec, err := svc.AddConnection(service.ConnRecord{ID: req.ID, Name: req.Name, Conn: req.Conn})
+		rec, err := svc.AddConnection(service.ConnRecord{ID: req.ID, Name: req.Name, ShortName: req.ShortName, Env: req.Env, Conn: req.Conn})
 		if err != nil {
 			return nil, err
 		}
-		return gin.H{"id": rec.ID, "name": rec.Name}, nil
+		return gin.H{"id": rec.ID, "name": rec.Name, "shortName": rec.ShortName}, nil
 	})
 }
 
@@ -391,6 +394,79 @@ type GetHistoryReq struct {
 func handleGetHistory(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req GetHistoryReq) (service.ExecutionRecord, error) {
 		return svc.GetHistory(req.TaskID)
+	})
+}
+
+// ==================== 快照 ====================
+
+// CreateSnapshotReq 创建快照请求（支持多库）
+type CreateSnapshotReq struct {
+	ConnID         string   `json:"connId" binding:"required"`
+	DBNames        []string `json:"dbNames" binding:"required"`
+	Name           string   `json:"name" binding:"required"`
+	Description    string   `json:"description"`
+	IncludeSamples bool     `json:"includeSamples"`
+	SampleLimit    int      `json:"sampleLimit"` // 每表采样行数；<=0 走默认 10
+}
+
+func handleCreateSnapshot(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req CreateSnapshotReq) (any, error) {
+		ctx := context.Background()
+		snapshot, err := svc.CreateSnapshot(ctx, req.ConnID, req.DBNames, req.Name, req.Description, req.IncludeSamples, req.SampleLimit, nil)
+		if err != nil {
+			return nil, err
+		}
+		return gin.H{"id": snapshot.ID, "name": snapshot.Name}, nil
+	})
+}
+
+func handleListSnapshots(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req struct{}) ([]service.SnapshotInfo, error) {
+		return svc.ListSnapshots(), nil
+	})
+}
+
+// GetSnapshotReq 获取快照详情请求
+type GetSnapshotReq struct {
+	ID string `uri:"id" binding:"required"`
+}
+
+func handleGetSnapshot(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req GetSnapshotReq) (*service.Snapshot, error) {
+		return svc.GetSnapshot(req.ID)
+	})
+}
+
+func handleDeleteSnapshot(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req GetSnapshotReq) (any, error) {
+		return gin.H{"ok": true}, svc.DeleteSnapshot(req.ID)
+	})
+}
+
+// SnapshotCompareReq 快照对比请求
+type SnapshotCompareReq struct {
+	Options      service.SnapshotCompareOptions `json:"options"`
+	TaskConfigID string                         `json:"taskConfigId"`
+}
+
+func handleSnapshotCompare(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req SnapshotCompareReq) (StartResp, error) {
+		taskID, err := svc.StartSnapshotCompare(req.Options, req.TaskConfigID)
+		if err != nil {
+			return StartResp{}, err
+		}
+		return StartResp{TaskID: taskID}, nil
+	})
+}
+
+// SnapshotCompareResultReq 快照对比结果查询
+type SnapshotCompareResultReq struct {
+	TaskID string `query:"taskID" binding:"required"`
+}
+
+func handleSnapshotCompareResult(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req SnapshotCompareResultReq) (*service.CompareResult, error) {
+		return svc.GetSnapshotCompareResult(req.TaskID)
 	})
 }
 
