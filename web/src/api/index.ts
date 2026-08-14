@@ -50,7 +50,7 @@ function notifyAuthError(msg: string) {
 
 // ---- fetch 封装（cygin 统一响应 {code,msg,data}，code==0 成功） ----
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
+export async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
     headers: {
@@ -72,19 +72,21 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     notifyAuthError(msg)
     throw new Error(msg)
   }
-  let body: { code: number; msg?: string; data?: T }
+  let body: { code: number; msg?: string; details?: string[]; data?: T }
   try {
     body = await res.json()
   } catch {
     throw new Error(`请求失败 (HTTP ${res.status})`)
   }
   if (body.code !== 0) {
-    throw new Error(body.msg || `请求失败 (code=${body.code})`)
+    // 优先展示 details 里的具体错误（如数据库错误），msg 作为兜底
+    const detail = (body.details ?? []).filter(Boolean).join("；")
+    throw new Error(detail || body.msg || `请求失败 (code=${body.code})`)
   }
   return body.data as T
 }
 
-const post = <T>(url: string, data: unknown) =>
+export const post = <T>(url: string, data: unknown) =>
   request<T>(url, { method: "POST", body: JSON.stringify(data ?? {}) })
 
 // ---- 连接管理 ----

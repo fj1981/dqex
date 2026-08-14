@@ -54,6 +54,14 @@ func (s *Service) Persist() *PersistMgr { return s.persist }
 // Config 返回全局配置
 func (s *Service) Config() *AppConfig { return s.cfg }
 
+// Close 释放底层资源（SQLite 连接等）。Web 服务退出前调用。
+func (s *Service) Close() error {
+	if s.persist != nil {
+		return s.persist.Close()
+	}
+	return nil
+}
+
 // ---- 连接管理 ----
 
 // validName 校验连接名称：非空、不含空格及控制字符、不含特殊字符（只允许字母/数字/中文/下划线/连字符/点）

@@ -388,3 +388,137 @@ export const RESET_MODE_LABEL: Record<string, string> = {
   truncate: "清空表（TRUNCATE，保留表结构）",
   drop: "删除重建（DROP + CREATE）",
 }
+
+// ---- SQL 查询终端 ----
+
+// SQL 执行模式：每个查询视图独立选择（用户可见文案：规范执行 / 原样执行）
+//   transform = 防护 + 智能：系统规范化 SQL 语法 + 自动补行数上限（最多 1000 行），默认
+//   raw       = 原样执行：按用户所写原样发库，不限制行数（用于特殊语法兜底，由用户自行负责）
+export type SQLExecMode = "transform" | "raw"
+
+export const SQL_EXEC_MODE_LABEL: Record<SQLExecMode, string> = {
+  transform: "规范执行",
+  raw: "原样执行",
+}
+
+export interface SQLQueryRequest {
+  connId: string
+  db?: string // 目标库名（点对象树查表时传入，覆盖连接默认库）
+  sql: string
+  limit?: number
+  offset?: number
+  mask?: boolean // 结果集脱敏：敏感列（password/token/secret 等）统一打码
+  mode?: SQLExecMode // 执行模式：transform（默认，规范执行）| raw（原样执行）
+  recordHistory?: boolean // 是否写入「SQL 执行历史」；默认 true（手动执行）。对象树点开自动生成的查询传 false
+}
+
+export interface SQLPingResult {
+  ok: boolean
+  elapsedMs: number
+  error?: string
+}
+
+// 对象创建语句（建表/视图/函数/过程 DDL）
+export type ObjectDDLType = "table" | "view" | "function" | "procedure"
+
+export interface ObjectDDLResult {
+  type: ObjectDDLType
+  name: string
+  ddl: string
+}
+
+export interface SQLQueryResult {
+  columns: string[]
+  rows: unknown[][]
+  rowCount: number
+  affectedRows: number
+  elapsedMs: number
+  sql: string
+  isWrite: boolean
+  warnings: string[]
+  error?: string // 执行失败原因（非空时表示失败结果）
+}
+
+export interface SQLHistoryItem {
+  id: string
+  connId: string
+  db?: string // 执行时目标库名（空=连接默认库）
+  mode?: SQLExecMode // 执行模式 transform/raw
+  sql: string
+  isWrite: boolean
+  rowCount: number
+  elapsedMs: number
+  status: "ok" | "error"
+  error?: string
+  createdAt: number
+}
+
+// 审计日志条目（安全兜底，全量、只读、不可删）
+export type SQLAuditSource = "manual" | "tree" | "cell"
+
+export interface SQLAuditEntry {
+  id: string
+  connId: string
+  db?: string
+  mode?: SQLExecMode
+  source: SQLAuditSource // manual=用户手写 / tree=对象树自动查询 / cell=单元格内联编辑
+  sql: string
+  isWrite: boolean
+  rowCount: number
+  elapsedMs: number
+  status: "ok" | "error"
+  error?: string
+  createdAt: number
+  // 单元格内联编辑的结构化参数（source=cell 时才有值）
+  table?: string
+  column?: string
+  newValue?: unknown
+  pkColumns?: string[]
+  pkValues?: unknown[]
+}
+
+// ---- 查询工作区（后端持久化，按连接，可重跑上下文不含结果集） ----
+
+export interface WorkspaceTab {
+  id: string
+  kind: "query" | "object"
+  seq?: number // 查询序号（query tab 专用）
+  title?: string // 展示标题（query tab 重命名后）
+  db?: string // 目标库名（空 = 连接默认库）
+  sql?: string // 查询 SQL（query tab 专用）
+  mode?: SQLExecMode // 执行模式（query tab 专用）
+  name?: string // object tab：对象名
+  objType?: ObjectDDLType // object tab：table / view / function / procedure
+  subTab?: "data" | "struct" | "ddl" // object tab
+}
+
+export interface WorkspaceState {
+  tabs: WorkspaceTab[]
+  activeId: string
+}
+
+// ---- 数据浏览器 / 对象树 ----
+export interface ObjectNode {
+  name: string
+  type: "db" | "table" | "view" | "function" | "procedure" | "other"
+  children?: ObjectNode[]
+}
+
+export interface TableDataRequest {
+  connId: string
+  db: string
+  table: string
+  page: number
+  pageSize: number
+  sortColumn?: string // 排序列名（后端 ORDER BY，全局排序）
+  sortOrder?: "asc" | "desc" // 排序方向
+}
+
+export interface TableDataResult {
+  columns: string[]
+  rows: unknown[][]
+  total: number
+  page: number
+  pageSize: number
+}
+

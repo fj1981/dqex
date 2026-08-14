@@ -6,9 +6,12 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -35,6 +38,28 @@ func genToken() (string, error) {
 
 // tokenTTL 访问令牌有效期：到期后 API 拒绝访问并提示重启服务刷新令牌
 const tokenTTL = 24 * time.Hour
+
+// webAccessFileName vite dev 代理读取的令牌桥接文件名（位于数据根目录）。
+// 仅服务于本地前端开发（Node 进程无法直接读 SQLite），非权威数据源。
+const webAccessFileName = "web-access.json"
+
+// writeWebAccessFile 将访问凭证写入数据目录下的 web-access.json（0600），
+// 供本地 vite dev 代理读取令牌注入 /api 请求。失败仅告警，不影响启动。
+func writeWebAccessFile(baseDir, addr, token string, issuedAt int64) {
+	if baseDir == "" {
+		return
+	}
+	info := map[string]any{"addr": addr, "token": token, "issuedAt": issuedAt}
+	data, err := json.Marshal(info)
+	if err != nil {
+		cylog.Warnf("序列化 Web 访问凭证文件失败: %v", err)
+		return
+	}
+	path := filepath.Join(baseDir, webAccessFileName)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		cylog.Warnf("写入 Web 访问凭证文件失败（不影响启动）: %v", err)
+	}
+}
 
 // tokenAuth /api 路由的令牌认证中间件：
 //   - 令牌超过 expireAt 过期：拒绝并提示重启服务刷新（令牌不自动续期）
@@ -215,6 +240,20 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 		eb.GROUP("/meta", []cygin.APIHandler{
 			eb.GET("/dbtypes", handleDBTypes()),
 		}),
+		// SQL 查询终端
+		eb.GROUP("/sql", []cygin.APIHandler{
+			eb.POST("/query", handleSQLQuery(svc)),
+			eb.POST("/exec", handleSQLExec(svc)),
+			eb.POST("/run", handleSQLRun(svc)),
+			eb.POST("/cell", handleUpdateCell(svc)),
+			eb.GET("/history", handleSQLHistory(svc)),
+			eb.DELETE("/history", handleClearSQLHistory(svc)),
+			eb.GET("/audit", handleSQLAudit(svc)),
+			eb.POST("/ping", handleSQLPing(svc)),
+			eb.GET("/ddl", handleSQLDDL(svc)),
+			eb.GET("/workspace", handleGetWorkspace(svc)),
+			eb.PUT("/workspace", handleSaveWorkspace(svc)),
+		}),
 	)
 
 	opts := []cygin.ServerOption{
@@ -252,6 +291,9 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 	if err := svc.Persist().SaveWebAccess(service.WebAccessInfo{Addr: server.Config.Address, Token: token, IssuedAt: issuedAt.UnixMilli()}); err != nil {
 		cylog.Warnf("保存 Web 访问凭证失败（不影响启动）: %v", err)
 	}
+	// 令牌桥接文件：本地开发（vite dev 代理）读取 web-access.json 注入 /api 请求头，
+	// 数据源仍以 SQLite 为准（dbx url 走 SQLite），此文件仅为 vite 的令牌快照
+	writeWebAccessFile(svc.Persist().BaseDir(), server.Config.Address, token, issuedAt.UnixMilli())
 	// 浏览器访问地址：通配地址（0.0.0.0/::）无法直接访问，回退为本机回环
 	browserHost := host
 	if browserHost == "" || browserHost == "0.0.0.0" || browserHost == "::" {

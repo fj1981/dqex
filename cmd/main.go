@@ -32,6 +32,7 @@ func runWeb(args *cli.WebArgs) {
 		fmt.Fprintf(os.Stderr, "初始化服务失败: %v\n", err)
 		os.Exit(1)
 	}
+	defer svc.Close() // 释放 SQLite 连接
 	// 访问来源白名单：--allow flag 优先，未给出时取配置文件 web.allow
 	allow := []string{}
 	for _, item := range strings.Split(args.Allow, ",") {

@@ -5,8 +5,8 @@ import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 
 // dev 模式：后端默认启用 token 认证，而 vite 页面 URL 没有 ?token=。
-// 从数据目录 web-access.json 读令牌，由代理层自动注入 /api 请求，
-// 使 http://localhost:5281 开箱即用（与生产行为一致：真实校验 token）
+// 从数据目录 web-access.json 读令牌（该文件由后端启动时生成，作为 vite 的令牌桥接），
+// 由代理层自动注入 /api 请求，使 http://localhost:5281 开箱即用（与生产行为一致：真实校验 token）
 function devToken(): string {
   try {
     const file = path.join(os.homedir(), ".dbimpex", "web-access.json")

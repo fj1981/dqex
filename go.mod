@@ -4,6 +4,8 @@ go 1.25.1
 
 require (
 	github.com/gin-gonic/gin v1.10.1
+	github.com/olekukonko/tablewriter v1.1.4
+	github.com/peterh/liner v1.2.2
 	github.com/pingcap/tidb/parser v0.0.0-20231013125129-93a834a6bf8d
 	github.com/rs/xid v1.6.0
 	github.com/spf13/cobra v1.10.1
@@ -56,6 +58,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/lib/pq v1.10.9 // indirect
+	github.com/logoove/sqlite v1.37.1 // indirect
 	github.com/mailru/easyjson v0.7.6 // indirect
 	github.com/matoous/go-nanoid/v2 v2.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
@@ -63,20 +66,18 @@ require (
 	github.com/mattn/go-runewidth v0.0.19 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
+	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/olekukonko/cat v0.0.0-20250911104152-50322a0618f6 // indirect
 	github.com/olekukonko/errors v1.2.0 // indirect
 	github.com/olekukonko/ll v0.1.6 // indirect
-	github.com/olekukonko/tablewriter v1.1.4 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
-	github.com/peterh/liner v1.2.2 // indirect
 	github.com/pingcap/errors v0.11.5-0.20210425183316-da1aaba5fb63 // indirect
 	github.com/pingcap/failpoint v0.0.0-20220801062533-2eaa32854a6c // indirect
 	github.com/pingcap/log v1.1.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/richardlehane/mscfb v1.0.7 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect
-	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sijms/go-ora/v2 v2.9.0 // indirect
 	github.com/sony/sonyflake v1.3.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
@@ -104,6 +105,10 @@ require (
 	google.golang.org/protobuf v1.36.9 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
+	modernc.org/libc v1.66.10 // indirect
+	modernc.org/mathutil v1.7.1 // indirect
+	modernc.org/memory v1.11.0 // indirect
+	modernc.org/sqlite v1.39.0 // indirect
 )
 
 replace gitlab.mycyclone.com/rpa-platform/pk-infrakit-g => /Users/fanjun/project/pk-infrakit-g

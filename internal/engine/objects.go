@@ -76,6 +76,33 @@ var kindObjectType = map[objectKind]dialect.DatabaseObjectType{
 	objectProcedure: cydb.ObjectTypeProcedure,
 }
 
+// ObjectDDLType 可供查询创建语句的对象类型（对应用户可见的 DDL 对象）
+type ObjectDDLType string
+
+const (
+	ObjectDDLTable     ObjectDDLType = "table"
+	ObjectDDLView      ObjectDDLType = "view"
+	ObjectDDLFunction  ObjectDDLType = "function"
+	ObjectDDLProcedure ObjectDDLType = "procedure"
+)
+
+// GetObjectDDL 获取指定对象（表/视图/函数/存储过程）的创建语句。
+// 复用底层库方言 DDL 能力；表 DDL 已包含该表触发器。
+func GetObjectDDL(cli *cydb.DBCli, objType ObjectDDLType, name string) (string, error) {
+	switch objType {
+	case ObjectDDLTable:
+		return ddlContent(cli, dialect.FuncNameGetCreateTableSql, name)
+	case ObjectDDLView:
+		return ddlContent(cli, dialect.FuncNameGetCreateViewSql, name)
+	case ObjectDDLFunction:
+		return ddlContent(cli, dialect.FuncNameGetCreateFunctionSql, name)
+	case ObjectDDLProcedure:
+		return ddlContent(cli, dialect.FuncNameGetCreateProcedureSql, name)
+	default:
+		return "", fmt.Errorf("不支持的对象类型: %s", objType)
+	}
+}
+
 // objectDDL 获取单个对象的创建语句（复用底层库方言 DDL 能力）
 func objectDDL(cli *cydb.DBCli, kind objectKind, name string) (string, error) {
 	switch kind {
