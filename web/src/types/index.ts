@@ -69,6 +69,8 @@ export interface TableColumn {
   primaryKey?: boolean
   default?: string
   autoIncrement?: boolean
+  unique?: boolean // 唯一约束（非主键）
+  indexed?: boolean // 普通索引（非主键/非唯一）
 }
 
 export interface ExportOptions {
@@ -174,6 +176,7 @@ export interface CompareOptions {
 export interface CompareColumnItem {
   name: string
   dataType: string
+  normalizedType?: string
   nullable: boolean
   primaryKey: boolean
 }
@@ -409,7 +412,6 @@ export interface SQLQueryRequest {
   offset?: number
   mask?: boolean // 结果集脱敏：敏感列（password/token/secret 等）统一打码
   mode?: SQLExecMode // 执行模式：transform（默认，规范执行）| raw（原样执行）
-  recordHistory?: boolean // 是否写入「SQL 执行历史」；默认 true（手动执行）。对象树点开自动生成的查询传 false
 }
 
 export interface SQLPingResult {
@@ -490,6 +492,7 @@ export interface WorkspaceTab {
   name?: string // object tab：对象名
   objType?: ObjectDDLType // object tab：table / view / function / procedure
   subTab?: "data" | "struct" | "ddl" // object tab
+  viewLayout?: TableViewLayout // object tab：表浏览视图布局（过滤/排序/列显隐/页大小）
 }
 
 export interface WorkspaceState {
@@ -504,21 +507,55 @@ export interface ObjectNode {
   children?: ObjectNode[]
 }
 
+// 列过滤操作符（与后端 engine.FilterOp 严格对齐）
+export type FilterOp =
+  | "eq" | "neq"          // 等于 / 不等于
+  | "contains" | "notContains" // 包含 / 不包含
+  | "startsWith" | "endsWith"  // 开头是 / 结尾是
+  | "gt" | "gte" | "lt" | "lte" // 大于 / 大于等于 / 小于 / 小于等于
+  | "isNull" | "isNotNull"     // 为空 / 非空（无需输入值）
+
+// 单列过滤条件（值仅在 isNull/isNotNull 时为空）
+export interface ColumnFilter {
+  column: string
+  op: FilterOp
+  value?: unknown
+}
+
+// 单列排序规格（多列排序：按数组顺序叠加 ORDER BY，优先级从高到低）
+export interface SortSpec {
+  column: string
+  order: "asc" | "desc"
+}
+
 export interface TableDataRequest {
   connId: string
   db: string
   table: string
   page: number
   pageSize: number
-  sortColumn?: string // 排序列名（后端 ORDER BY，全局排序）
-  sortOrder?: "asc" | "desc" // 排序方向
+  sortSpecs?: SortSpec[] // 多列排序（按顺序叠加 ORDER BY，全局排序）
+  excludeColumns?: string[] // 省略的大字段列名（二进制/超长文本，列表不取真实值）
+  filters?: ColumnFilter[] // 列过滤条件（AND 叠加，后端过滤）
+}
+
+// 表浏览视图布局：跟随 object tab 持久化（过滤/排序/列显隐/页大小）。
+// 页码不持久化（数据会变，恢复旧页码无意义）。
+export interface TableViewLayout {
+  filters?: ColumnFilter[] // 过滤条件
+  sortSpecs?: SortSpec[]   // 多列排序
+  hiddenColumns?: string[] // 隐藏列名
+  pageSize?: number        // 页大小偏好
+  frozenUntil?: string | null // 冻结边界列（该列及左侧可见列冻结；null/空 = 仅 checkbox 列冻结）
+  colWidths?: Record<string, number> // 用户手动调整的列宽（列名 → px），覆盖自适应估算
 }
 
 export interface TableDataResult {
   columns: string[]
   rows: unknown[][]
-  total: number
+  total: number // 全表总行数（-1 表示未知/统计失败）
   page: number
   pageSize: number
+  excludeColumns?: string[] // 被省略的大字段列名（值为 NULL，前端渲染占位）
 }
 

@@ -14,6 +14,7 @@ interface Props {
   onCancel: () => void
   saving?: boolean
   readonly?: boolean // 只读模式：仅「查看」渲染展示，不提供编辑与保存（用于查询结果）
+  maximized?: boolean // 最大化模式：内容区撑满可用高度（配合 DialogContent 拉高）
 }
 
 // 内容格式类型：用于选择展示/编辑组件
@@ -38,7 +39,7 @@ function detectKind(value: unknown, dataType: string): ContentKind {
   if (t === "boolean") return "boolean"
 
   const s = String(value)
-  // JSON：对象/数组字符串，或 dataType 含 json
+  // JSON：dataType 含 json 或 字符串是合法 JSON
   if (/json/i.test(dataType) || (s.trim().startsWith("{") && tryParseJSON(s) !== undefined) || (s.trim().startsWith("[") && tryParseJSON(s) !== undefined)) {
     return "json"
   }
@@ -56,8 +57,10 @@ function isJSONValue(v: unknown): v is object {
   return typeof v === "object" && v !== null
 }
 
-export default function CellEditor({ column, dataType, value, nullable, onSave, onCancel, saving, readonly }: Props) {
+export default function CellEditor({ column, dataType, value, nullable, onSave, onCancel, saving, readonly, maximized }: Props) {
   const kind = useMemo(() => detectKind(value, dataType), [value, dataType])
+  // 内容区高度：最大化时撑满剩余高度，否则用固定 min-h（240px）与 max-h（40vh）
+  const boxH = maximized ? "min-h-0 flex-1" : "min-h-[240px] max-h-[40vh]"
 
   // 编辑态文本（切到「编辑」tab 时才展示，但状态始终保留）
   const [text, setText] = useState<string>(value === null || value === undefined ? "" : String(value))
@@ -100,7 +103,7 @@ export default function CellEditor({ column, dataType, value, nullable, onSave, 
   }
 
   return (
-    <div className="flex min-h-0 flex-col gap-2">
+    <div className={cn("flex min-h-0 min-w-0 flex-col gap-2", maximized && "flex-1")}>
       {/* 头部：列名 + 类型 */}
       <div className="flex items-center gap-2">
         <span className="font-medium">{column}</span>
@@ -110,59 +113,83 @@ export default function CellEditor({ column, dataType, value, nullable, onSave, 
 
       {/* 只读模式：仅「查看」，直接渲染内容，不显示 tab 标题（节省可视区） */}
       {readonly ? (
-        <div className="scrollbar-thin max-h-[40vh] overflow-auto rounded-md border bg-muted/20 p-2">
-          {kind === "json" && parsedJSON !== undefined ? (
+        kind === "json" && parsedJSON !== undefined ? (
+          <div className={cn("scrollbar-thin overflow-auto rounded-md border bg-muted/20 p-2", boxH)}>
             <JsonView value={parsedJSON as object} collapsed={2} displayDataTypes={false} enableClipboard={false} />
-          ) : kind === "json" ? (
-            <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">JSON 格式无效</div>
-          ) : kind === "null" ? (
-            <div className="font-mono text-[12px] italic text-muted-foreground">NULL</div>
-          ) : (
-            <pre className="whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed">{String(value ?? "")}</pre>
-          )}
-        </div>
+          </div>
+        ) : kind === "json" ? (
+          <div className={cn("rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive", boxH)}>JSON 格式无效</div>
+        ) : kind === "sql" || kind === "xml" ? (
+          <div className={cn("overflow-hidden rounded-md border", boxH)}>
+            <Editor
+              height={maximized ? "100%" : "240px"}
+              language={kind === "sql" ? "sql" : "xml"}
+              value={String(value ?? "")}
+              options={{
+                minimap: { enabled: false },
+                fontSize: 12,
+                wordWrap: "bounded",
+                wrappingIndent: "deepIndent",
+                scrollBeyondLastLine: false,
+                readOnly: true,
+              }}
+            />
+          </div>
+        ) : kind === "null" ? (
+          <div className={cn("rounded-md border bg-muted/20 p-3 font-mono text-[12px] italic text-muted-foreground", boxH)}>NULL</div>
+        ) : (
+          <pre className={cn("scrollbar-thin overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/20 p-3 font-mono text-[12px] leading-relaxed", boxH)}>{String(value ?? "")}</pre>
+        )
       ) : (
         /* 可编辑模式：顶部 Tab 查看 / 编辑 */
-        <Tabs defaultValue="view">
+        <Tabs defaultValue="view" className={cn("flex min-h-0 flex-col", maximized && "flex-1")}>
           <TabsList className="w-fit">
             <TabsTrigger value="view">查看</TabsTrigger>
             <TabsTrigger value="edit">编辑</TabsTrigger>
           </TabsList>
 
           {/* 查看：只读渲染，按格式选最佳展示（min-h 与编辑区对齐，避免切换抖动） */}
-          <TabsContent value="view" className="min-h-[240px]">
+          <TabsContent value="view" className={cn("min-h-[240px]", maximized && "min-h-0 flex-1")}>
             {kind === "json" && parsedJSON !== undefined ? (
-              <div className="scrollbar-thin max-h-[40vh] min-h-[240px] overflow-auto rounded-md border bg-muted/20 p-2">
+              <div className={cn("scrollbar-thin overflow-auto rounded-md border bg-muted/20 p-2", boxH)}>
                 <JsonView value={parsedJSON as object} collapsed={2} displayDataTypes={false} enableClipboard={false} />
               </div>
             ) : kind === "json" ? (
-              <div className="min-h-[240px] rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
+              <div className={cn("rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive", boxH)}>
                 JSON 格式无效，请切到「编辑」修正
               </div>
             ) : kind === "sql" || kind === "xml" ? (
-              <div className="overflow-hidden rounded-md border">
+              <div className={cn("overflow-hidden rounded-md border", boxH)}>
                 <Editor
-                  height="240px"
+                  height={maximized ? "100%" : "240px"}
                   language={kind === "sql" ? "sql" : "xml"}
                   value={String(value ?? "")}
-                  options={{ minimap: { enabled: false }, fontSize: 12, wordWrap: "on", scrollBeyondLastLine: false, readOnly: true }}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 12,
+                    // wordWrap "bounded" 会在视区宽度内强制换行，避免超长单行撑出容器（"on" 模式仍可能让容器被内容撑大）。
+                    wordWrap: "bounded",
+                    wrappingIndent: "deepIndent",
+                    scrollBeyondLastLine: false,
+                    readOnly: true,
+                  }}
                 />
               </div>
             ) : kind === "null" ? (
-              <div className="min-h-[240px] rounded-md border bg-muted/20 p-3 font-mono text-[12px] italic text-muted-foreground">NULL</div>
+              <div className={cn("rounded-md border bg-muted/20 p-3 font-mono text-[12px] italic text-muted-foreground", boxH)}>NULL</div>
             ) : (
-              <pre className="scrollbar-thin max-h-[40vh] min-h-[240px] overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/20 p-3 font-mono text-[12px] leading-relaxed">
+              <pre className={cn("scrollbar-thin overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/20 p-3 font-mono text-[12px] leading-relaxed", boxH)}>
                 {String(value ?? "")}
               </pre>
             )}
           </TabsContent>
 
           {/* 编辑：可修改，按格式选组件（统一 min-h 与查看区一致） */}
-          <TabsContent value="edit" className="min-h-[240px]">
+          <TabsContent value="edit" className={cn("min-h-[240px]", maximized && "min-h-0 flex-1")}>
             {kind === "sql" || kind === "xml" || (kind === "text" && text.length > 200) ? (
-              <div className="overflow-hidden rounded-md border">
+              <div className={cn("overflow-hidden rounded-md border", boxH)}>
                 <Editor
-                  height="240px"
+                  height={maximized ? "100%" : "240px"}
                   language={kind === "sql" ? "sql" : kind === "xml" ? "xml" : "plaintext"}
                   value={text}
                   onChange={(v) => {
@@ -175,7 +202,8 @@ export default function CellEditor({ column, dataType, value, nullable, onSave, 
             ) : (
               <textarea
                 className={cn(
-                  "min-h-[240px] w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-[12px] outline-none focus:border-primary",
+                  "w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-[12px] outline-none focus:border-primary",
+                  maximized ? "min-h-0 flex-1" : "min-h-[240px]",
                   jsonError && "border-destructive",
                 )}
                 value={text}

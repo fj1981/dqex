@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Braces, ChevronDown, ChevronRight, ChevronUp, Code2, Database, Eye, Filter, KeyRound, Loader2, Plus, Settings2, Table2, Trash2, Workflow, X } from "lucide-react"
+import { Braces, ChevronDown, ChevronRight, ChevronUp, Code2, Database, Eye, Filter, KeyRound, ListOrdered, Loader2, Plus, Settings2, ShieldCheck, Table2, Trash2, Workflow, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { confirm } from "@/components/ui/alert-dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -16,6 +17,7 @@ import {
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
+import TableIcon from "@/components/ui/table-icon"
 import * as api from "@/api"
 import { NO_VALUE_OPS, restoreSelectViaAst, serializeWhere, type WhereCond } from "@/lib/sqlCond"
 import type { DBTables, TableColumn, TableCondition, TableDataMode } from "@/types"
@@ -563,9 +565,11 @@ export default function TablePicker({
       return
     }
     // 三级：复杂语法无法还原，确认后丢弃
-    const ok = window.confirm(
-      "当前 SQL 包含可视化构建器不支持的语法，无法还原为结构化条件。\n切换后可视化模式将为空条件，手动编写的 SQL 将丢失。\n\n是否继续切换？",
-    )
+    const ok = await confirm({
+      title: "切换模式",
+      description: "当前 SQL 包含可视化构建器不支持的语法，无法还原为结构化条件。\n切换后可视化模式将为空条件，手动编写的 SQL 将丢失。",
+      confirmText: "继续切换",
+    })
     if (!ok) return // 留在 SQL 模式
     setVisConds([{ column: columns[0]?.name || "", operator: "=", value: "", connector: "AND" }])
     setWhereMode(mode)
@@ -988,7 +992,9 @@ export default function TablePicker({
                           }`}
                         >
                           {col.name}
-                          {col.primaryKey && <KeyRound className="h-2.5 w-2.5" />}
+                          {col.primaryKey && <TableIcon icon={KeyRound} size={12} />}
+                          {!col.primaryKey && col.unique && <TableIcon icon={ShieldCheck} size={12} />}
+                          {!col.primaryKey && !col.unique && col.indexed && <TableIcon icon={ListOrdered} size={12} />}
                         </button>
                       )
                     })}
@@ -1169,7 +1175,9 @@ export default function TablePicker({
                                 onClick={() => { insertColumn(col.name); setShowColRef(false); setColRefPos(null) }}
                                 className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-accent"
                               >
-                                {col.primaryKey && <KeyRound className="h-3 w-3 shrink-0 text-amber-500" />}
+                                {col.primaryKey && <TableIcon icon={KeyRound} className="text-amber-500" />}
+                                {!col.primaryKey && col.unique && <TableIcon icon={ShieldCheck} className="text-blue-500" />}
+                                {!col.primaryKey && !col.unique && col.indexed && <TableIcon icon={ListOrdered} className="text-muted-foreground/70" />}
                                 <span className="font-mono">{col.name}</span>
                                 <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{col.dataType}</span>
                               </button>

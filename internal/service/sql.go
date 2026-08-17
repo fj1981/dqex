@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"dbimpex/internal/engine"
@@ -15,7 +16,6 @@ import (
 // 审计来源标记
 const (
 	auditSourceManual = "manual" // 用户手写执行
-	auditSourceTree   = "tree"   // 对象树点开自动生成的查询（浏览表数据/统计行数）
 	auditSourceCell   = "cell"   // 单元格内联编辑
 )
 
@@ -44,90 +44,6 @@ func truncateAuditString(s string) string {
 		return s
 	}
 	return s[:auditFieldLimit] + "…[截断]"
-}
-
-// RunSQLQuery 执行查询类 SQL（SELECT/SHOW 等），自动追加 LIMIT 护栏。
-// dbName 覆盖连接默认库（点对象树查表时必传），确保跨库查询时 SQL 有库上下文。
-// mode 控制执行模式：transform（解析重构 + 补 LIMIT，默认）/ raw（原始直传，不做转换限制）。
-func (s *Service) RunSQLQuery(ctx context.Context, connKey, dbName, sql string, limit, offset int, mode string) (*engine.SQLQueryResult, error) {
-	conn, err := s.resolveConn(connKey, nil)
-	if err != nil {
-		return nil, err
-	}
-	var cli *cydb.DBCli
-	if dbName != "" {
-		// 指定库时按库建立连接（覆盖连接默认库），复用 ConnectDB
-		cli, err = engine.ConnectDB(*conn, dbName)
-	} else {
-		cli, err = engine.Connect(*conn)
-	}
-	if err != nil {
-		return nil, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
-	}
-	defer cli.Close()
-
-	result, err := engine.RunSQLQuery(ctx, cli, sql, limit, offset, mode)
-	if err != nil {
-		// 执行失败作为结果返回（HTTP 200），错误写入结果对象，前端结果区展示
-		result = &engine.SQLQueryResult{
-			SQL:     sql,
-			IsWrite: false,
-			Error:   err.Error(),
-			Elapsed: 0,
-		}
-		item := SQLHistoryItem{ConnID: connKey, DB: dbName, Mode: mode, SQL: sql, Status: "error", ErrorMsg: err.Error(), CreatedAt: nowMillis()}
-		_ = s.persist.AddSQLHistory(item)
-		s.appendSQLAudit(s.newAuditEntry(connKey, dbName, mode, auditSourceManual, sql, false, 0, 0, "error", err.Error()))
-		return result, nil
-	}
-	item := SQLHistoryItem{
-		ConnID: connKey, DB: dbName, Mode: mode, SQL: sql, IsWrite: false, RowCount: result.RowCount,
-		Elapsed: result.Elapsed, Status: "ok", CreatedAt: nowMillis(),
-	}
-	_ = s.persist.AddSQLHistory(item)
-	s.appendSQLAudit(s.newAuditEntry(connKey, dbName, mode, auditSourceManual, sql, false, result.RowCount, result.Elapsed, "ok", ""))
-	return result, nil
-}
-
-// RunSQLExec 执行写操作 SQL（INSERT/UPDATE/DELETE/DDL），危险语句已由引擎拦截。
-// dbName 覆盖连接默认库（点对象树时必传）。
-func (s *Service) RunSQLExec(ctx context.Context, connKey, dbName, sql string) (*engine.SQLQueryResult, error) {
-	conn, err := s.resolveConn(connKey, nil)
-	if err != nil {
-		return nil, err
-	}
-	var cli *cydb.DBCli
-	if dbName != "" {
-		cli, err = engine.ConnectDB(*conn, dbName)
-	} else {
-		cli, err = engine.Connect(*conn)
-	}
-	if err != nil {
-		return nil, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
-	}
-	defer cli.Close()
-
-	result, err := engine.RunSQLExec(ctx, cli, sql)
-	if err != nil {
-		// 执行失败作为结果返回（HTTP 200），错误写入结果对象，前端结果区展示
-		result = &engine.SQLQueryResult{
-			SQL:     sql,
-			IsWrite: true,
-			Error:   err.Error(),
-			Elapsed: 0,
-		}
-		item := SQLHistoryItem{ConnID: connKey, DB: dbName, SQL: sql, IsWrite: true, Status: "error", ErrorMsg: err.Error(), CreatedAt: nowMillis()}
-		_ = s.persist.AddSQLHistory(item)
-		s.appendSQLAudit(s.newAuditEntry(connKey, dbName, "", auditSourceManual, sql, true, 0, 0, "error", err.Error()))
-		return result, nil
-	}
-	item := SQLHistoryItem{
-		ConnID: connKey, DB: dbName, SQL: sql, IsWrite: true, RowCount: int(result.AffectedRows),
-		Elapsed: result.Elapsed, Status: "ok", CreatedAt: nowMillis(),
-	}
-	_ = s.persist.AddSQLHistory(item)
-	s.appendSQLAudit(s.newAuditEntry(connKey, dbName, "", auditSourceManual, sql, true, int(result.AffectedRows), result.Elapsed, "ok", ""))
-	return result, nil
 }
 
 // UpdateTableCell 更新表浏览视图中的单个单元格（named bind + 标识符引用，防注入）。
@@ -159,12 +75,137 @@ func (s *Service) UpdateTableCell(ctx context.Context, connKey, dbName string, p
 	return affected, nil
 }
 
+// GetCellValue 按主键 + 列名定位单行单列，返回该单元格的完整值（大字段懒加载）。
+// 仅用于对象树表浏览场景；列名/主键列用标识符引用，值用命名参数绑定，防注入。
+func (s *Service) GetCellValue(ctx context.Context, connKey, dbName, table, column string, pkColumns []string, pkValues []any) (any, error) {
+	conn, err := s.resolveConn(connKey, nil)
+	if err != nil {
+		return nil, err
+	}
+	var cli *cydb.DBCli
+	if dbName != "" {
+		cli, err = engine.ConnectDB(*conn, dbName)
+	} else {
+		cli, err = engine.Connect(*conn)
+	}
+	if err != nil {
+		return nil, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+	}
+	defer cli.Close()
+
+	return engine.GetCellValue(ctx, cli, table, column, pkColumns, pkValues)
+}
+
+// DeleteTableRows 删除表浏览中的整行（按主键定位，支持批量）。
+// 逐行执行 DELETE（named bind + 标识符引用，防注入）；返回累计影响行数。
+func (s *Service) DeleteTableRows(ctx context.Context, connKey, dbName, table string, pkColumns []string, rows [][]any) (int64, error) {
+	conn, err := s.resolveConn(connKey, nil)
+	if err != nil {
+		return 0, err
+	}
+	var cli *cydb.DBCli
+	if dbName != "" {
+		cli, err = engine.ConnectDB(*conn, dbName)
+	} else {
+		cli, err = engine.Connect(*conn)
+	}
+	if err != nil {
+		return 0, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+	}
+	defer cli.Close()
+
+	var total int64
+	for _, pkValues := range rows {
+		p := engine.DeleteRowParams{Table: table, PKColumns: pkColumns, PKValues: pkValues}
+		affected, err := engine.RunParamDelete(ctx, cli, p)
+		if err != nil {
+			// 失败也记审计（真实参数），便于排查失败的删除尝试
+			s.appendSQLAudit(s.newDeleteAuditEntry(connKey, dbName, table, pkColumns, pkValues, 0, "error", err.Error()))
+			return total, err
+		}
+		total += affected
+		s.appendSQLAudit(s.newDeleteAuditEntry(connKey, dbName, table, pkColumns, pkValues, int(affected), "ok", ""))
+	}
+	return total, nil
+}
+
+// InsertTableRow 表浏览视图新增一行（INSERT，named bind + 标识符引用，防注入）。
+// columns/values 为用户显式填写的列（自增主键通常不传）；返回影响行数。
+func (s *Service) InsertTableRow(ctx context.Context, connKey, dbName string, p engine.InsertRowParams) (int64, error) {
+	conn, err := s.resolveConn(connKey, nil)
+	if err != nil {
+		return 0, err
+	}
+	var cli *cydb.DBCli
+	if dbName != "" {
+		cli, err = engine.ConnectDB(*conn, dbName)
+	} else {
+		cli, err = engine.Connect(*conn)
+	}
+	if err != nil {
+		return 0, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+	}
+	defer cli.Close()
+
+	affected, err := engine.RunParamInsert(ctx, cli, p)
+	if err != nil {
+		// 失败也记审计（真实参数），便于排查失败的插入尝试
+		s.appendSQLAudit(s.newInsertAuditEntry(connKey, dbName, p, 0, "error", err.Error()))
+		return 0, err
+	}
+	s.appendSQLAudit(s.newInsertAuditEntry(connKey, dbName, p, int(affected), "ok", ""))
+	return affected, nil
+}
+
+// QueryTablePage 对象树数据浏览：分页查询单表数据并一次返回全表总行数。
+// 与 RunSQLQuery 不同：这是系统自动生成的浏览查询，不进「SQL 执行历史」、不写审计，
+// 避免每次点开表都产生一条孤立的 SELECT COUNT(*) 审计记录（此前由前端二次 COUNT 造成）。
+// filters 为列过滤条件（AND 叠加），由 engine 层复用 cydb 条件构建器（值参数化绑定防注入）。
+func (s *Service) QueryTablePage(ctx context.Context, connKey, dbName, table string, page, pageSize int, sortSpecs []engine.SortSpec, excludeColumns []string, filters []engine.ColumnFilter) (*engine.TablePageResult, error) {
+	conn, err := s.resolveConn(connKey, nil)
+	if err != nil {
+		return nil, err
+	}
+	var cli *cydb.DBCli
+	if dbName != "" {
+		cli, err = engine.ConnectDB(*conn, dbName)
+	} else {
+		cli, err = engine.Connect(*conn)
+	}
+	if err != nil {
+		return nil, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+	}
+	defer cli.Close()
+
+	return engine.QueryTablePage(ctx, cli, table, page, pageSize, sortSpecs, excludeColumns, filters)
+}
+
+// ExportTableExcel 表数据导出 Excel（应用过滤/排序），返回 xlsx 字节流 + 总行数 + 是否截断。
+// 复用 engine.QueryTablePage 拿数据 + excelize 内存生成，不落盘。
+func (s *Service) ExportTableExcel(ctx context.Context, connKey, dbName, table string, sortSpecs []engine.SortSpec, filters []engine.ColumnFilter, maxRows int) ([]byte, int64, bool, error) {
+	conn, err := s.resolveConn(connKey, nil)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	var cli *cydb.DBCli
+	if dbName != "" {
+		cli, err = engine.ConnectDB(*conn, dbName)
+	} else {
+		cli, err = engine.Connect(*conn)
+	}
+	if err != nil {
+		return nil, 0, false, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+	}
+	defer cli.Close()
+
+	return engine.ExportTableExcel(ctx, cli, table, sortSpecs, filters, maxRows)
+}
+
 // RunSQLScript 批量执行多语句 SQL（Navicat 式）：按分号分割，逐条判断读写并执行，
 // 返回结果集数组（顺序与语句一致）。mode 控制执行模式（transform/raw）。
 // 写操作的安全确认由调用方（前端）在进入本函数前完成。
-// recordHistory 控制是否写入「SQL 执行历史」：对象树点开自动生成的查询（浏览表数据/统计行数）
-// 传 false，避免系统生成语句污染历史；用户手动执行传 true。审计日志始终保留，不受此开关影响。
-func (s *Service) RunSQLScript(ctx context.Context, connKey, dbName, sql string, limit, offset int, mode string, recordHistory bool) ([]*engine.SQLQueryResult, error) {
+// 均写入「SQL 执行历史」并追加审计日志（用户手写，来源 manual）。
+func (s *Service) RunSQLScript(ctx context.Context, connKey, dbName, sql string, limit, offset int, mode string) ([]*engine.SQLQueryResult, error) {
 	conn, err := s.resolveConn(connKey, nil)
 	if err != nil {
 		return nil, err
@@ -182,9 +223,9 @@ func (s *Service) RunSQLScript(ctx context.Context, connKey, dbName, sql string,
 
 	results, err := engine.RunSQLScript(ctx, cli, sql, limit, offset, mode)
 	if err != nil {
-		// 执行失败：记录历史（受 recordHistory 开关控制），返回错误（前端展示）
+		// 执行失败：记录历史并审计，返回错误（前端展示）
 		item := SQLHistoryItem{ConnID: connKey, DB: dbName, Mode: mode, SQL: sql, Status: "error", ErrorMsg: err.Error(), CreatedAt: nowMillis()}
-		s.recordSQL(item, recordHistory, dbName, mode)
+		s.recordSQL(item, dbName, mode)
 		return nil, err
 	}
 	// 记录历史（汇总）
@@ -202,21 +243,14 @@ func (s *Service) RunSQLScript(ctx context.Context, connKey, dbName, sql string,
 		ConnID: connKey, DB: dbName, Mode: mode, SQL: sql, IsWrite: hasWrite, RowCount: totalRows,
 		Elapsed: results[len(results)-1].Elapsed, Status: "ok", CreatedAt: nowMillis(),
 	}
-	s.recordSQL(item, recordHistory, dbName, mode)
+	s.recordSQL(item, dbName, mode)
 	return results, nil
 }
 
-// recordSQL 写入 SQL 执行历史（受 recordHistory 开关控制）并始终追加审计日志。
-// 来源由 recordHistory 推断：true=用户手写（manual），false=对象树自动查询（tree）。
-func (s *Service) recordSQL(item SQLHistoryItem, recordHistory bool, dbName, mode string) {
-	source := auditSourceManual
-	if !recordHistory {
-		source = auditSourceTree
-	}
-	if recordHistory {
-		_ = s.persist.AddSQLHistory(item)
-	}
-	s.appendSQLAudit(s.newAuditEntry(item.ConnID, dbName, mode, source, item.SQL, item.IsWrite, item.RowCount, item.Elapsed, item.Status, item.ErrorMsg))
+// recordSQL 写入 SQL 执行历史并追加审计日志（来源恒为用户手写 manual）。
+func (s *Service) recordSQL(item SQLHistoryItem, dbName, mode string) {
+	_ = s.persist.AddSQLHistory(item)
+	s.appendSQLAudit(s.newAuditEntry(item.ConnID, dbName, mode, auditSourceManual, item.SQL, item.IsWrite, item.RowCount, item.Elapsed, item.Status, item.ErrorMsg))
 }
 
 // newAuditEntry 构造审计条目（SQL 执行类）。
@@ -242,6 +276,42 @@ func (s *Service) newCellAuditEntry(connID, dbName string, p engine.UpdateCellPa
 		NewValue: p.SetValue,
 		PKColumns: p.PKColumns,
 		PKValues:  p.PKValues,
+	}
+}
+
+// newDeleteAuditEntry 构造审计条目（整行删除，结构化真实参数）。
+func (s *Service) newDeleteAuditEntry(connID, dbName, table string, pkColumns []string, pkValues []any, affected int, status, errMsg string) SQLAuditEntry {
+	return SQLAuditEntry{
+		ConnID:    connID,
+		DB:        dbName,
+		Source:    auditSourceCell,
+		SQL:       fmt.Sprintf("DELETE FROM %s WHERE (主键)", table),
+		IsWrite:   true,
+		RowCount:  affected,
+		Status:    status,
+		ErrorMsg:  errMsg,
+		CreatedAt: nowMillis(),
+		Table:     table,
+		PKColumns: pkColumns,
+		PKValues:  pkValues,
+	}
+}
+
+// newInsertAuditEntry 构造审计条目（新增行，结构化真实参数）。
+func (s *Service) newInsertAuditEntry(connID, dbName string, p engine.InsertRowParams, affected int, status, errMsg string) SQLAuditEntry {
+	return SQLAuditEntry{
+		ConnID:    connID,
+		DB:        dbName,
+		Source:    auditSourceCell,
+		SQL:       fmt.Sprintf("INSERT INTO %s (%s)", p.Table, strings.Join(p.Columns, ", ")),
+		IsWrite:   true,
+		RowCount:  affected,
+		Status:    status,
+		ErrorMsg:  errMsg,
+		CreatedAt: nowMillis(),
+		Table:     p.Table,
+		Column:    strings.Join(p.Columns, ", "),
+		NewValue:  p.Values,
 	}
 }
 

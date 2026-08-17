@@ -104,11 +104,15 @@ function GroupNode({ group, node, depth, dbName, onOpenObject }: {
               />
             </div>
           )}
-          {children
-            .filter((c) => !filter || c.name.toLowerCase().includes(filter.toLowerCase()))
-            .map((c) => (
-              <LeafNode key={c.type + ":" + c.name} node={c} depth={depth + 1} dbName={dbName} onOpenObject={onOpenObject} />
-            ))}
+          {/* 子节点列表最大高度固定，内部滚动：避免单个分组（如表）过多把后续库挤到视区外，
+              用户无需折叠整个库也能看到其他库。过滤输入框固定在顶部不参与滚动。 */}
+          <div className="scrollbar-thin max-h-64 overflow-y-auto">
+            {children
+              .filter((c) => !filter || c.name.toLowerCase().includes(filter.toLowerCase()))
+              .map((c) => (
+                <LeafNode key={c.type + ":" + c.name} node={c} depth={depth + 1} dbName={dbName} onOpenObject={onOpenObject} />
+              ))}
+          </div>
         </div>
       )}
     </div>

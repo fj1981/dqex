@@ -52,6 +52,16 @@ function colDesc(c: CompareColumnItem): string {
   return `${c.dataType}${c.primaryKey ? " · 主键" : ""}${c.nullable ? "" : " · 非空"}`
 }
 
+// 单列各维度的类型/可空/主键差异标记：用于结构差异明细里逐维度高亮不一致项
+function colDims(c: CompareColumnItem): { type: string; nullable: string; pk: string } {
+  const type = c.normalizedType && c.normalizedType !== c.dataType ? `${c.dataType}(${c.normalizedType})` : c.dataType
+  return {
+    type,
+    nullable: c.nullable ? "可空" : "非空",
+    pk: c.primaryKey ? "主键" : "—",
+  }
+}
+
 // 数据差异摘要：省略零值项，避免“缺失19行/多出0行”这类冗余信息
 function tableDataDesc(d: NonNullable<CompareTableResult["data"]>): string {
   if (d.mode === "count") return `行数 ${d.sourceRows} vs ${d.targetRows}`
@@ -203,20 +213,36 @@ function TableDiffDetail({ t }: { t: CompareTableResult }) {
                 <thead className="bg-muted">
                   <tr>
                     <th className="px-2 py-1 text-left font-medium">列名</th>
-                    <th className="px-2 py-1 text-left font-medium">源</th>
-                    <th className="px-2 py-1 text-left font-medium">目标</th>
+                    <th className="px-2 py-1 text-left font-medium">类型</th>
+                    <th className="px-2 py-1 text-left font-medium">可空</th>
+                    <th className="px-2 py-1 text-left font-medium">主键</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {t.columns.different.map((d) => (
-                    <tr key={d.name} className="border-t">
-                      <td className="px-2 py-1 font-mono">{d.name}</td>
-                      <td className="px-2 py-1 font-mono text-muted-foreground">{colDesc(d.source)}</td>
-                      <td className="px-2 py-1 font-mono text-muted-foreground">{colDesc(d.target)}</td>
-                    </tr>
-                  ))}
+                  {t.columns.different.map((d) => {
+                    const s = colDims(d.source)
+                    const tg = colDims(d.target)
+                    // 不一致维度红色高亮，一致维度灰化，一眼定位差异点
+                    const td = (src: string, tgt: string, cls: string) => (
+                      <td className="px-2 py-1 align-top">
+                        <div className={cn("font-mono", src !== tgt ? "text-red-600 font-medium" : "text-muted-foreground", cls)}>{src}</div>
+                        <div className={cn("font-mono text-[11px]", src !== tgt ? "text-red-600 font-medium" : "text-muted-foreground", cls)}>{tgt}</div>
+                      </td>
+                    )
+                    return (
+                      <tr key={d.name} className="border-t">
+                        <td className="px-2 py-1 font-mono align-top">{d.name}</td>
+                        {td(s.type, tg.type, "")}
+                        {td(s.nullable, tg.nullable, "")}
+                        {td(s.pk, tg.pk, "")}
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
+              <div className="border-t px-2 py-1 text-[11px] text-muted-foreground">
+                每格上行为源、下行为目标；<span className="text-red-600">红色</span>为不一致维度
+              </div>
             </div>
           )}
         </div>

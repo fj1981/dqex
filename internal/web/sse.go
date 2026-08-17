@@ -34,6 +34,7 @@ func rawRoutes(svc *service.Service) func(*gin.RouterGroup) {
 			}
 			c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok", "success": true})
 		})
+		g.POST("/sql/table-export", func(c *gin.Context) { exportTableExcel(c, svc) })
 	}
 }
 
@@ -154,4 +155,29 @@ func openExportDir(c *gin.Context, svc *service.Service) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok", "success": true})
+}
+
+// exportTableExcel 表数据导出 Excel：解析 TablePageReq，内存生成 xlsx 直接返回文件流。
+// 复用 service.ExportTableExcel（内部复用 engine.QueryTablePage + excelize），不落盘。
+func exportTableExcel(c *gin.Context, svc *service.Service) {
+	var req TablePageReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		cygin.ResponseError(c, cygin.WrapError(err, cygin.ErrParamsInvalid, cygin.WithStatus(http.StatusBadRequest)))
+		return
+	}
+	maxRows := req.MaxRows
+	data, total, truncated, err := svc.ExportTableExcel(c.Request.Context(), req.ConnID, req.DB, req.Table, req.SortSpecs, req.Filters, maxRows)
+	if err != nil {
+		cygin.ResponseError(c, err)
+		return
+	}
+	filename := req.Table
+	if truncated {
+		filename = req.Table + "-truncated"
+	}
+	_ = total
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", `attachment; filename="`+filename+`.xlsx"`)
+	c.Header("Content-Transfer-Encoding", "binary")
+	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", data)
 }

@@ -18,9 +18,6 @@ type SQLRunReq struct {
 	Offset int    `json:"offset"` // 分页偏移
 	Mask   bool   `json:"mask"`  // 结果集脱敏：敏感列（password/token/secret 等）统一打码
 	Mode   string `json:"mode"`  // 执行模式：transform（默认，转换+限制）| raw（原始直传）
-	// RecordHistory 是否写入「SQL 执行历史」；nil=默认 true（手动执行）。
-	// 对象树点开自动生成的查询显式传 false，避免污染历史。
-	RecordHistory *bool `json:"recordHistory"`
 }
 
 // handleSQLRun 统一执行 SQL（Navicat 式）：按分号分割多语句，逐条判断读写并执行，
@@ -31,8 +28,7 @@ func handleSQLRun(svc *service.Service) gin.HandlerFunc {
 		if mode == "" {
 			mode = "transform"
 		}
-		recordHistory := req.RecordHistory == nil || *req.RecordHistory
-		results, err := svc.RunSQLScript(c.Request.Context(), req.ConnID, req.DB, req.SQL, req.Limit, req.Offset, mode, recordHistory)
+		results, err := svc.RunSQLScript(c.Request.Context(), req.ConnID, req.DB, req.SQL, req.Limit, req.Offset, mode)
 		if err != nil {
 			return nil, err
 		}
@@ -45,58 +41,24 @@ func handleSQLRun(svc *service.Service) gin.HandlerFunc {
 	})
 }
 
-// SQLQueryReq 查询类 SQL 执行请求（保留兼容，内部委托 RunSQLScript）
-type SQLQueryReq struct {
-	ConnID string `json:"connId" binding:"required"`
-	DB     string `json:"db"`
-	SQL    string `json:"sql" binding:"required"`
-	Limit  int    `json:"limit"`
-	Offset int    `json:"offset"`
-	Mask   bool   `json:"mask"`
-	Mode   string `json:"mode"`
-	// RecordHistory 是否写入「SQL 执行历史」；nil=默认 true。
-	RecordHistory *bool `json:"recordHistory"`
+// TablePageReq 对象树数据浏览分页请求：一次返回当前页数据与全表总行数。
+// 独立于 /query（查询终端），是系统自动生成的浏览查询，不写审计/历史。
+type TablePageReq struct {
+	ConnID         string               `json:"connId" binding:"required"`
+	DB             string               `json:"db"`   // 目标库名（点对象树查表时传入，覆盖连接默认库）
+	Table          string               `json:"table" binding:"required"`
+	Page           int                  `json:"page"`
+	PageSize       int                  `json:"pageSize"`
+	SortSpecs      []engine.SortSpec    `json:"sortSpecs"` // 多列排序（按顺序叠加 ORDER BY）
+	ExcludeColumns []string             `json:"excludeColumns"` // 省略的大字段列名（二进制/超长文本，列表不取真实值）
+	Filters        []engine.ColumnFilter `json:"filters"` // 列过滤条件（AND 叠加）
+	MaxRows        int                  `json:"maxRows"` // 导出时行数上限（仅 /table-export 使用，默认 100000）
 }
 
-func handleSQLQuery(svc *service.Service) gin.HandlerFunc {
-	return cygin.Handle(func(c *gin.Context, req SQLQueryReq) (*engine.SQLQueryResult, error) {
-		mode := req.Mode
-		if mode == "" {
-			mode = "transform"
-		}
-		recordHistory := req.RecordHistory == nil || *req.RecordHistory
-		results, err := svc.RunSQLScript(c.Request.Context(), req.ConnID, req.DB, req.SQL, req.Limit, req.Offset, mode, recordHistory)
-		if err != nil {
-			return nil, err
-		}
-		if len(results) == 0 {
-			return &engine.SQLQueryResult{SQL: req.SQL}, nil
-		}
-		r := results[0]
-		if req.Mask {
-			engine.MaskResult(r)
-		}
-		return r, nil
-	})
-}
-
-// SQLExecReq 写操作 SQL 执行请求（保留兼容）
-type SQLExecReq struct {
-	ConnID string `json:"connId" binding:"required"`
-	DB     string `json:"db"`
-	SQL    string `json:"sql" binding:"required"`
-}
-
-func handleSQLExec(svc *service.Service) gin.HandlerFunc {
-	return cygin.Handle(func(c *gin.Context, req SQLExecReq) (*engine.SQLQueryResult, error) {
-		results, err := svc.RunSQLScript(c.Request.Context(), req.ConnID, req.DB, req.SQL, 0, 0, "raw", true)
-		if err != nil {
-			return nil, err
-		}
-		if len(results) == 0 {
-			return &engine.SQLQueryResult{SQL: req.SQL, IsWrite: true}, nil
-		}
-		return results[0], nil
+// handleSQLTablePage 对象树数据浏览：分页查表数据 + 全表总行数一次返回。
+func handleSQLTablePage(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req TablePageReq) (*engine.TablePageResult, error) {
+		return svc.QueryTablePage(c.Request.Context(), req.ConnID, req.DB, req.Table, req.Page, req.PageSize, req.SortSpecs, req.ExcludeColumns, req.Filters)
 	})
 }
 
@@ -125,6 +87,72 @@ func handleUpdateCell(svc *service.Service) gin.HandlerFunc {
 			return nil, err
 		}
 		return map[string]any{"affectedRows": affected}, nil
+	})
+}
+
+// DeleteRowsReq 整行删除请求（按主键定位，支持批量删除）
+type DeleteRowsReq struct {
+	ConnID    string   `json:"connId" binding:"required"`
+	DB        string   `json:"db"`                        // 目标库名
+	Table     string   `json:"table" binding:"required"`  // 表名
+	PKColumns []string `json:"pkColumns" binding:"required"` // 主键列名
+	Rows      [][]any  `json:"rows" binding:"required"`   // 每行主键值数组（与 PKColumns 顺序一致）
+}
+
+// handleDeleteRows 删除表浏览中选中的整行（按主键定位，支持批量），返回累计影响行数。
+func handleDeleteRows(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req DeleteRowsReq) (map[string]any, error) {
+		affected, err := svc.DeleteTableRows(c.Request.Context(), req.ConnID, req.DB, req.Table, req.PKColumns, req.Rows)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"affectedRows": affected}, nil
+	})
+}
+
+// InsertRowReq 新增行请求（用户显式填写的列与值）
+type InsertRowReq struct {
+	ConnID  string   `json:"connId" binding:"required"`
+	DB      string   `json:"db"`                         // 目标库名
+	Table   string   `json:"table" binding:"required"`   // 表名
+	Columns []string `json:"columns" binding:"required"` // 写入列名（与 Values 顺序一致）
+	Values  []any    `json:"values" binding:"required"`  // 对应列值（null 表示 NULL）
+}
+
+// handleInsertRow 表浏览视图新增一行（INSERT），返回影响行数。
+func handleInsertRow(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req InsertRowReq) (map[string]any, error) {
+		affected, err := svc.InsertTableRow(c.Request.Context(), req.ConnID, req.DB, engine.InsertRowParams{
+			Table:   req.Table,
+			Columns: req.Columns,
+			Values:  req.Values,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"affectedRows": affected}, nil
+	})
+}
+
+// CellValueReq 单个大字段单元格取值请求：按主键 + 列名定位单行单列，返回完整值。
+// 用于列表省略的大字段（二进制/超长文本）点击查看，避免列表一次传输大量数据。
+type CellValueReq struct {
+	ConnID    string   `json:"connId" binding:"required"`
+	DB        string   `json:"db"`                        // 目标库名
+	Table     string   `json:"table" binding:"required"`  // 表名
+	Column    string   `json:"column" binding:"required"` // 目标列名
+	PKColumns []string `json:"pkColumns" binding:"required"` // 主键列名
+	PKValues  []any    `json:"pkValues" binding:"required"`  // 主键值
+}
+
+// handleCellValue 返回单行单列的完整值（大字段懒加载）。
+func handleCellValue(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req CellValueReq) (map[string]any, error) {
+		val, err := svc.GetCellValue(c.Request.Context(), req.ConnID, req.DB, req.Table, req.Column, req.PKColumns, req.PKValues)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"value": val}, nil
 	})
 }
 

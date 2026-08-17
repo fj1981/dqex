@@ -235,6 +235,8 @@ type TableColumnInfo struct {
 	PrimaryKey    bool   `json:"primaryKey,omitempty"` // 是否主键
 	Default       string `json:"default,omitempty"`    // 默认值
 	AutoIncrement bool   `json:"autoIncrement,omitempty"`
+	Unique        bool   `json:"unique,omitempty"` // 是否唯一约束（非主键）
+	Indexed       bool   `json:"indexed,omitempty"` // 是否有普通索引（非主键/非唯一）
 }
 
 // GetTableColumns 获取指定表的列信息（名称/类型/可空/主键/默认值，复用池化连接）
@@ -250,12 +252,17 @@ func GetTableColumns(conn DBConnInfo, tableName string) ([]TableColumnInfo, erro
 	cols := info.GetColumns()
 	result := make([]TableColumnInfo, 0, len(cols))
 	for _, col := range cols {
+		isPK := col.IsPrimaryKey()
+		isUnique := col.IsUnique()
 		c := TableColumnInfo{
 			Name:          col.GetName(),
 			DataType:      col.GetOrginalDataType(),
 			Nullable:      !col.IsNotNull(),
-			PrimaryKey:    col.IsPrimaryKey(),
+			PrimaryKey:    isPK,
 			AutoIncrement: col.IsAutoIncrement(),
+			// 唯一约束/普通索引均排除主键（主键自带唯一 + 索引，避免重复标识）
+			Unique:  !isPK && isUnique,
+			Indexed: !isPK && !isUnique && col.IsIndex(),
 		}
 		if d := col.GetDefault(); d != nil {
 			c.Default = *d

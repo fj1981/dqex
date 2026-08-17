@@ -20,6 +20,7 @@ import {
 import * as api from "@/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { confirm } from "@/components/ui/alert-dialog"
 import { Separator } from "@/components/ui/separator"
 import { Toaster } from "@/components/ui/sonner"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -159,7 +160,7 @@ function RightPanel() {
   }
 
   const delRecord = async (taskID: string) => {
-    if (!window.confirm("确定删除这条执行记录吗？（会同步删除其导出/对比产物文件）")) return
+    if (!(await confirm({ title: "删除执行记录", description: "确定删除这条执行记录吗？（会同步删除其导出/对比产物文件）", confirmText: "删除", danger: true }))) return
     try {
       await api.deleteHistory(taskID)
       loadHistory()
@@ -354,7 +355,7 @@ function SQLHistoryPanel({
   const [tab, setTab] = useState<"history" | "audit">("history")
 
   const clear = async () => {
-    if (!window.confirm("确认清空当前连接的全部 SQL 执行历史？")) return
+    if (!(await confirm({ title: "清空 SQL 历史", description: "确认清空当前连接的全部 SQL 执行历史？", confirmText: "清空", danger: true }))) return
     try {
       await onClear()
       toast.success("SQL 历史已清空")

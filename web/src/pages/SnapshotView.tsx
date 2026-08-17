@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { Camera, CheckCircle2, ChevronDown, ChevronUp, Database, Loader2, Play, Plus, RotateCcw, ScrollText, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { confirm } from "@/components/ui/alert-dialog"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -206,7 +207,7 @@ export default function SnapshotView() {
 
   const handleDelete = useCallback(async () => {
     if (!selectedInfo) return
-    if (!confirm(`确认删除快照「${selectedInfo.name}」？此操作不可恢复。`)) return
+    if (!(await confirm({ title: "删除快照", description: `确认删除快照「${selectedInfo.name}」？此操作不可恢复。`, confirmText: "删除", danger: true }))) return
     try {
       await api.deleteSnapshot(selectedInfo.id)
       toast.success("快照已删除")
@@ -225,20 +226,23 @@ export default function SnapshotView() {
   }, [])
 
   return (
-    <div className="flex h-full flex-col">
-      <PageHeader
-        title="快照管理"
-        description="冻结数据库快照，随时与当前状态对比变化"
-        actions={
-          <Button variant="outline" onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-1 h-4 w-4" /> 新建快照
-          </Button>
-        }
-      />
+    // 负 margin 抵消外层 main 的 p-6，让工作区撑满视口；外层不滚动，只有内部列表滚动
+    <div className="-m-6 flex h-[calc(100%+3rem)] flex-col">
+      <div className="shrink-0 px-6 pb-4 pt-6">
+        <PageHeader
+          title="快照管理"
+          description="冻结数据库快照，随时与当前状态对比变化"
+          actions={
+            <Button variant="outline" onClick={() => setCreateOpen(true)}>
+              <Plus className="mr-1 h-4 w-4" /> 新建快照
+            </Button>
+          }
+        />
+      </div>
 
-      <div className="flex min-h-0 flex-1 gap-4">
+      <div className="flex min-h-0 flex-1 gap-4 px-6 pb-6">
         {/* 左侧快照列表 */}
-        <Card className="flex w-72 shrink-0 flex-col">
+        <Card className="flex min-h-0 w-72 shrink-0 flex-col">
           <div className="border-b p-3">
             <Input
               placeholder="搜索快照..."
@@ -286,12 +290,12 @@ export default function SnapshotView() {
           </div>
         </Card>
 
-        {/* 右侧主操作区 */}
-        <div className="scrollbar-thin min-w-0 flex-1 space-y-4 overflow-y-auto pb-4">
+        {/* 右侧主操作区：固定头部，仅「包含的表」列表区滚动 */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col space-y-4 overflow-hidden">
           {detail && (
             <>
               {/* 快照摘要信息块 */}
-              <Card className="p-4">
+              <Card className="shrink-0 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
@@ -321,6 +325,7 @@ export default function SnapshotView() {
               </Card>
 
               {/* 对比配置 — Section 分区，与其他页面风格一致 */}
+              <div className="shrink-0">
               <Section title="对比当前数据库" description="将快照结构与当前在线库对比，检查表结构差异与行数变化">
                 <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
                   <div className="min-w-[200px] space-y-1">
@@ -349,6 +354,8 @@ export default function SnapshotView() {
                   {(snapshotDatabases.length > 1 || Object.keys(dbMapping).some(k => dbMapping[k] !== k)) && (
                     <div className="min-w-[200px] space-y-1">
                       <label className="text-xs font-medium text-muted-foreground">库映射</label>
+                      {/* 限高内滚：库多时不撑高对比配置 Section */}
+                      <div className="scrollbar-thin max-h-32 space-y-1 overflow-y-auto pr-1">
                       {snapshotDatabases.map((db) => {
                         const mapped = dbMapping[db.dbName] || db.dbName
                         return (
@@ -372,6 +379,7 @@ export default function SnapshotView() {
                           </div>
                         )
                       })}
+                      </div>
                     </div>
                   )}
 
@@ -389,23 +397,29 @@ export default function SnapshotView() {
                   <p className="mt-2 text-xs text-amber-600">未找到快照来源连接，请重新选择目标连接</p>
                 )}
               </Section>
+              </div>
 
-              {/* 包含的表预览（对比中/出报告时隐藏，避免与结果区重复） */}
+              {/* 包含的表预览（对比中/出报告时隐藏，避免与结果区重复）——唯一滚动区 */}
               {!busy && !report && (
-              <Section title={`包含的表（${detail.tableCount}）`}>
-                {snapshotDatabases.length > 1 && (
-                  <p className="mb-1 text-xs text-muted-foreground">
-                    共 {snapshotDatabases.length} 个库
-                  </p>
-                )}
-                {/* 表头 */}
-                <div className="mb-0.5 grid grid-cols-[minmax(0,2fr)_48px_1fr_64px] gap-x-3 border-b px-1 pb-1 text-xs font-medium text-muted-foreground">
-                  <span>表名</span>
-                  <span>列</span>
-                  <span>主键</span>
-                  <span className="text-right">行数</span>
+              <section className="flex min-h-0 flex-1 flex-col space-y-3">
+                <div className="shrink-0">
+                  <h3 className="text-sm font-medium">包含的表（{detail.tableCount}）</h3>
                 </div>
-                <div className="scrollbar-thin max-h-[calc(100vh-520px)] min-h-[200px] overflow-y-auto">
+                <div className="shrink-0">
+                  {snapshotDatabases.length > 1 && (
+                    <p className="mb-1 text-xs text-muted-foreground">
+                      共 {snapshotDatabases.length} 个库
+                    </p>
+                  )}
+                  {/* 表头 */}
+                  <div className="mb-0.5 grid grid-cols-[minmax(0,2fr)_48px_1fr_64px] gap-x-3 border-b px-1 pb-1 text-xs font-medium text-muted-foreground">
+                    <span>表名</span>
+                    <span>列</span>
+                    <span>主键</span>
+                    <span className="text-right">行数</span>
+                  </div>
+                </div>
+                <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
                   {snapshotDatabases.map((db) => (
                     <div key={db.dbName}>
                       {snapshotDatabases.length > 1 && (
@@ -433,12 +447,12 @@ export default function SnapshotView() {
                     </div>
                   ))}
                 </div>
-              </Section>
+              </section>
               )}
 
               {/* 对比进度 / 报告（在快照信息与表列表下方追加） */}
               {runningTaskID && comparing && (
-                <Card className="p-4">
+                <Card className="shrink-0 p-4">
                   <ProgressView
                     taskID={runningTaskID}
                     taskType="snapshot_compare"
@@ -453,7 +467,7 @@ export default function SnapshotView() {
               {report && (
                 <>
                   {/* 完成后状态条：与实时对比风格一致 */}
-                  <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800">
+                  <div className="flex shrink-0 items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800">
                     <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" />
                     <span className="font-medium">执行完成</span>
                     <span className="text-xs opacity-80">
@@ -477,7 +491,9 @@ export default function SnapshotView() {
                       </div>
                     </div>
                   )}
-                  <CompareReport result={report} />
+                  <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
+                    <CompareReport result={report} />
+                  </div>
                 </>
               )}
             </>

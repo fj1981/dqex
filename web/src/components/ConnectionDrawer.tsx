@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { confirm } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
@@ -149,7 +150,7 @@ export default function ConnectionDrawer() {
 
   const doDelete = async (id: string, n: string) => {
     // 删除前确认，防止误点
-    if (!window.confirm(`确定删除连接「${n}」吗？`)) return
+    if (!(await confirm({ title: "删除连接", description: `确定删除连接「${n}」吗？`, confirmText: "删除", danger: true }))) return
     try {
       await removeConnection(id)
       toast.success(`已删除连接 ${n}`)

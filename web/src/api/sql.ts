@@ -15,9 +15,6 @@ import type {
 
 // ---- SQL 查询终端 ----
 
-export const querySql = (payload: SQLQueryRequest) =>
-  post<SQLQueryResult>("/api/sql/query", payload)
-
 // 统一执行（Navicat 式）：支持多语句批量执行 + 选中执行，返回结果集数组。
 // 写操作确认由调用方（store）在发送前完成。
 export const runSql = (payload: SQLQueryRequest) =>
@@ -25,9 +22,6 @@ export const runSql = (payload: SQLQueryRequest) =>
 
 export const pingConnection = (connId: string) =>
   post<SQLPingResult>("/api/sql/ping", { connId })
-
-export const execSql = (payload: { connId: string; db?: string; sql: string }) =>
-  post<SQLQueryResult>("/api/sql/exec", payload)
 
 export const fetchSqlHistory = (connId: string) =>
   request<SQLHistoryItem[]>(`/api/sql/history?connId=${encodeURIComponent(connId)}`)
@@ -74,37 +68,76 @@ export const buildObjectTree = (databases: { name: string; tables: string[]; obj
     ],
   }))
 
-// 查询表数据（通过 SQL 终端生成分页 SELECT，支持全局排序）
+// 查询表数据：走专用分页接口，一次返回当前页数据与全表总行数（total）。
+// 后端内部用 cydb 的 SQLStmt.Count 计算总数，不写审计/历史，避免二次 COUNT 的审计冗余。
 export const fetchTableData = async (req: TableDataRequest): Promise<TableDataResult> => {
-  const offset = (req.page - 1) * req.pageSize
-  // 排序列名用反引号引用（防注入），ORDER BY 放在 LIMIT 之前
-  const orderBy = req.sortColumn && req.sortOrder
-    ? ` ORDER BY \`${req.sortColumn.replace(/`/g, "")}\` ${req.sortOrder === "desc" ? "DESC" : "ASC"}`
-    : ""
-  const sql = `SELECT * FROM \`${req.table}\`${orderBy} LIMIT ${req.pageSize} OFFSET ${offset}`
-  // recordHistory: false —— 对象树点开自动生成的浏览查询，不写入 SQL 执行历史
-  const result = await querySql({ connId: req.connId, db: req.db, sql, limit: req.pageSize, offset, recordHistory: false })
-  // 执行失败时后端以 result.error 返回（HTTP 200），此处抛错交给调用方内联展示
-  if (result.error) throw new Error(result.error)
-  return {
-    columns: result.columns ?? [],
-    rows: result.rows ?? [],
-    total: -1, // 全表总行数由单独 count 查询提供
+  const result = await post<TableDataResult>("/api/sql/table", {
+    connId: req.connId,
+    db: req.db,
+    table: req.table,
     page: req.page,
     pageSize: req.pageSize,
-  }
+    sortSpecs: req.sortSpecs,
+    excludeColumns: req.excludeColumns,
+    filters: req.filters,
+  })
+  return result
 }
 
-// 统计表总行数
-export const countTableRows = async (connId: string, db: string, table: string): Promise<number> => {
-  const sql = `SELECT COUNT(*) AS cnt FROM \`${table}\``
-  // recordHistory: false —— 对象树点开自动生成的统计查询，不写入 SQL 执行历史
-  const result = await querySql({ connId, db, sql, limit: 1, recordHistory: false })
-  if (result.error) return -1
-  if (!result.rows?.length) return 0
-  const v = result.rows[0][0]
-  return typeof v === "number" ? v : Number(v) || 0
+// 表数据导出 Excel：直接 fetch 返回文件流（响应非 JSON，不走 request 封装）。
+// 成功时触发浏览器下载；失败时解析 cygin 错误响应抛错。
+export const exportTableExcel = async (req: TableDataRequest, maxRows = 100000): Promise<void> => {
+  const authToken = sessionStorage.getItem("dbx_token") || "" // 与 api/index.ts 的 resolveToken 保持一致
+  const res = await fetch("/api/sql/table-export", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(authToken ? { "X-Auth-Token": authToken } : {}),
+    },
+    body: JSON.stringify({
+      connId: req.connId,
+      db: req.db,
+      table: req.table,
+      sortSpecs: req.sortSpecs,
+      filters: req.filters,
+      maxRows,
+    }),
+  })
+  if (!res.ok) {
+    // 尝试解析错误响应
+    try {
+      const b = await res.json()
+      const detail = (b?.details ?? []).filter(Boolean).join("；")
+      throw new Error(detail || b?.msg || `导出失败 (HTTP ${res.status})`)
+    } catch (e) {
+      if (e instanceof Error && e.message) throw e
+      throw new Error(`导出失败 (HTTP ${res.status})`)
+    }
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = `${req.table}.xlsx`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }
+
+// 表浏览大字段单元格取值请求（按主键 + 列名定位单行单列）
+export interface CellValuePayload {
+  connId: string
+  db: string
+  table: string
+  column: string
+  pkColumns: string[]
+  pkValues: unknown[]
+}
+
+// 获取单个大字段单元格的完整值（懒加载）
+export const fetchTableCellValue = (payload: CellValuePayload) =>
+  post<{ value: unknown }>("/api/sql/cell-value", payload)
 
 // 表浏览单元格更新请求（named bind 更新）
 export interface UpdateCellPayload {
@@ -120,3 +153,29 @@ export interface UpdateCellPayload {
 // 更新表浏览中的单个单元格，返回影响行数
 export const updateTableCell = (payload: UpdateCellPayload) =>
   post<{ affectedRows: number }>("/api/sql/cell", payload)
+
+// 表浏览整行删除请求（按主键定位，支持批量）
+export interface DeleteRowsPayload {
+  connId: string
+  db: string
+  table: string
+  pkColumns: string[]
+  rows: unknown[][] // 每行主键值数组（与 pkColumns 顺序一致）
+}
+
+// 删除表浏览中选中的整行（批量），返回累计影响行数
+export const deleteTableRows = (payload: DeleteRowsPayload) =>
+  post<{ affectedRows: number }>("/api/sql/delete-rows", payload)
+
+// 表浏览新增行请求（用户显式填写的列与值）
+export interface InsertRowPayload {
+  connId: string
+  db: string
+  table: string
+  columns: string[]
+  values: unknown[]
+}
+
+// 表浏览新增一行（INSERT），返回影响行数
+export const insertTableRow = (payload: InsertRowPayload) =>
+  post<{ affectedRows: number }>("/api/sql/insert-row", payload)

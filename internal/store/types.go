@@ -13,6 +13,8 @@
 package store
 
 import (
+	"encoding/json"
+
 	"dbimpex/internal/engine"
 )
 
@@ -189,6 +191,8 @@ type WorkspaceTab struct {
 	Name    string `json:"name,omitempty"`
 	ObjType string `json:"objType,omitempty"` // table / view / function / procedure
 	SubTab  string `json:"subTab,omitempty"`  // data / struct / ddl
+	// 表浏览视图布局（过滤/排序/列显隐/页大小），原样 JSON 存取，后端不解析语义
+	ViewLayout json.RawMessage `json:"viewLayout,omitempty"`
 }
 
 // WorkspaceState 某连接的工作区状态。

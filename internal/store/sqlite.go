@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rs/xid"
@@ -33,9 +34,22 @@ type SQLiteStore struct {
 	cli *cydb.DBCli
 }
 
+// sqliteDSN 生成 SQLite 连接 DSN：通过 modernc.org/sqlite 的 _pragma 参数为
+// 连接池中的每个新连接自动执行对应 PRAGMA。
+//   - busy_timeout(5000)：写锁竞争时最多等待 5s 而不是立即报 database is locked。
+//     busy_timeout 是连接级设置，必须走 DSN 才能在每次打开连接时生效。
+//   - journal_mode(WAL)：写事务不再阻塞其他连接的读（读-写并发友好）。
+//   - synchronous(NORMAL)：WAL 模式下兼顾安全与吞吐的推荐级别。
+func sqliteDSN(dbPath string) string {
+	if strings.Contains(dbPath, "?") {
+		return dbPath // 调用方已提供完整 DSN，尊重原值
+	}
+	return dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+}
+
 // NewSQLiteStore 打开（或创建）指定路径的 SQLite 库并执行自动迁移。
 func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
-	cli, err := cydb.TryConnect(&def.DBConnection{Type: "sqlite", Path: dbPath})
+	cli, err := cydb.TryConnect(&def.DBConnection{Type: "sqlite", Path: sqliteDSN(dbPath)})
 	if err != nil {
 		return nil, fmt.Errorf("打开 SQLite 存储失败: %w", err)
 	}
@@ -127,9 +141,12 @@ func (s *SQLiteStore) SaveConn(rec ConnRecord) (ConnRecord, error) {
 }
 
 // LoadConns 加载全部连接配置（按 ID 索引）。
+// 注意：返回空 map 可能意味着"确实无连接"，也可能意味着"读取失败"（如 SQLite 锁竞争）。
+// 读取失败不再静默——记录日志，避免上层把"读库失败"误判为"连接配置不存在"。
 func (s *SQLiteStore) LoadConns() map[string]ConnRecord {
 	rows, err := s.cli.List(tableConn, nil)
 	if err != nil {
+		cylog.Errorf("加载连接配置失败（注意：这是存储读取错误，不等于连接不存在）: %v", err)
 		return map[string]ConnRecord{}
 	}
 	recs := make(map[string]ConnRecord, len(rows))

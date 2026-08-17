@@ -1,7 +1,8 @@
 import { create } from "zustand"
+import { confirm } from "@/components/ui/alert-dialog"
 import { fetchWorkspace, runSql, saveWorkspace } from "@/api/sql"
 import { describeWriteOp, isWriteSQL, previewSQL } from "@/lib/sql"
-import type { ObjectDDLType, SQLExecMode, SQLQueryResult, WorkspaceTab as WorkspaceTabDTO } from "@/types"
+import type { ObjectDDLType, SQLExecMode, SQLQueryResult, TableViewLayout, WorkspaceTab as WorkspaceTabDTO } from "@/types"
 
 export type WorkspaceTabKind = "query" | "object"
 
@@ -30,6 +31,7 @@ export interface ObjectTab {
   objType: ObjectDDLType // table / view / function / procedure
   subTab: "data" | "struct" | "ddl"
   page: number
+  viewLayout?: TableViewLayout // 表浏览视图布局（过滤/排序/列显隐/页大小），随 tab 持久化
 }
 
 export type WorkspaceTab = QueryTab | ObjectTab
@@ -40,6 +42,8 @@ interface QueryState {
   activeId: string
   running: boolean
   mask: boolean // 结果集脱敏开关（敏感列统一打码）
+  persistFailed: boolean // 工作区持久化失败标记（用于 UI 提示，下次成功保存时清除）
+  clearPersistFailed: () => void
   setConnId: (connId: string) => void
   addTab: (db?: string) => void // 新建查询 tab（可选指定目标库，空 = 连接默认库）
   openObjectTab: (db: string, name: string, objType: ObjectDDLType) => void // 打开对象 tab（已存在则激活）
@@ -54,6 +58,7 @@ interface QueryState {
   updateTabMode: (id: string, mode: SQLExecMode) => void
   setObjectSubTab: (id: string, subTab: "data" | "struct" | "ddl") => void
   setObjectPage: (id: string, page: number) => void
+  setObjectViewLayout: (id: string, layout: TableViewLayout) => void
   setMask: (mask: boolean) => void
   runActive: (selection?: string) => Promise<void>
   runTab: (id: string, selection?: string) => Promise<void>
@@ -113,7 +118,15 @@ function toDTO(t: WorkspaceTab): WorkspaceTabDTO {
       ...(t.title !== defaultTitle ? { title: t.title } : {}),
     }
   }
-  return { id: t.id, kind: "object", db: t.db, name: t.name, objType: t.objType, subTab: t.subTab }
+  return {
+    id: t.id,
+    kind: "object",
+    db: t.db,
+    name: t.name,
+    objType: t.objType,
+    subTab: t.subTab,
+    ...(t.viewLayout ? { viewLayout: t.viewLayout } : {}),
+  }
 }
 
 // 从后端 DTO 转内存 WorkspaceTab（保留原 id；结果集/瞬时状态按初始值复位）
@@ -136,6 +149,7 @@ function fromDTO(d: WorkspaceTabDTO): WorkspaceTab {
     objType: (d.objType ?? "table") as ObjectDDLType,
     subTab: (d.subTab ?? "data") as "data" | "struct" | "ddl",
     page: 1,
+    ...(d.viewLayout ? { viewLayout: d.viewLayout } : {}),
   }
 }
 
@@ -155,13 +169,30 @@ async function restoreConn(connId: string): Promise<{ tabs: WorkspaceTab[]; acti
   }
 }
 
-// 保存当前内存中的连接状态到后端（fire-and-forget，失败不阻塞主流程）
-function persistCurrent(connId: string, tabs: WorkspaceTab[], activeId: string) {
+// 立即落盘：直接把给定快照写入后端（fire-and-forget，失败不阻塞主流程）。
+// 仅用于「切换连接前保存旧连接」等必须即时写入、不能等待防抖的场景。
+function persistNow(connId: string, tabs: WorkspaceTab[], activeId: string) {
   if (!connId) return
   const state = { tabs: tabs.map(toDTO), activeId }
-  saveWorkspace(connId, state).catch(() => {
-    // 忽略持久化失败，不影响主流程
+  saveWorkspace(connId, state).catch((e) => {
+    // 持久化失败不阻塞主流程，但记录告警并标记状态，便于用户感知排查
+    console.warn(`[workspace] 工作区持久化失败 conn=${connId}:`, e)
+    useQueryStore.setState({ persistFailed: true })
   })
+}
+
+// 统一的工作区持久化防抖：停顿 300ms 后才真正落盘。
+// 一次用户操作（如点击对象）会触发一串连续的状态更新（openObjectTab → setActiveTab → setObjectViewLayout），
+// 若每次都立即落盘，会在几十毫秒内对同一连接发出多条相同的 PUT /workspace。
+// 这里统一走防抖：窗口内多次变更只落盘一次（回调时重新读最新 store 状态，不会被旧快照覆盖）。
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+function persistCurrent() {
+  if (persistTimer) clearTimeout(persistTimer)
+  persistTimer = setTimeout(() => {
+    persistTimer = null
+    const { connId, tabs, activeId } = useQueryStore.getState()
+    persistNow(connId, tabs, activeId)
+  }, 300)
 }
 
 export const useQueryStore = create<QueryState>((set, get) => ({
@@ -170,13 +201,22 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   activeId: "",
   running: false,
   mask: false,
+  persistFailed: false,
+
+  clearPersistFailed: () => set({ persistFailed: false }),
 
   setConnId: (connId) => {
     const { connId: prev, tabs, activeId } = get()
     if (prev === connId) return
+    // 清掉 SQL 输入的防抖持久化，避免窗口期结束后误把旧连接快照写进新连接
+    if (persistTimer) {
+      clearTimeout(persistTimer)
+      persistTimer = null
+    }
     // 先保存旧连接的工作区（若已进入过某连接），再异步恢复新连接的工作区
+    // 必须立即落盘：防抖窗口内 get() 已切到新连接，不能用 persistCurrent（会读错连接）
     if (prev) {
-      persistCurrent(prev, tabs, activeId)
+      persistNow(prev, tabs, activeId)
     }
     set({ connId, tabs: [], activeId: "", running: false })
     // 异步恢复目标连接的工作区
@@ -197,7 +237,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     const tab = newQueryTab(db, maxQuerySeq(tabs) + 1)
     const nextTabs = [...tabs, tab]
     set({ tabs: nextTabs, activeId: tab.id })
-    persistCurrent(connId, nextTabs, tab.id)
+    persistCurrent()
   },
 
   openObjectTab: (db, name, objType) => {
@@ -208,7 +248,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     )
     if (existing) {
       set({ activeId: existing.id })
-      persistCurrent(connId, tabs, existing.id)
+      persistCurrent()
       return
     }
     // 表/视图默认看数据，函数/存储过程只有 DDL
@@ -224,7 +264,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     }
     const nextTabs = [...tabs, tab]
     set({ tabs: nextTabs, activeId: tab.id })
-    persistCurrent(connId, nextTabs, tab.id)
+    persistCurrent()
   },
 
   closeTab: (id) => {
@@ -238,14 +278,14 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       nextActive = next.length > 0 ? next[Math.min(idx, next.length - 1)].id : ""
     }
     set({ tabs: next, activeId: nextActive })
-    persistCurrent(connId, next, nextActive)
+    persistCurrent()
   },
 
   closeOthers: (id) => {
     const { connId, tabs } = get()
     const next = tabs.filter((t) => t.id === id)
     set({ tabs: next, activeId: id })
-    persistCurrent(connId, next, id)
+    persistCurrent()
   },
 
   closeRight: (id) => {
@@ -256,13 +296,13 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     // 若当前激活的 tab 在被关闭的右侧，回退激活到 id
     const nextActive = tabs.slice(idx + 1).some((t) => t.id === activeId) ? id : activeId
     set({ tabs: next, activeId: nextActive })
-    persistCurrent(connId, next, nextActive)
+    persistCurrent()
   },
 
   closeAll: () => {
     const { connId } = get()
     set({ tabs: [], activeId: "" })
-    persistCurrent(connId, [], "")
+    persistCurrent()
   },
 
   renameTab: (id, title) => {
@@ -271,34 +311,35 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       t.id === id && t.kind === "query" ? { ...t, title: title.trim() || t.title } : t,
     ) as WorkspaceTab[]
     set({ tabs: next })
-    persistCurrent(connId, next, activeId)
+    persistCurrent()
   },
 
   setActiveTab: (id) => {
     set({ activeId: id })
     const { connId, tabs } = get()
-    persistCurrent(connId, tabs, id)
+    persistCurrent()
   },
 
   updateTabSql: (id, sql) => {
-    const { connId, tabs, activeId } = get()
+    const { tabs } = get()
     const next = tabs.map((t) => (t.id === id && t.kind === "query" ? { ...t, sql } : t)) as WorkspaceTab[]
     set({ tabs: next })
-    persistCurrent(connId, next, activeId)
+    // 统一走防抖持久化（SQL 输入与结构操作共用同一防抖窗口）
+    persistCurrent()
   },
 
   updateTabDb: (id, db) => {
     const { connId, tabs, activeId } = get()
     const next = tabs.map((t) => (t.id === id && t.kind === "query" ? { ...t, db } : t)) as WorkspaceTab[]
     set({ tabs: next })
-    persistCurrent(connId, next, activeId)
+    persistCurrent()
   },
 
   updateTabMode: (id, mode) => {
     const { connId, tabs, activeId } = get()
     const next = tabs.map((t) => (t.id === id && t.kind === "query" ? { ...t, mode } : t)) as WorkspaceTab[]
     set({ tabs: next })
-    persistCurrent(connId, next, activeId)
+    persistCurrent()
   },
 
   setObjectSubTab: (id, subTab) => {
@@ -307,7 +348,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       t.id === id && t.kind === "object" ? { ...t, subTab, page: 1 } : t,
     ) as WorkspaceTab[]
     set({ tabs: next })
-    persistCurrent(connId, next, activeId)
+    persistCurrent()
   },
 
   setObjectPage: (id, page) =>
@@ -315,18 +356,27 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       tabs: s.tabs.map((t) => (t.id === id && t.kind === "object" ? { ...t, page } : t)) as WorkspaceTab[],
     })),
 
+  setObjectViewLayout: (id, layout) => {
+    const { connId, tabs, activeId } = get()
+    const next = tabs.map((t) =>
+      t.id === id && t.kind === "object" ? { ...t, viewLayout: layout } : t,
+    ) as WorkspaceTab[]
+    set({ tabs: next })
+    persistCurrent()
+  },
+
   clearTabResult: (id) => {
     const { connId, tabs, activeId } = get()
     const next = tabs.map((t) => (t.id === id && t.kind === "query" ? { ...t, results: [], activeResult: 0, error: null } : t)) as WorkspaceTab[]
     set({ tabs: next })
-    persistCurrent(connId, next, activeId)
+    persistCurrent()
   },
 
   setActiveResult: (id, index) => {
     const { connId, tabs, activeId } = get()
     const next = tabs.map((t) => (t.id === id && t.kind === "query" ? { ...t, activeResult: index } : t)) as WorkspaceTab[]
     set({ tabs: next })
-    persistCurrent(connId, next, activeId)
+    persistCurrent()
   },
 
   runActive: async (selection?: string) => {
@@ -354,7 +404,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     }))
     try {
       // 写操作统一确认：检测到 INSERT/UPDATE/DELETE/DDL 时弹一次确认，避免误点
-      if (isWriteSQL(sql) && !window.confirm(`检测到 ${describeWriteOp(sql)} 写操作，确认执行？\n\n${previewSQL(sql)}`)) {
+      if (isWriteSQL(sql) && !(await confirm({ title: "确认写操作", description: `检测到 ${describeWriteOp(sql)} 写操作，确认执行？\n\n${previewSQL(sql)}`, confirmText: "确认执行", danger: true }))) {
         set((s) => ({
           running: false,
           tabs: s.tabs.map((t) => (t.id === id && t.kind === "query" ? { ...t, running: false } : t)) as WorkspaceTab[],
@@ -370,8 +420,8 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           : t,
       ) as WorkspaceTab[]
       set({ running: false, tabs: next })
-      // 结果持久化：刷新/切换连接后恢复上次查询结果
-      persistCurrent(connId, next, get().activeId)
+      // 持久化 tab 的 SQL 上下文（结果集不落盘：toDTO 已剥离 results，刷新后需重新执行查看）
+      persistCurrent()
     } catch (e) {
       set((s) => ({
         running: false,
@@ -399,7 +449,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           : t,
       ) as WorkspaceTab[]
       set({ tabs: next })
-      persistCurrent(connId, next, activeId)
+      persistCurrent()
       return
     }
     // 无激活 query tab：新建一个（序号递增），并带入上下文
@@ -408,6 +458,6 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     if (mode) tab.mode = mode
     const next = [...tabs, tab]
     set({ tabs: next, activeId: tab.id })
-    persistCurrent(connId, next, tab.id)
+    persistCurrent()
   },
 }))
