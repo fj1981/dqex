@@ -239,6 +239,12 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 		// 元数据
 		eb.GROUP("/meta", []cygin.APIHandler{
 			eb.GET("/dbtypes", handleDBTypes()),
+			eb.GET("/version", handleVersion()),
+		}),
+		// 全局配置
+		eb.GROUP("/config", []cygin.APIHandler{
+			eb.GET("", handleGetConfig(svc)),
+			eb.PUT("", handleSaveConfig(svc)),
 		}),
 		// SQL 查询终端
 		eb.GROUP("/sql", []cygin.APIHandler{

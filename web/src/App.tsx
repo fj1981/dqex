@@ -5,15 +5,19 @@ import {
   ArrowLeftRight,
   BookOpenText,
   Camera,
+  ClipboardList,
   Database,
   FileDown,
   FileUp,
   FolderOpen,
+  HelpCircle,
+  Info,
   PanelRightClose,
   PanelRightOpen,
   Plus,
   Scale,
   ScrollText,
+  Settings,
   Terminal,
   Trash2,
 } from "lucide-react"
@@ -36,6 +40,16 @@ import CompareView from "@/pages/CompareView"
 import DictionaryView from "@/pages/DictionaryView"
 import SnapshotView from "@/pages/SnapshotView"
 import QueryView from "@/pages/QueryView"
+import SettingsView from "@/pages/SettingsView"
+import AboutDialog from "@/components/AboutDialog"
+import HelpDialog from "@/components/HelpDialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   SQL_EXEC_MODE_LABEL,
   TASK_TYPE_LABEL,
@@ -555,9 +569,16 @@ function AuditList({ connId, items }: { connId: string; items: SQLAuditEntry[] }
 }
 
 function Layout() {
+  const navigate = useNavigate()
+  const location = useLocation()
   const setPanelOpen = useAppStore((s) => s.setPanelOpen)
   const panelOpen = useAppStore((s) => s.panelOpen)
   const togglePanel = useAppStore((s) => s.togglePanel)
+  const [aboutOpen, setAboutOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
+
+  // 设置 / 任务列表页：右侧「连接 + 历史」面板与展开按钮均不展示，让出完整空间
+  const hidePanel = location.pathname === "/settings" || location.pathname === "/tasks"
 
   // 窗口从宽变窄（跌破 lg 断点）时自动收起右侧面板，避免浮层遮挡内容
   useEffect(() => {
@@ -579,7 +600,47 @@ function Layout() {
           <span className="font-medium">数据库工作台</span>
         </div>
         <TopNav />
-        <span className="ml-auto shrink-0 text-xs text-muted-foreground">MySQL / PostgreSQL / Oracle</span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0"
+          title="任务列表"
+          onClick={() => navigate("/tasks")}
+        >
+          <ClipboardList className={cn("h-4 w-4", location.pathname === "/tasks" ? "text-primary" : "text-muted-foreground")} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0"
+          title="设置"
+          onClick={() => navigate("/settings")}
+        >
+          <Settings className={cn("h-4 w-4", location.pathname === "/settings" ? "text-primary" : "text-muted-foreground")} />
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              title="帮助与关于"
+            >
+              <HelpCircle className="h-4 w-4 text-muted-foreground" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-40">
+            <DropdownMenuItem onSelect={() => setHelpOpen(true)}>
+              <BookOpenText className="h-4 w-4 text-muted-foreground" />
+              使用说明
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => setAboutOpen(true)}>
+              <Info className="h-4 w-4 text-muted-foreground" />
+              关于
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
       <div className="relative flex flex-1 overflow-hidden">
         <main className="scrollbar-thin min-w-0 flex-1 overflow-y-auto bg-muted/20 p-6">
@@ -592,23 +653,29 @@ function Layout() {
             <Route path="/compare" element={<CompareView />} />
             <Route path="/snapshots" element={<SnapshotView />} />
             <Route path="/dictionary" element={<DictionaryView />} />
+            <Route path="/settings" element={<SettingsView />} />
+            <Route path="/tasks" element={<TaskView />} />
             {/* 旧数据浏览入口重定向到合并后的查询浏览页 */}
             <Route path="/browser" element={<Navigate to="/query" replace />} />
           </Routes>
         </main>
-        <RightPanel />
+        {!hidePanel && <RightPanel />}
         {/* 展开/收起按钮：固定右上角同一位置，避免跳动；新建查询容器已预留右侧 padding 让位 */}
-        <Button
-          variant="outline"
-          size="icon"
-          className="absolute right-2 top-1 z-40 h-7 w-7 rounded-full bg-background shadow-sm"
-          title={panelOpen ? "收起面板" : "展开面板"}
-          onClick={togglePanel}
-        >
-          {panelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-        </Button>
+        {!hidePanel && (
+          <Button
+            variant="outline"
+            size="icon"
+            className="absolute right-2 top-1 z-40 h-7 w-7 rounded-full bg-background shadow-sm"
+            title={panelOpen ? "收起面板" : "展开面板"}
+            onClick={togglePanel}
+          >
+            {panelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+          </Button>
+        )}
       </div>
       <ConnectionDrawer />
+      <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
+      <HelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
       <Toaster position="top-center" richColors />
     </div>
   )

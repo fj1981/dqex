@@ -21,9 +21,11 @@ import (
 
 // Service 业务服务层：Web/CLI 共用，编排引擎 + 连接 + 任务 + 历史
 type Service struct {
-	persist *PersistMgr
-	runner  *TaskRunner
-	cfg     *AppConfig
+	persist     *PersistMgr
+	runner      *TaskRunner
+	cfg         *AppConfig
+	configFile  string // 全局配置文件路径（空 = 未发现，使用默认值）
+	dataDirFlag string // --data-dir 启动参数（用于 ResolveDirs 覆盖）
 }
 
 // NewService 创建业务服务（自动发现全局配置 config.yaml）
@@ -33,7 +35,8 @@ func NewService(dataDirFlag string) (*Service, error) {
 
 // NewServiceWith 创建业务服务：configFile 显式指定全局配置，空则按默认顺序发现
 func NewServiceWith(dataDirFlag, configFile string) (*Service, error) {
-	cfg, err := LoadAppConfig(FindConfigFile(configFile))
+	resolvedPath := FindConfigFile(configFile)
+	cfg, err := LoadAppConfig(resolvedPath)
 	if err != nil {
 		return nil, err
 	}
@@ -42,9 +45,11 @@ func NewServiceWith(dataDirFlag, configFile string) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		persist: persist,
-		runner:  newTaskRunner(),
-		cfg:     cfg,
+		persist:     persist,
+		runner:      newTaskRunner(),
+		cfg:         cfg,
+		configFile:  resolvedPath,
+		dataDirFlag: dataDirFlag,
 	}, nil
 }
 

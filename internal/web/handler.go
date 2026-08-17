@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"mime/multipart"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"dbimpex/internal/cli"
 	"dbimpex/internal/engine"
 	"dbimpex/internal/service"
 
@@ -475,5 +477,42 @@ func handleSnapshotCompareResult(svc *service.Service) gin.HandlerFunc {
 func handleDBTypes() gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req struct{}) (any, error) {
 		return gin.H{"types": service.SupportedDBTypes}, nil
+	})
+}
+
+// VersionInfo 版本信息（构建版本 + 构建时间 + 支持的数据库类型）
+type VersionInfo struct {
+	Version   string   `json:"version"`
+	BuildTime string   `json:"buildTime"`
+	DBTypes   []string `json:"dbTypes"`
+}
+
+func handleVersion() gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req struct{}) (VersionInfo, error) {
+		dbTypes := make([]string, 0, len(service.SupportedDBTypes))
+		for t := range service.SupportedDBTypes {
+			dbTypes = append(dbTypes, t)
+		}
+		sort.Strings(dbTypes)
+		return VersionInfo{Version: cli.Version, BuildTime: cli.BuildTime, DBTypes: dbTypes}, nil
+	})
+}
+
+// ==================== 全局配置 ====================
+
+// handleGetConfig 返回全局配置完整视图（配置内容 + 解析目录 + 文件路径）。
+func handleGetConfig(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req struct{}) (service.ConfigInfo, error) {
+		return svc.GetConfigInfo(), nil
+	})
+}
+
+// handleSaveConfig 保存全局配置（写回 config.yaml，重启后生效）。
+func handleSaveConfig(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req service.AppConfig) (any, error) {
+		if err := svc.SaveConfig(req); err != nil {
+			return nil, err
+		}
+		return gin.H{"ok": true}, nil
 	})
 }

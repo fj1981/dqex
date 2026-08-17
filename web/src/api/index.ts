@@ -1,7 +1,9 @@
 import { toast } from "sonner"
 import type {
+  AppConfig,
   CompareOptions,
   CompareResult,
+  ConfigInfo,
   ConnInfo,
   DBConn,
   DBTables,
@@ -17,6 +19,7 @@ import type {
   SnapshotInfo,
   TableColumn,
   TaskConfig,
+  VersionInfo,
 } from "@/types"
 
 // ---- 访问令牌（Web 服务默认启用 token 认证） ----
@@ -181,6 +184,15 @@ export const getHistory = (taskID: string) =>
 
 export const getDBTypes = () =>
   request<{ types: Record<string, string[]> }>("/api/meta/dbtypes")
+
+export const getVersion = () => request<VersionInfo>("/api/meta/version")
+
+// ---- 全局配置 ----
+
+export const getConfig = () => request<ConfigInfo>("/api/config")
+
+export const saveConfig = (config: AppConfig) =>
+  request<{ ok: boolean }>("/api/config", { method: "PUT", body: JSON.stringify(config) })
 
 // ---- 导出文件操作 ----
 

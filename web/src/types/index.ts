@@ -479,6 +479,50 @@ export interface SQLAuditEntry {
   pkValues?: unknown[]
 }
 
+// ---- 全局配置（config.yaml） ----
+
+export interface DirConfig {
+  data: string
+  tmp: string
+  uploads: string
+  exports: string
+  compares: string
+  snapshots: string
+}
+
+export interface WebConfig {
+  allow: string[] // 访问来源白名单（IP/CIDR/域名），留空 = 不限制
+}
+
+export interface AppConfig {
+  dirs: DirConfig
+  web: WebConfig
+  // 兼容排序规则：将 MySQL 8.0 特有排序规则替换为 5.7 兼容版本（全局默认）
+  compatCollation: boolean
+}
+
+export interface ResolvedDirs {
+  data: string
+  tmp: string
+  uploads: string
+  exports: string
+  compares: string
+  snapshots: string
+}
+
+export interface ConfigInfo {
+  config: AppConfig
+  resolved: ResolvedDirs
+  configFile: string // 全局配置文件路径（空 = 未发现）
+  dataDirOverride: boolean // --data-dir 是否覆盖了 dirs.data（此时目录修改不生效）
+}
+
+export interface VersionInfo {
+  version: string
+  buildTime: string
+  dbTypes: string[]
+}
+
 // ---- 查询工作区（后端持久化，按连接，可重跑上下文不含结果集） ----
 
 export interface WorkspaceTab {

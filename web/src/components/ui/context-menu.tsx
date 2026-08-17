@@ -9,16 +9,27 @@ const ContextMenu = ContextMenuPrimitive.Root
 
 const ContextMenuTrigger = ContextMenuPrimitive.Trigger
 
+// onPlaced 运行时由 radix 透传给底层 PopperContent（定位完成回调），
+// 但 radix 的 ContextMenuContent 类型定义里已将其 Omit 掉，此处显式补回类型，
+// 用于「定位完成前保持透明，避免菜单从 Portal 初始位置（视口左上）闪现」。
+type ContextMenuContentProps = React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Content> & {
+  onPlaced?: () => void
+}
+
 const ContextMenuContent = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Content>
->(({ className, ...props }, ref) => {
+  ContextMenuContentProps
+>(({ className, onPlaced, ...props }, ref) => {
   const [placed, setPlaced] = React.useState(false)
   return (
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Content
         ref={ref}
-        onPlaced={() => setPlaced(true)}
+        // radix 类型缺 onPlaced，但运行时透传到底层 PopperContent；用断言保留原防闪现能力
+        {...({ onPlaced: () => {
+          setPlaced(true)
+          onPlaced?.()
+        } } as React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Content>)}
         // floating-ui 定位完成前保持透明，避免菜单从 Portal 初始位置（视口左上）闪现后跳到鼠标点
         className={cn(
           "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md",

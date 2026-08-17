@@ -1530,7 +1530,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                 <tbody>
                   {rows.length === 0 && (
                     <tr onContextMenu={(e) => e.stopPropagation()}>
-                      <td colSpan={visibleCols.length + (objType === "table" ? 1 : 0)} className="px-2 py-8 text-center text-sm text-muted-foreground">
+                      <td colSpan={1 + visibleCols.length} className="px-2 py-8 text-center text-sm text-muted-foreground">
                         {filters.length > 0 ? `无匹配数据（已应用 ${filters.length} 个过滤条件，可通过表头漏斗或上方清除）` : "无数据"}
                       </td>
                     </tr>
