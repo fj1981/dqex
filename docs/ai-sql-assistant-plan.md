@@ -290,7 +290,7 @@ ai:
 ### 10.1 技术风险
 | 风险 | 等级 | 对策 |
 |---|---|---|
-| Eino v0.9 仍处 0.x，API 可能变动 | 中 | 隔离在 `internal/llm` 单点封装，版本锁定 go.mod；升级集中评估 |
+| Eino v0.9 仍处 0.x，API 可能变动 | 低 | 实际为 `go.mod` **indirect 依赖且已固定 v0.9.14**，AI 为可选模块（未配置不初始化）；升级仅影响 AI 链路，不波及导入/导出/迁移/查询核心。隔离在 `internal/llm` 单点封装，版本锁定 go.mod，升级集中评估 |
 | openai 组件对个别国内服务 SSE 差异 | 低 | 厂商级适配已覆盖主流（deepseek/qwen/kimi/ollama）；异常回落非流式 |
 | 流式长 SQL 客户端断开浪费 token | 中 | 服务端 `ctx` 取消传播到上游调用，断开即终止 |
 | 配置错误（baseURL 不可达/key 无效） | 低 | `status` 返回 reason；`\ai status` 提供诊断信息；超时兜底 |

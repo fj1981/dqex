@@ -22,6 +22,7 @@ const COMMANDS = [
   { cmd: "dbx migrate", alias: "mig", desc: "数据库 → 数据库（跨类型）" },
   { cmd: "dbx compare", alias: "cmp", desc: "两个库的结构与数据差异" },
   { cmd: "dbx dictionary", alias: "dict", desc: "表结构 + 注释 → Excel（.xlsx）" },
+  { cmd: "dbx snapshot", alias: "shot", desc: "库快照：create / list / show / delete / compare" },
   { cmd: "dbx task", alias: "tk", desc: "任务配置：保存 / 运行 / 删除" },
   { cmd: "dbx history", alias: "his", desc: "执行历史：查看 / 删除" },
   { cmd: "dbx config", alias: "cfg", desc: "查看 / 生成全局配置" },
@@ -43,6 +44,7 @@ const EXAMPLES = [
   { title: "迁移", code: 'dbx migrate -s "170 生产" -t 本地 --tables act_ge_property --reset truncate' },
   { title: "对比", code: "dbx cmp -s 生产库 -t 测试库 --scope both" },
   { title: "数据字典", code: 'dbx dict camunda -s "170 生产" -o dict.zip' },
+  { title: "快照与对比", code: 'dbx shot create -c 生产库 -n 早盘\n dbx shot compare -c 生产库 --a 早盘 --b 午盘' },
 ]
 
 // 交互模式（dbx sql REPL）常用元命令

@@ -78,8 +78,9 @@ dbx url --token-only     # 仅输出 token，便于 curl/脚本调试
 | `import` | `imp` | `task` | `tk` |
 | `migrate` | `mig` | `history` | `his` |
 | `compare` | `cmp` | `config` | `cfg` |
-| `dictionary` | `dict` | | |
-| `list` | `ls` | `delete` | `del` |
+| `dictionary` | `dict` | `sql` | — |
+| `snapshot` | `shot` | `list` | `ls` |
+| `delete` | `del` | | |
 
 **常用短参：**
 
@@ -165,6 +166,97 @@ dbx dictionary camunda -s "170 生产" -o ./dict.zip
 dbx history list                  # 查看执行记录
 dbx history show --id <ID>        # 查看详情
 ```
+
+---
+
+## SQL 终端（dbx sql）
+
+交互式 REPL / 单次执行 / 智能体友好 JSON 输出。**核心理念：用 MySQL 语法操作 PostgreSQL / Oracle**，底层由 `cydb.preProcess` 自动完成方言翻译（LIMIT 偏移、REPLACE→MERGE、IFNULL→NVL、AUTO_INCREMENT→IDENTITY 等）。
+
+### 交互式终端
+
+```bash
+dbx sql -c "生产库"          # 连接名称
+dbx sql -c prod             # 短名
+dbx sql -c conn_a1b2c3      # 连接 ID
+
+# 进入后提示符自动显示类型/地址/库名：
+# dbx (mysql  @ 10.0.0.1:3306/mydb) >
+# dbx (pg     @ 10.0.0.2:5432/mydb) >
+```
+
+终端能力（已落地）：
+
+- **补全**：Tab 补全关键字 / 表名 / 列名 / 数据库名；`FROM users u` 后 `u.` 可补 `users` 列（别名感知）；列名补全带数据类型、表名补全带行数估计。
+- **历史**：`Ctrl+R` 增量搜索；敏感 SQL（含密码）自动过滤，不落历史。
+- **安全护栏**：写操作（INSERT/UPDATE/DELETE）默认需确认；`SLEEP(`/`BENCHMARK(` 触发警告，`LOAD_FILE(`/`INTO OUTFILE` 直接拦截；审计日志轮转落盘。
+- **大数据量保护**：默认 `max-rows=1000` 行上限；非 TTY 自动降级为纯文本表格（便于管道 / grep）。
+- **智能体模式**：`--json` 输出 NDJSON，供脚本 / Agent 消费。
+
+### 单次执行与管道
+
+```bash
+dbx sql -c prod -e "SELECT * FROM users LIMIT 5"          # 表格输出
+dbx sql -c prod --json "SELECT id,name FROM users"        # JSON 输出
+echo "SELECT COUNT(*) FROM orders" | dbx sql -c prod --json   # 从 stdin
+dbx sql -c prod -f query.sql                              # 从文件执行
+
+# 管道友好
+dbx sql -c prod -e "SELECT * FROM users" | grep "admin"
+result=$(dbx sql -c prod --json "SELECT COUNT(*) FROM users")
+echo "$result" | jq '.rows[0][0]'
+```
+
+### 常用 flag
+
+| flag | 短参 | 默认 | 说明 |
+|---|---|---|---|
+| `--conn` | `-c` | — | 已保存连接（ID/名称/短名） |
+| `--execute` | `-e` | — | 执行 SQL 后退出 |
+| `--file` | `-f` | — | 从文件读取 SQL |
+| `--json` | — | false | JSON 格式输出 |
+| `--timeout` | — | 30s | 查询超时 |
+| `--max-rows` | — | 1000 | 最大返回行数 |
+| `--allow-write` | — | false | `--json`/`-f` 模式允许写操作 |
+| `--ssl-ca` | — | — | TLS CA 证书路径 |
+| `--no-color` | — | false | 禁用颜色 |
+
+> 内联连接：`dbx sql --type mysql --host 10.0.0.1 --port 3306 --un root --pw '${DB_PASSWORD}' --db mydb`
+
+---
+
+## 快照（dbx snapshot）
+
+对库结构 / 数据打快照并对比差异，CLI + Web 全链路已落地。子命令：`create / list / show / delete / compare`。
+
+```bash
+dbx snapshot create -c 生产库 -n 早盘          # 打快照
+dbx snapshot list -c 生产库                    # 列出快照
+dbx snapshot show  -c 生产库 --id <ID>         # 查看快照内容
+dbx snapshot delete -c 生产库 --id <ID>        # 删除
+dbx snapshot compare -c 生产库 --a 早盘 --b 午盘   # 对比两个快照结构/数据差异
+```
+
+典型用途：每次变更前打快照，出问题时 `compare` 快速定位结构或数据漂移。
+
+---
+
+## AI 辅助写 SQL（可选模块）
+
+**配置齐全（BaseURL/Model/Key 等四项非空）才启用；未配置时入口完全隐藏，不影响任何既有功能。**
+
+- **生成 ≠ 执行**：AI 只产出 SQL 文本，永远复用 `dbx sql` 的安全链路（写操作确认、危险函数拦截、审计）才落地。
+- **只读探索**：React Agent 仅拥有「列结构 / 样例数据 / 执行只读查询」等只读工具，无 SQL 写执行能力。
+- **密钥不出本机**：API Key 存本地；状态接口仅返回掩码后的端点与模型名，不回显明文。
+- **注入防护**：AI 生成 SQL 先剥离注释再经 `CheckDangerous` 校验，阻断间接 Prompt 注入。
+
+```bash
+# 在交互终端内启用（需先配置 AI）
+dbx sql -c 生产库
+dbx (mysql @ ...)> \ai 帮我统计昨日新增用户数
+```
+
+> 依赖 `cloudwego/eino`（`go.mod` 中为 indirect 且固定版本，功能可选，升级不影响核心链路）。
 
 ---
 

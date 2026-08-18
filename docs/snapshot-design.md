@@ -1,7 +1,7 @@
 # 快照功能设计文档
 
-> **文档状态**: 待实现  
-> **最后更新**: 2025-08-11  
+> **文档状态**: 已落地（cli/snapshot.go + service/snapshot.go + engine/snapshot.go + engine/snapshot_compare.go，Web `/snapshots` API 已挂载）  
+> **最后更新**: 2026-08-18  （设计稿初版 2025-08-11） 
 > **设计原则**: 最大程度复用现有对比引擎和对比报告组件，快照作为独立一级功能，与实时对比互补。
 
 ---
