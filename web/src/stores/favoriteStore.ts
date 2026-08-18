@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import type { SQLFavorite } from "@/types"
+import type { SQLExecMode, SQLFavorite } from "@/types"
 import { addFavorite, deleteFavorite, listFavorites, renameFavorite } from "@/api/sql"
 
 interface FavoriteState {

@@ -54,5 +54,16 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    // Monaco 本体 minified 后约 3~4MB，属本地工具可接受范围，调高阈值避免误报
+    chunkSizeWarningLimit: 4000,
+    rollupOptions: {
+      output: {
+        // 大体积第三方库拆独立 chunk：互不阻塞加载、便于浏览器长期缓存
+        manualChunks: {
+          monaco: ["monaco-editor", "@monaco-editor/react"],
+          markdown: ["react-markdown", "remark-gfm"],
+        },
+      },
+    },
   },
 })
