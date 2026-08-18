@@ -9,6 +9,8 @@ LDFLAGS_REL := -s -w -X dbimpex/internal/cli.Version=$(VERSION) -X 'dbimpex/inte
 
 # 检测 air 是否已安装
 HAS_AIR := $(shell command -v $(AIR) 2>/dev/null)
+# dev 模式 air 配置：DEBUG=1 时使用 .air-debug.toml（后端加 --debug，输出全局 debug 日志）
+AIR_CFG := $(if $(DEBUG),.air-debug.toml,.air.toml)
 
 .PHONY: all build install uninstall web web-deps web-dist web-stub dev dev-debug stop release clean air-install
 
@@ -85,9 +87,10 @@ dev: web-deps web-stub stop
 	@echo ">> air 热重载启动后端（Go 代码变更自动重启，仅本机回环 127.0.0.1:8181）"
 	@echo ">> Vite HMR 启动前端 http://localhost:5281（React 代码变更即时生效）"
 	@echo ">> Ctrl+C 同时停止前后端"
+	@if [ -n "$(DEBUG)" ]; then echo ">> DEBUG=1：后端以 --debug 启动，输出全局 debug 及以上级别日志"; fi
 	@if [ -z "$(OPEN_BACKEND)" ]; then echo ">> 默认不打开 8181 网页；如需同步打开请加 OPEN_BACKEND=1"; fi
 	@echo ">> dev 代理自动注入令牌（读 ~/.dbimpex/web-access.json），5281 无需 ?token= 即可访问"
-	@$(AIR) & AIR_PID=$$!; \
+	@$(AIR) -c $(AIR_CFG) & AIR_PID=$$!; \
 	trap "kill $$AIR_PID 2>/dev/null; sh scripts/kill-dev-ports.sh" EXIT; \
 	cd web && yarn dev
 

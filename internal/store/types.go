@@ -128,6 +128,19 @@ type ConnInfo struct {
 	SubTypes  []string   `json:"subTypes"` // 该类型可用的子类型（兼容数据库产品）
 }
 
+// SQLFavorite 收藏的 SQL（字段对齐 SQLHistoryItem，便于回填）。
+// ConnID 用于按连接隔离；DB/Mode/SQL 复用执行历史的回填语义；
+// 仅在「全部替换」回填动作下才还原 DB/Mode 上下文，其余动作只插文本。
+type SQLFavorite struct {
+	ID        string `json:"id"`
+	ConnID    string `json:"connId"`
+	Title     string `json:"title"`    // 用户可重命名，默认取 SQL 去注释后首行前 40 字符
+	DB        string `json:"db"`       // 执行上下文：目标库（仅 replace_all 回填时还原）
+	Mode      string `json:"mode"`     // 执行模式 transform/raw（仅 replace_all 回填时还原）
+	SQL       string `json:"sql"`
+	CreatedAt int64  `json:"createdAt"` // Unix 毫秒
+}
+
 // SQLHistoryItem 查询终端历史记录（用户手写 SQL，可回填重跑）
 type SQLHistoryItem struct {
 	ID        string `json:"id"`
@@ -199,4 +212,21 @@ type WorkspaceTab struct {
 type WorkspaceState struct {
 	Tabs    []WorkspaceTab `json:"tabs"`
 	ActiveID string        `json:"activeId"`
+}
+
+// ---- AI 会话（对话历史，按连接持久化到 SQLite） ----
+
+// AISessionRecord AI 会话持久化记录：绑定连接+库，整组对话消息 JSON 序列化存储。
+// 会话消息体量小（单会话上限 aiMaxMessages 条），整组覆盖写，无需逐条建表；
+// UpdatedAt 用于过期清理（按空闲时间回收过期会话）。
+type AISessionRecord struct {
+	ID        string `json:"id"`        // 会话 ID
+	ConnID    string `json:"connId"`    // 所属连接
+	TabID     string `json:"tabId"`     // 所属 query tab（按 tab 隔离对话；空 = 不隔离）
+	DB        string `json:"db"`        // 目标库名
+	Dialect   string `json:"dialect"`   // 方言标签
+	Messages  []any  `json:"messages"`  // 对话消息（schema.Message 序列化，含 system/user/assistant/tool）
+	Usage     any    `json:"usage"`     // 累计 token（llm.Usage）
+	CreatedAt int64  `json:"createdAt"` // Unix 毫秒
+	UpdatedAt int64  `json:"updatedAt"` // Unix 毫秒（每次对话更新，用于过期判定）
 }

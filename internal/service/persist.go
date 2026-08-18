@@ -82,6 +82,81 @@ func (p *PersistMgr) CompareDir() string { return p.compareDir }
 // SnapshotDir 返回快照目录
 func (p *PersistMgr) SnapshotDir() string { return p.snapshotDir }
 
+// UpdateDirs 运行时热更新子目录（不修改 baseDir，因 SQLite 已打开）。
+// 产物类目录（exports/compares/snapshots）变更时自动迁移原数据到新目录，并同步
+// 重写执行历史中的产物路径（OutputPath 保持全路径），保证历史下载始终可用；
+// tmp/uploads 为临时目录（任务结束自动清理），不做迁移。
+func (p *PersistMgr) UpdateDirs(dirs ResolvedDirs) error {
+	for _, d := range []string{dirs.Tmp, dirs.Uploads, dirs.Exports, dirs.Compares, dirs.Snapshots} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return err
+		}
+	}
+	// 迁移产物目录并同步历史路径（旧目录 → 新目录）
+	for _, pair := range []struct{ name, oldDir, newDir string }{
+		{"exports", p.exportDir, dirs.Exports},
+		{"compares", p.compareDir, dirs.Compares},
+		{"snapshots", p.snapshotDir, dirs.Snapshots},
+	} {
+		if filepath.Clean(pair.oldDir) == filepath.Clean(pair.newDir) {
+			continue
+		}
+		if err := migrateDir(pair.oldDir, pair.newDir); err != nil {
+			cylog.Warnf("迁移%s目录数据失败（历史路径保持不变，仍指向旧目录）: %v", pair.name, err)
+			continue
+		}
+		p.rewriteHistoryOutputPaths(pair.oldDir, pair.newDir)
+	}
+	p.tmpDir = dirs.Tmp
+	p.uploadDir = dirs.Uploads
+	p.exportDir = dirs.Exports
+	p.compareDir = dirs.Compares
+	p.snapshotDir = dirs.Snapshots
+	cylog.Infof("数据目录已热更新: tmp=%s uploads=%s exports=%s compares=%s snapshots=%s",
+		dirs.Tmp, dirs.Uploads, dirs.Exports, dirs.Compares, dirs.Snapshots)
+	return nil
+}
+
+// migrateDir 将 src 目录内容迁移到 dst（目标已存在的同名条目跳过，避免覆盖）。
+func migrateDir(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		from := filepath.Join(src, e.Name())
+		to := filepath.Join(dst, e.Name())
+		if _, err := os.Lstat(to); err == nil {
+			continue
+		}
+		if err := os.Rename(from, to); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// rewriteHistoryOutputPaths 将执行历史中 OutputPath 的旧目录前缀重写为新目录前缀。
+func (p *PersistMgr) rewriteHistoryOutputPaths(oldDir, newDir string) {
+	oldPrefix := filepath.Clean(oldDir) + string(os.PathSeparator)
+	recs := p.store.LoadHistory("", "")
+	for _, rec := range recs {
+		if rec.OutputPath == "" || !strings.HasPrefix(filepath.Clean(rec.OutputPath), oldPrefix) {
+			continue
+		}
+		rec.OutputPath = filepath.Join(newDir, strings.TrimPrefix(filepath.Clean(rec.OutputPath), oldPrefix))
+		if err := p.store.SaveHistory(rec); err != nil {
+			cylog.Warnf("重写历史产物路径失败 %s: %v", rec.ID, err)
+		}
+	}
+}
+
 // RemoveArtifact 清理执行记录 OutputPath 指向的产物文件（目录或文件均可）。
 // 安全边界：仅清理 exports/compares 受管目录内的产物，用户自定义输出路径
 // （export -o / compare --output）不动；文件不存在时静默跳过。
@@ -212,6 +287,33 @@ func (p *PersistMgr) ClearSQLHistory(connID string) error {
 	return p.store.ClearSQLHistory(connID)
 }
 
+// ---- SQL 收藏（全局共享，conn_id/db 仅作来源标记） ----
+
+// AddFavorite 新增一条收藏
+func (p *PersistMgr) AddFavorite(f *SQLFavorite) error {
+	return p.store.AddFavorite(f)
+}
+
+// ListFavorites 返回全部收藏（全局共享，不按连接隔离；新→旧）
+func (p *PersistMgr) ListFavorites() []*SQLFavorite {
+	items, err := p.store.ListFavorites()
+	if err != nil {
+		cylog.Warnf("加载 SQL 收藏失败: %v", err)
+		return []*SQLFavorite{}
+	}
+	return items
+}
+
+// DeleteFavorite 删除收藏（按全局唯一 id 定位）
+func (p *PersistMgr) DeleteFavorite(id string) error {
+	return p.store.DeleteFavorite(id)
+}
+
+// RenameFavorite 重命名收藏（按全局唯一 id 定位）
+func (p *PersistMgr) RenameFavorite(id, title string) error {
+	return p.store.RenameFavorite(id, title)
+}
+
 // ---- SQL 审计（只增不删） ----
 
 // AppendSQLAudit 追加一条 SQL 审计日志（只追加，不提供删除）
@@ -239,4 +341,46 @@ func (p *PersistMgr) LoadWorkspace(connID string) (WorkspaceState, bool) {
 // DeleteWorkspace 删除某连接的工作区。
 func (p *PersistMgr) DeleteWorkspace(connID string) error {
 	return p.store.DeleteWorkspace(connID)
+}
+
+// ---- AI 会话（对话历史，按连接持久化） ----
+
+// SaveAISession 保存/更新一个 AI 会话（整组消息覆盖写）。
+func (p *PersistMgr) SaveAISession(rec AISessionRecord) error {
+	return p.store.SaveAISession(rec)
+}
+
+// LoadAISession 读取指定会话；无记录时 ok=false。
+func (p *PersistMgr) LoadAISession(sessionID string) (AISessionRecord, bool) {
+	return p.store.LoadAISession(sessionID)
+}
+
+// ListAISessions 列出某连接（可选指定 tab）的会话（新→旧，仅元信息不含消息）。
+func (p *PersistMgr) ListAISessions(connID, tabID string) []AISessionRecord {
+	items, err := p.store.ListAISessions(connID, tabID)
+	if err != nil {
+		cylog.Warnf("加载 AI 会话列表失败: %v", err)
+		return []AISessionRecord{}
+	}
+	return items
+}
+
+// DeleteAISession 删除指定会话。
+func (p *PersistMgr) DeleteAISession(sessionID string) error {
+	return p.store.DeleteAISession(sessionID)
+}
+
+// DeleteAISessionByTab 删除某连接下指定 tab 的会话（tab 关闭时调用）。
+func (p *PersistMgr) DeleteAISessionByTab(connID, tabID string) error {
+	return p.store.DeleteAISessionByTab(connID, tabID)
+}
+
+// DeleteAISessionsByConn 删除某连接的全部会话。
+func (p *PersistMgr) DeleteAISessionsByConn(connID string) error {
+	return p.store.DeleteAISessionsByConn(connID)
+}
+
+// PurgeExcessAISessions 清理超额会话（会话数 > maxPerConn 且超过 keepDays 天未活动），返回删除条数。
+func (p *PersistMgr) PurgeExcessAISessions(maxPerConn, keepDays int) (int64, error) {
+	return p.store.PurgeExcessAISessions(maxPerConn, keepDays)
 }

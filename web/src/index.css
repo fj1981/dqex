@@ -158,6 +158,71 @@
   background-color: #eef2f7 !important;
 }
 
+/* ---- AI 执行过程动画 ---- */
+
+/* 状态胶囊呼吸圆点：柔和放大缩小的脉冲 */
+@keyframes ai-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+.ai-status-dot {
+  animation: ai-breathe 1.4s ease-in-out infinite;
+}
+
+/* 工具调用三点跳动（依次延迟，营造「正在处理」的节奏感） */
+@keyframes ai-dot-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+.ai-bounce-dot {
+  animation: ai-dot-bounce 1.2s ease-in-out infinite;
+}
+.ai-bounce-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.ai-bounce-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* 打字光标：流式输出末尾的闪烁竖线 */
+@keyframes ai-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.ai-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -2px;
+  border-radius: 1px;
+  background-color: currentColor;
+  animation: ai-caret-blink 0.9s step-end infinite;
+}
+
 /* 数据表格边框统一管理：所有单元格用同一套 border 颜色/宽度，避免 Tailwind
    border-b/border-r 与自定义类混用产生重影或错位。
    规则：
@@ -177,6 +242,12 @@
   border-right: 1px solid hsl(var(--border));
   border-bottom: 1px solid hsl(var(--border));
 }
+/* 冻结列表头 hover：表头 th 的 hover:bg-muted/60 会让冻结列在 hover 时背景半透明，
+   透出下方滚动的数据行，表现为"标题透明"。用 !important 强制恢复不透明背景，
+   与 .frozen-col 同级 sticky 列保持视觉一致。 */
+.data-grid-table thead th.frozen-col:hover {
+  background-color: hsl(var(--muted)) !important;
+}
 /* 表头普通单元格：右边框 + 下边框 */
 .data-grid-table thead th:not(.frozen-col) {
   border-right: 1px solid hsl(var(--border));
@@ -191,4 +262,94 @@
 /* 统计行的冻结列：去掉下边框（最底部无需） */
 .data-grid-table tfoot .frozen-col {
   border-bottom: none;
+}
+
+/* AI 回答 Markdown 排版：react-markdown 输出无默认样式，这里补齐段落/列表/标题间距与代码/引用样式。
+   窄面板（约 24% 宽）下保持紧凑，字号跟随容器 text-xs 基准。 */
+.ai-markdown {
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  word-break: break-word;
+}
+.ai-markdown > :first-child {
+  margin-top: 0;
+}
+.ai-markdown > :last-child {
+  margin-bottom: 0;
+}
+.ai-markdown p {
+  margin: 0.5em 0;
+}
+.ai-markdown h1,
+.ai-markdown h2,
+.ai-markdown h3,
+.ai-markdown h4 {
+  margin: 0.9em 0 0.4em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.ai-markdown h1 {
+  font-size: 1.1em;
+}
+.ai-markdown h2 {
+  font-size: 1.05em;
+}
+.ai-markdown h3 {
+  font-size: 1em;
+}
+.ai-markdown h4 {
+  font-size: 0.95em;
+}
+.ai-markdown ul,
+.ai-markdown ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+.ai-markdown ul {
+  list-style: disc;
+}
+.ai-markdown ol {
+  list-style: decimal;
+}
+.ai-markdown li {
+  margin: 0.2em 0;
+}
+.ai-markdown li > ul,
+.ai-markdown li > ol {
+  margin: 0.2em 0;
+}
+.ai-markdown blockquote {
+  margin: 0.5em 0;
+  padding-left: 0.75em;
+  border-left: 3px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+.ai-markdown hr {
+  margin: 0.8em 0;
+  border: none;
+  border-top: 1px solid hsl(var(--border));
+}
+.ai-markdown strong {
+  font-weight: 600;
+}
+.ai-markdown em {
+  font-style: italic;
+}
+.ai-markdown del {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+/* AI 采纳预览：编辑器内行级 diff 高亮（绿=新增，红=删除） */
+.monaco-editor .ai-diff-added {
+  background: rgba(16, 185, 129, 0.15);
+}
+.monaco-editor .ai-diff-added-gutter {
+  background: rgba(16, 185, 129, 0.35);
+}
+.monaco-editor .ai-diff-removed {
+  background: rgba(239, 68, 68, 0.15);
+}
+.monaco-editor .ai-diff-removed-gutter {
+  background: rgba(239, 68, 68, 0.35);
 }

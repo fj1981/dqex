@@ -4,6 +4,8 @@ import type {
   ObjectDDLType,
   ObjectNode,
   SQLAuditEntry,
+  SQLExecMode,
+  SQLFavorite,
   SQLHistoryItem,
   SQLPingResult,
   SQLQueryRequest,
@@ -28,6 +30,29 @@ export const fetchSqlHistory = (connId: string) =>
 
 export const clearSqlHistory = (connId: string) =>
   request<{ ok: boolean }>(`/api/sql/history?connId=${encodeURIComponent(connId)}`, { method: "DELETE" })
+
+export const listFavorites = () =>
+  request<SQLFavorite[]>(`/api/sql/favorites`, { method: "GET" })
+
+export const addFavorite = (connId: string, params: {
+  sql: string
+  db?: string
+  mode?: SQLExecMode
+  title?: string
+}) =>
+  post<{ ok: boolean; id: string }>(`/api/sql/favorites?connId=${encodeURIComponent(connId)}`, {
+    connId,
+    ...params,
+  })
+
+export const deleteFavorite = (id: string) =>
+  request<{ ok: boolean }>(`/api/sql/favorites?id=${encodeURIComponent(id)}`, { method: "DELETE" })
+
+export const renameFavorite = (id: string, title: string) =>
+  post<{ ok: boolean }>(`/api/sql/favorites`, {
+    id,
+    title,
+  })
 
 // 审计日志（只读）：分页读取，按连接过滤；connId 为空 = 全部连接
 export const fetchSqlAudit = (connId: string, limit = 100, offset = 0) =>

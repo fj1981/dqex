@@ -24,6 +24,7 @@ type session struct {
 
 	tableCache []string
 	lastSQL    string
+	ai         *aiState // AI 会话状态（懒加载；切换数据库时重置）
 }
 
 func newSession(info *engine.DBConnInfo) (*session, error) {
@@ -55,6 +56,7 @@ func (s *session) switchDB(newDB string) error {
 	s.cli = cliDB
 	s.currentDB = newDB
 	s.tableCache = nil
+	s.ai = nil // 换库后 AI 会话（schema/上下文）失效，下次 \ai 自动重建
 	return nil
 }
 
@@ -208,6 +210,9 @@ func (s *session) handleMeta(cmd string) (bool, bool) {
 		if len(args) > 0 {
 			executeFile(s, args[0])
 		}
+		return true, false
+	case "\\ai":
+		s.aiCommand(args)
 		return true, false
 	}
 	return false, false
@@ -492,6 +497,7 @@ func completeMeta(word string) []string {
 		"\\l", "\\list", "\\databases", "\\c", "\\use", "\\connect",
 		"\\timing", "\\g", "\\G", "\\p", "\\print", "\\r", "\\reset",
 		"\\h", "\\help", "\\copy", "\\w", "\\write", "\\i", "\\include",
+		"\\ai",
 	}
 	var result []string
 	for _, c := range cmds {
@@ -662,6 +668,7 @@ func printHelp() {
   \G                   垂直显示（每行一个字段）
   \p, \print           打印当前缓冲区
   \r, \reset           清空缓冲区
+  \ai <需求>            AI 生成 SQL 到缓冲区（\ai help 查看子命令）
   \h, \help            显示此帮助
   \e, \edit           用外部编辑器编辑上一条 SQL
   \copy <文件>          导出上一条查询结果到文件（CSV）

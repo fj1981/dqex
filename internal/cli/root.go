@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
+	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
 	"golang.org/x/term"
 )
 
@@ -27,6 +28,7 @@ type WebArgs struct {
 	NoBrowser  bool
 	DataDir    string
 	ConfigFile string
+	Debug      bool // 全局 debug 日志开关（等效 config 顶层 debug: true）
 }
 
 var (
@@ -66,6 +68,7 @@ func Execute() *WebArgs {
 	rootCmd.PersistentFlags().BoolVar(&webArgs.NoBrowser, "no-browser", false, "启动时不自动打开浏览器")
 	rootCmd.PersistentFlags().StringVar(&webArgs.DataDir, "data-dir", "", "数据根目录（默认取全局配置，否则 ~/.dbimpex）")
 	rootCmd.PersistentFlags().StringVar(&webArgs.ConfigFile, "config-file", "", "全局配置文件（默认 环境变量 DBIMPEX_CONFIG 或 ~/.dbimpex/config.yaml）")
+	rootCmd.PersistentFlags().BoolVar(&webArgs.Debug, "debug", false, "输出 debug 及以上级别的日志（含 AI 链路；等效 config 顶层 debug: true）")
 	// help 展示（--help / 裸跑分组命令）也视为 CLI 执行，避免随后误启 Web
 	defaultHelp := rootCmd.HelpFunc()
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -96,7 +99,16 @@ func cliErrMsg(err error) string {
 
 // newCliService 解析全局配置（--data-dir/--config-file/DBIMPEX_CONFIG/~/.dbimpex/config.yaml）后构建 Service
 func newCliService() (*Service, error) {
-	return NewServiceWith(webArgs.DataDir, webArgs.ConfigFile)
+	svc, err := NewServiceWith(webArgs.DataDir, webArgs.ConfigFile)
+	if err != nil {
+		return nil, err
+	}
+	// 全局 debug 日志：--debug flag 或 config 顶层 debug=true 时把日志级别切到 debug（CLI 与 Web 统一入口）
+	if webArgs.Debug || svc.Config().Debug {
+		cylog.InitDefault(cylog.WithLevelStr("debug"))
+		cylog.Debugf("[cli] 全局 debug 日志已开启")
+	}
+	return svc, nil
 }
 
 // ---- Shell 动态补全（配合 dbx completion 生成的补全脚本） ----

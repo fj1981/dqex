@@ -35,6 +35,7 @@ func rawRoutes(svc *service.Service) func(*gin.RouterGroup) {
 			c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok", "success": true})
 		})
 		g.POST("/sql/table-export", func(c *gin.Context) { exportTableExcel(c, svc) })
+		g.POST("/ai/chat/stream", func(c *gin.Context) { handleAIChatStream(c, svc) })
 	}
 }
 

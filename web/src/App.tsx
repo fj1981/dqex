@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { HashRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import {
@@ -18,8 +18,11 @@ import {
   Scale,
   ScrollText,
   Settings,
+  ShieldCheck,
+  Star,
   Terminal,
   Trash2,
+  Zap,
 } from "lucide-react"
 import * as api from "@/api"
 import { Badge } from "@/components/ui/badge"
@@ -31,6 +34,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import ConnectionDrawer from "@/components/ConnectionDrawer"
 import { useAppStore } from "@/stores/app"
 import { useSqlHistoryStore } from "@/stores/sqlHistoryStore"
+import { useFavoriteStore } from "@/stores/favoriteStore"
 import { useQueryStore } from "@/stores/queryStore"
 import TaskView from "@/pages/TaskView"
 import ExportView from "@/pages/ExportView"
@@ -55,6 +59,7 @@ import {
   TASK_TYPE_LABEL,
   type SQLAuditEntry,
   type SQLExecMode,
+  type SQLFavorite,
   type SQLHistoryItem,
 } from "@/types"
 import { cn, formatTime, shortPaths } from "@/lib/utils"
@@ -75,6 +80,21 @@ const STATUS_META: Record<string, { label: string; cls: string; dot: string }> =
   error: { label: "失败", cls: "bg-red-50 text-destructive", dot: "bg-destructive" },
   running: { label: "运行中", cls: "bg-blue-50 text-blue-600", dot: "animate-pulse bg-blue-600" },
   cancelled: { label: "已取消", cls: "bg-muted text-muted-foreground", dot: "bg-muted-foreground" },
+}
+
+const MODE_META: Record<SQLExecMode, { label: string; icon: typeof ShieldCheck; cls: string }> = {
+  transform: { label: "规范执行", icon: ShieldCheck, cls: "text-blue-600" },
+  raw: { label: "原样执行", icon: Zap, cls: "text-amber-600" },
+}
+
+function ModeBadge({ mode }: { mode: SQLExecMode }) {
+  const meta = MODE_META[mode]
+  const Icon = meta.icon
+  return (
+    <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground" title={meta.label}>
+      <Icon className={cn("h-3.5 w-3.5 shrink-0", meta.cls)} strokeWidth={1.5} />
+    </span>
+  )
 }
 
 function TopNav() {
@@ -139,7 +159,12 @@ function RightPanel() {
   // 查询页语义切换：/query 下右侧面板展示「SQL 执行历史 + 审计」，其余页面展示任务级「操作历史」
   const isQuery = location.pathname === "/query"
   const queryConnId = useQueryStore((s) => s.connId)
+  const queryActiveDb = useQueryStore((s) => {
+    const t = s.tabs.find((x) => x.id === s.activeId && x.kind === "query")
+    return t && t.kind === "query" ? t.db : undefined
+  })
   const applySQL = useQueryStore((s) => s.applySQL)
+  const applySQLByAction = useQueryStore((s) => s.applySQLByAction)
   const {
     items: sqlItems,
     load: loadSQLHistory,
@@ -147,6 +172,8 @@ function RightPanel() {
     auditItems,
     loadAudit,
   } = useSqlHistoryStore()
+  const { favorites, load: loadFavorites, add: addFavorite, remove: removeFavorite, rename: renameFavorite } =
+    useFavoriteStore()
 
   const filterType = TYPE_BY_PATH[location.pathname]
   const records = filterType ? history.filter((h) => h.taskType === filterType) : history
@@ -156,11 +183,12 @@ function RightPanel() {
     loadHistory()
   }, [location.pathname]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 查询页：按当前查询连接加载 SQL 执行历史 + 审计（切换连接或进入查询页时刷新）
+  // 查询页：加载 SQL 执行历史 + 审计；收藏为全局共享，进入查询页即加载（不随连接变化重拉）
   useEffect(() => {
     if (isQuery && queryConnId) {
       loadSQLHistory(queryConnId)
       loadAudit(queryConnId)
+      loadFavorites()
     }
   }, [isQuery, queryConnId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -237,10 +265,15 @@ function RightPanel() {
       {isQuery ? (
         <SQLHistoryPanel
           connId={queryConnId}
+          currentDb={queryActiveDb}
           items={sqlItems}
           auditItems={auditItems}
+          favorites={favorites}
           onClear={clearSQLHistory}
-          onApply={applySQL}
+          onRefill={(sql, db, mode, action) => applySQLByAction(sql, db, mode, action)}
+          onAddFavorite={(sql, db, mode) => addFavorite(queryConnId, sql, db, mode)}
+          onDeleteFavorite={(id) => removeFavorite(id)}
+          onRenameFavorite={(id, title) => renameFavorite(id, title)}
         />
       ) : (
         <>
@@ -351,22 +384,38 @@ function RightPanel() {
   )
 }
 
-// SQL 记录面板：查询页右侧，含「执行历史 / 审计」两个 Tab。
-// 执行历史：用户手写 SQL，可回填重跑；审计：全量只读，含对象树自动查询与单元格编辑。
+// SQL 记录面板：查询页右侧，含「执行历史 / 收藏 / 审计」三个 Tab。
+// 执行历史：用户手写 SQL，可回填重跑；收藏：用户主动、跨会话、按连接隔离；审计：全量只读。
+// 历史/收藏回填均采用与 AI 面板一致的「四动作」菜单（全部替换/插入光标处/追加末尾/替换所选）。
 function SQLHistoryPanel({
   connId,
+  currentDb,
   items,
   auditItems,
+  favorites,
   onClear,
-  onApply,
+  onRefill,
+  onAddFavorite,
+  onDeleteFavorite,
+  onRenameFavorite,
 }: {
   connId: string
+  currentDb?: string
   items: SQLHistoryItem[]
   auditItems: SQLAuditEntry[]
+  favorites: SQLFavorite[]
   onClear: () => Promise<void>
-  onApply: (sql: string, db?: string, mode?: SQLExecMode) => void
+  onRefill: (
+    sql: string,
+    db: string | undefined,
+    mode: SQLExecMode | undefined,
+    action: "replace_all" | "replace_selection" | "insert_cursor" | "append",
+  ) => void
+  onAddFavorite: (sql: string, db?: string, mode?: SQLExecMode) => Promise<void>
+  onDeleteFavorite: (id: string) => Promise<void>
+  onRenameFavorite: (id: string, title: string) => Promise<void>
 }) {
-  const [tab, setTab] = useState<"history" | "audit">("history")
+  const [tab, setTab] = useState<"history" | "favorite" | "audit">("history")
 
   const clear = async () => {
     if (!(await confirm({ title: "清空 SQL 历史", description: "确认清空当前连接的全部 SQL 执行历史？", confirmText: "清空", danger: true }))) return
@@ -381,12 +430,15 @@ function SQLHistoryPanel({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 px-3 pb-1">
-        <Tabs value={tab} onValueChange={(v) => setTab(v as "history" | "audit")}>
+        <Tabs value={tab} onValueChange={(v) => setTab(v as "history" | "favorite" | "audit")}>
           <TabsList className="w-full">
-            <TabsTrigger value="history" className="flex-1 text-xs">
-              执行历史{items.length > 0 && <span className="ml-1 tabular-nums">({items.length})</span>}
+            <TabsTrigger value="history" className="w-1/3 shrink-0 truncate text-xs">
+              历史{items.length > 0 && <span className="ml-1 tabular-nums">({items.length})</span>}
             </TabsTrigger>
-            <TabsTrigger value="audit" className="flex-1 text-xs">
+            <TabsTrigger value="favorite" className="w-1/3 shrink-0 truncate text-xs">
+              收藏{favorites.length > 0 && <span className="ml-1 tabular-nums">({favorites.length})</span>}
+            </TabsTrigger>
+            <TabsTrigger value="audit" className="w-1/3 shrink-0 truncate text-xs">
               审计{auditItems.length > 0 && <span className="ml-1 tabular-nums">({auditItems.length})</span>}
             </TabsTrigger>
           </TabsList>
@@ -415,52 +467,293 @@ function SQLHistoryPanel({
               <div className="py-4 text-center text-xs text-muted-foreground">暂无 SQL 执行记录</div>
             ) : (
               items.map((h) => (
-                <div
+                <HistoryOrFavoriteCard
                   key={h.id}
-                  role="button"
-                  tabIndex={0}
-                  title="点击回填到当前查询编辑器"
-                  className="group mb-1.5 min-w-0 cursor-pointer overflow-hidden rounded-md border bg-background px-2.5 py-1.5 text-xs transition-colors hover:border-primary/40 hover:shadow-sm"
-                  onClick={() => onApply(h.sql, h.db, h.mode)}
-                  onKeyDown={(e) => e.key === "Enter" && onApply(h.sql, h.db, h.mode)}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <span
-                        className={cn(
-                          "h-1.5 w-1.5 rounded-full",
-                          h.status === "error" ? "bg-destructive" : "bg-green-600",
-                        )}
-                      />
+                  sql={h.sql}
+                  statusDot={h.status === "error" ? "bg-destructive" : "bg-green-600"}
+                  badges={
+                    <>
                       {h.isWrite && (
                         <span className="rounded bg-destructive/10 px-1 py-px text-[10px] font-medium text-destructive">写</span>
                       )}
                       {h.db && <span className="rounded bg-muted px-1 py-px text-[10px] text-muted-foreground">{h.db}</span>}
-                    </span>
-                    <span className="shrink-0 tabular-nums text-muted-foreground">
-                      {formatTime(new Date(h.createdAt).toISOString()).slice(5, 16)}
-                    </span>
-                  </div>
-                  <div className="mt-0.5 line-clamp-2 break-all font-mono text-[11px] leading-4 text-foreground/80">
-                    {h.sql}
-                  </div>
-                  <div className="mt-0.5 flex items-center justify-between text-[11px] text-muted-foreground">
-                    <span className="tabular-nums">
-                      {h.status === "ok"
-                        ? h.isWrite
-                          ? `影响 ${h.rowCount} 行`
-                          : `${h.rowCount} 行 · ${h.elapsedMs}ms`
-                        : h.error || "执行失败"}
-                    </span>
-                    {h.mode && <span className="text-[10px]">{SQL_EXEC_MODE_LABEL[h.mode]}</span>}
-                  </div>
-                </div>
+                      {h.mode && <ModeBadge mode={h.mode} />}
+                    </>
+                  }
+                  timeText={`${h.status === "ok" ? (h.isWrite ? `影响 ${h.rowCount} 行` : `${h.rowCount} 行 · ${h.elapsedMs}ms`) : h.error || "执行失败"}`}
+                  onRefill={(action) => onRefill(h.sql, h.db, h.mode, action)}
+                  onFavorite={() => onAddFavorite(h.sql, h.db, h.mode)}
+                />
               ))
             )}
           </div>
         </>
+      ) : tab === "favorite" ? (
+        <FavoriteList
+          connId={connId}
+          currentDb={currentDb}
+          favorites={favorites}
+          onRefill={(f, action) => onRefill(f.sql, f.db, f.mode, action)}
+          onDelete={onDeleteFavorite}
+          onRename={onRenameFavorite}
+        />
       ) : (
         <AuditList connId={connId} items={auditItems} />
+      )}
+    </div>
+  )
+}
+
+// 回填动作菜单：与 AI 面板完全一致，降低学习成本。仅「全部替换」还原 db/mode 上下文。
+const REFILL_ACTIONS: {
+  value: "replace_all" | "replace_selection" | "insert_cursor" | "append"
+  label: string
+}[] = [
+  { value: "replace_all", label: "全替换" },
+  { value: "insert_cursor", label: "插光标" },
+  { value: "append", label: "追末尾" },
+  { value: "replace_selection", label: "换所选" },
+]
+
+// 历史/收藏通用卡片：点击展开「回填方式」菜单；hover 出收藏按钮。
+function HistoryOrFavoriteCard({
+  title,
+  sql,
+  statusDot,
+  badges,
+  timeText,
+  onRefill,
+  onFavorite,
+  onDelete,
+}: {
+  title?: string
+  sql: string
+  statusDot: string
+  badges: React.ReactNode
+  timeText: string
+  onRefill: (action: "replace_all" | "replace_selection" | "insert_cursor" | "append") => void
+  onFavorite?: () => void
+  onDelete?: () => void
+}) {
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      title="点击选择回填方式"
+      className="group mb-1.5 min-w-0 cursor-pointer overflow-hidden rounded-md border bg-background px-2.5 py-1.5 text-xs transition-colors hover:border-primary/40 hover:shadow-sm"
+      onClick={() => setMenuOpen((v) => !v)}
+      onKeyDown={(e) => e.key === "Enter" && setMenuOpen((v) => !v)}
+    >
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1.5">
+          <span className={cn("h-1.5 w-1.5 rounded-full", statusDot)} />
+          {badges}
+        </span>
+        <span className="flex shrink-0 items-center gap-1">
+          {(onFavorite || onDelete) && (
+            <span className="flex items-center opacity-0 transition-opacity group-hover:opacity-100">
+              {onFavorite && (
+                <button
+                  type="button"
+                  className="flex h-4 w-4 items-center justify-center rounded text-muted-foreground hover:bg-amber-100 hover:text-amber-600"
+                  title="收藏"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onFavorite()
+                  }}
+                >
+                  <Star className="h-3 w-3" />
+                </button>
+              )}
+              {onDelete && (
+                <button
+                  type="button"
+                  className="flex h-4 w-4 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  title="删除"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onDelete()
+                  }}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              )}
+            </span>
+          )}
+          {title && <span className="max-w-[6rem] truncate whitespace-nowrap tabular-nums text-muted-foreground">{title}</span>}
+        </span>
+      </div>
+      <div className="mt-0.5 line-clamp-2 break-all font-mono text-[11px] leading-4 text-foreground/80">{sql}</div>
+      {menuOpen && (
+        <div className="mt-1.5 flex flex-nowrap gap-1 overflow-x-auto border-t border-border/60 pt-1.5">
+          {REFILL_ACTIONS.map((a) => (
+            <button
+              key={a.value}
+              type="button"
+              className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-primary/10 hover:text-primary"
+              onClick={(e) => {
+                e.stopPropagation()
+                onRefill(a.value)
+                setMenuOpen(false)
+              }}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 收藏列表：全局共享 Tab。跨连接时显示来源标记，回填若连接/库不一致给提示。
+function FavoriteList({
+  connId,
+  currentDb,
+  favorites,
+  onRefill,
+  onDelete,
+  onRename,
+}: {
+  connId?: string
+  currentDb?: string
+  favorites: SQLFavorite[]
+  onRefill: (f: SQLFavorite, action: "replace_all" | "replace_selection" | "insert_cursor" | "append") => void
+  onDelete: (id: string) => Promise<void>
+  onRename: (id: string, title: string) => Promise<void>
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draft, setDraft] = useState("")
+  // 连接 id → 友好名称映射：让收藏来源标记显示连接名而非内部 id
+  const connections = useAppStore((s) => s.connections)
+  const connName = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const c of connections) m.set(c.id, c.name)
+    return m
+  }, [connections])
+  const connLabel = (id?: string) => (id ? connName.get(id) || id : "")
+
+  const startRename = (f: SQLFavorite) => {
+    setEditingId(f.id)
+    setDraft(f.title)
+  }
+  const commitRename = async () => {
+    const id = editingId
+    const t = draft.trim()
+    setEditingId(null)
+    if (id && t) {
+      try {
+        await onRename(id, t)
+      } catch (e) {
+        toast.error(`重命名失败: ${(e as Error).message}`)
+      }
+    }
+  }
+
+  // 跨连接/跨库的不一致提示：收藏来源与当前不同，回填时（尤其全部替换会切库）需告知
+  const mismatchHint = (f: SQLFavorite): string | null => {
+    const connDiff = connId && f.connId && f.connId !== connId
+    const dbDiff = f.db && currentDb && f.db !== currentDb
+    const cName = connLabel(f.connId)
+    if (connDiff && dbDiff) return `收藏来自连接「${cName}」· 库「${f.db}」，与当前不一致`
+    if (connDiff) return `收藏来自连接「${cName}」，与当前不一致`
+    if (dbDiff) return `收藏库「${f.db}」与当前库「${currentDb}」不一致`
+    return null
+  }
+
+  return (
+    <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+      {favorites.length === 0 ? (
+        <div className="py-4 text-center text-xs text-muted-foreground">暂无收藏（可在历史中或编辑器工具栏添加）</div>
+      ) : (
+        favorites.map((f) => {
+          const hint = mismatchHint(f)
+          return (
+            <div key={f.id} className="group mb-1.5 min-w-0 overflow-hidden rounded-md border bg-background px-2.5 py-1.5 text-xs">
+              <div className="flex items-center justify-between gap-1">
+                {editingId === f.id ? (
+                  <input
+                    autoFocus
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitRename()
+                      if (e.key === "Escape") setEditingId(null)
+                    }}
+                    className="min-w-0 flex-1 rounded border border-primary/40 px-1 py-0.5 text-[11px] outline-none"
+                  />
+                ) : (
+                  <span
+                    className="min-w-0 flex-1 cursor-text truncate font-medium text-foreground/90"
+                    title="双击重命名"
+                    onDoubleClick={() => startRename(f)}
+                  >
+                    {f.title}
+                  </span>
+                )}
+                <span className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  <button
+                    type="button"
+                    className="flex h-4 w-4 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    title="删除（不可恢复）"
+                    onClick={async () => {
+                      if (!(await confirm({ title: "删除收藏", description: `确认删除收藏「${f.title}」？此操作不可恢复`, confirmText: "删除", danger: true }))) return
+                      try {
+                        await onDelete(f.id)
+                      } catch (e) {
+                        toast.error(`删除失败: ${(e as Error).message}`)
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </span>
+              </div>
+              <div
+                role="button"
+                tabIndex={0}
+                title="点击选择回填方式"
+                className="mt-0.5 cursor-pointer"
+                onClick={(e) => {
+                  const menu = (e.currentTarget.querySelector("[data-refill-menu]") as HTMLElement) || null
+                  if (menu) menu.classList.toggle("hidden")
+                }}
+              >
+                <div className="line-clamp-2 break-all font-mono text-[11px] leading-4 text-foreground/80">{f.sql}</div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[10px] text-muted-foreground">
+                  {/* 来源标记：来自哪个连接/库（全局共享，跨连接可见） */}
+                  {f.connId && <span className="rounded bg-muted px-1 py-px">连接 {connLabel(f.connId)}</span>}
+                  {f.db && <span className="rounded bg-muted px-1 py-px">库 {f.db}</span>}
+                  {f.mode && <ModeBadge mode={f.mode} />}
+                </div>
+                {hint && <div className="mt-0.5 text-[10px] text-amber-600">⚠ {hint}</div>}
+                <div data-refill-menu className="mt-1.5 hidden flex flex-nowrap gap-1 overflow-x-auto border-t border-border/60 pt-1.5">
+                  {REFILL_ACTIONS.map((a) => (
+                    <button
+                      key={a.value}
+                      type="button"
+                      className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                      onClick={(ev) => {
+                        ev.stopPropagation()
+                        if (hint && a.value === "replace_all") {
+                          toast.warning(`${hint}；「全部替换」将切换至收藏的库与执行模式，请确认目标正确`)
+                        } else if (hint) {
+                          toast.warning(hint)
+                        }
+                        onRefill(f, a.value)
+                      }}
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )
+        })
       )}
     </div>
   )
@@ -557,7 +850,7 @@ function AuditList({ connId, items }: { connId: string; items: SQLAuditEntry[] }
                         : `${a.rowCount} 行 · ${a.elapsedMs}ms`
                       : a.error || "执行失败"}
                   </span>
-                  {a.mode && <span className="text-[10px]">{SQL_EXEC_MODE_LABEL[a.mode]}</span>}
+                  {a.mode && <ModeBadge mode={a.mode} />}
                 </div>
               </div>
             )

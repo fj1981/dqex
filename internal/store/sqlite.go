@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,6 +26,8 @@ const (
 	tableSQLAudit   = "sql_audit"
 	tableWebAcc     = "web_access"
 	tableWorkspace  = "workspace"
+	tableAISession  = "ai_session"
+	tableSQLFav     = "sql_favorites"
 )
 
 // SQLiteStore 基于 SQLite 的 Store 实现。
@@ -596,6 +599,89 @@ func (s *SQLiteStore) ClearSQLHistory(connID string) error {
 	return nil
 }
 
+// ---- SQL 收藏（全局共享，不受历史环形上限影响；conn_id/db 仅作来源标记，用于跨连接回填提示） ----
+
+// AddFavorite 新增一条收藏。
+
+// AddFavorite 新增一条收藏。
+func (s *SQLiteStore) AddFavorite(f *SQLFavorite) error {
+	if f.ID == "" {
+		f.ID = newID(f.CreatedAt)
+	}
+	body, err := marshal(f)
+	if err != nil {
+		return err
+	}
+	_, err = s.cli.Replace(tableSQLFav, map[string]any{
+		"id":         f.ID,
+		"conn_id":    f.ConnID,
+		"title":      f.Title,
+		"created_at": f.CreatedAt,
+		"body_json":  body,
+	})
+	return err
+}
+
+// ListFavorites 返回全部收藏（全局共享，不按连接隔离；新→旧）。
+func (s *SQLiteStore) ListFavorites() ([]*SQLFavorite, error) {
+	rows, err := s.cli.List(tableSQLFav,
+		map[string]any{},
+		cydb.WithOrderByDesc("created_at"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*SQLFavorite, 0, len(rows))
+	for _, m := range rows {
+		var f SQLFavorite
+		if err := unmarshal(str(m["body_json"]), &f); err == nil {
+			ret = append(ret, &f)
+		}
+	}
+	return ret, nil
+}
+
+// DeleteFavorite 删除收藏（按全局唯一 id 定位；无 conn_id 隔离，跨连接可见）。
+func (s *SQLiteStore) DeleteFavorite(id string) error {
+	_, err := s.cli.Delete(tableSQLFav,
+		map[string]any{"id": id},
+		cydb.WithWhere(cydb.EQ("id")),
+	)
+	return err
+}
+
+// RenameFavorite 重命名收藏（按全局唯一 id 定位）。
+func (s *SQLiteStore) RenameFavorite(id, title string) error {
+	rows, err := s.cli.List(tableSQLFav,
+		map[string]any{"id": id},
+		cydb.WithWhere(cydb.EQ("id")),
+	)
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return fmt.Errorf("favorite not found")
+	}
+	body := str(rows[0]["body_json"])
+	var f SQLFavorite
+	if err := unmarshal(body, &f); err != nil {
+		return err
+	}
+	f.Title = title
+	body, err = marshal(f)
+	if err != nil {
+		return err
+	}
+	_, err = s.cli.Replace(tableSQLFav, map[string]any{
+		"id":         f.ID,
+		"conn_id":    f.ConnID,
+		"title":      f.Title,
+		"created_at": f.CreatedAt,
+		"body_json":  body,
+	})
+	return err
+}
+
 // ---- SQL 审计（只增不删） ----
 
 // AppendSQLAudit 追加一条 SQL 审计日志（只追加，不提供删除）。
@@ -656,6 +742,219 @@ func (s *SQLiteStore) ListSQLAudit(connID string, limit, offset int) ([]SQLAudit
 		}
 	}
 	return ret, nil
+}
+
+// ---- AI 会话（对话历史，按连接持久化） ----
+
+// aiSessionToRow 领域模型 → 行模型（消息与 usage 分别 JSON 序列化）。
+func aiSessionToRow(rec AISessionRecord) (aiSessionRow, error) {
+	msgs, err := marshal(rec.Messages)
+	if err != nil {
+		return aiSessionRow{}, err
+	}
+	usage, err := marshal(rec.Usage)
+	if err != nil {
+		return aiSessionRow{}, err
+	}
+	return aiSessionRow{
+		ID:           rec.ID,
+		ConnID:       rec.ConnID,
+		TabID:        rec.TabID,
+		DB:           rec.DB,
+		MessagesJSON: msgs,
+		UsageJSON:    usage,
+		CreatedAt:    rec.CreatedAt,
+		UpdatedAt:    rec.UpdatedAt,
+	}, nil
+}
+
+// rowToAISession 行模型 → 领域模型。
+func rowToAISession(r aiSessionRow) AISessionRecord {
+	rec := AISessionRecord{
+		ID:        r.ID,
+		ConnID:    r.ConnID,
+		TabID:     r.TabID,
+		DB:        r.DB,
+		CreatedAt: r.CreatedAt,
+		UpdatedAt: r.UpdatedAt,
+	}
+	if r.MessagesJSON != "" {
+		var msgs []any
+		if err := unmarshal(r.MessagesJSON, &msgs); err == nil {
+			rec.Messages = msgs
+		}
+	}
+	if r.UsageJSON != "" {
+		var usage any
+		if err := unmarshal(r.UsageJSON, &usage); err == nil {
+			rec.Usage = usage
+		}
+	}
+	return rec
+}
+
+// SaveAISession 保存/更新一个 AI 会话（整组消息覆盖写）。
+func (s *SQLiteStore) SaveAISession(rec AISessionRecord) error {
+	row, err := aiSessionToRow(rec)
+	if err != nil {
+		return err
+	}
+	_, err = s.cli.Replace(tableAISession, map[string]any{
+		"id":            row.ID,
+		"conn_id":       row.ConnID,
+		"tab_id":        row.TabID,
+		"db":            row.DB,
+		"messages_json": row.MessagesJSON,
+		"usage_json":    row.UsageJSON,
+		"created_at":    row.CreatedAt,
+		"updated_at":    row.UpdatedAt,
+	})
+	return err
+}
+
+// LoadAISession 读取指定会话；无记录时 ok=false。
+func (s *SQLiteStore) LoadAISession(sessionID string) (AISessionRecord, bool) {
+	m, err := s.cli.First(tableAISession, map[string]any{"id": sessionID}, cydb.WithWhere(cydb.EQ("id")))
+	if err != nil || m == nil {
+		return AISessionRecord{}, false
+	}
+	return rowToAISession(aiSessionRow{
+		ID:           str(m["id"]),
+		ConnID:       str(m["conn_id"]),
+		TabID:        str(m["tab_id"]),
+		DB:           str(m["db"]),
+		MessagesJSON: str(m["messages_json"]),
+		UsageJSON:    str(m["usage_json"]),
+		CreatedAt:    integer(m["created_at"]),
+		UpdatedAt:    integer(m["updated_at"]),
+	}), true
+}
+
+// ListAISessions 列出某连接（可选指定 tab）的会话（新→旧，仅元信息不含消息）。
+// tabID 为空 = 返回该连接全部会话；非空 = 仅返回该 tab 的会话（按 tab 隔离）。
+func (s *SQLiteStore) ListAISessions(connID, tabID string) ([]AISessionRecord, error) {
+	if tabID != "" {
+		rows, err := s.cli.List(tableAISession,
+			map[string]any{"conn_id": connID, "tab_id": tabID},
+			cydb.WithWhereAnd(cydb.EQ("conn_id"), cydb.EQ("tab_id")),
+			cydb.WithOrderByDesc("updated_at"),
+		)
+		if err != nil {
+			return nil, err
+		}
+		return sessionMetaList(rows), nil
+	}
+	rows, err := s.cli.List(tableAISession,
+		map[string]any{"conn_id": connID},
+		cydb.WithWhere(cydb.EQ("conn_id")),
+		cydb.WithOrderByDesc("updated_at"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return sessionMetaList(rows), nil
+}
+
+// sessionMetaList 行集合 → 会话元信息列表（不含消息体）。
+func sessionMetaList(rows []map[string]any) []AISessionRecord {
+	ret := make([]AISessionRecord, 0, len(rows))
+	for _, m := range rows {
+		ret = append(ret, AISessionRecord{
+			ID:        str(m["id"]),
+			ConnID:    str(m["conn_id"]),
+			TabID:     str(m["tab_id"]),
+			DB:        str(m["db"]),
+			CreatedAt: integer(m["created_at"]),
+			UpdatedAt: integer(m["updated_at"]),
+		})
+	}
+	return ret
+}
+
+// DeleteAISession 删除指定会话。
+func (s *SQLiteStore) DeleteAISession(sessionID string) error {
+	_, err := s.cli.Delete(tableAISession, map[string]any{"id": sessionID}, cydb.WithWhere(cydb.EQ("id")))
+	return err
+}
+
+// DeleteAISessionByTab 删除某连接下指定 tab 的会话（tab 关闭时调用）。
+func (s *SQLiteStore) DeleteAISessionByTab(connID, tabID string) error {
+	_, err := s.cli.Delete(tableAISession,
+		map[string]any{"conn_id": connID, "tab_id": tabID},
+		cydb.WithWhereAnd(cydb.EQ("conn_id"), cydb.EQ("tab_id")),
+	)
+	return err
+}
+
+// DeleteAISessionsByConn 删除某连接的全部会话。
+func (s *SQLiteStore) DeleteAISessionsByConn(connID string) error {
+	_, err := s.cli.Delete(tableAISession, map[string]any{"conn_id": connID}, cydb.WithWhere(cydb.EQ("conn_id")))
+	return err
+}
+
+// PurgeExcessAISessions 清理超额会话：
+//   - 当某连接的会话数 > maxPerConn 时，删除其中「超过 keepDays 天未活动」的会话；
+//   - 从最旧（updated_at 最小）的会话开始删，直到会话数 ≤ maxPerConn 或没有可删的超期会话；
+//   - 会话数 ≤ maxPerConn 或未超期（tab 未关闭）时永久保留，不做时间过期清理。
+func (s *SQLiteStore) PurgeExcessAISessions(maxPerConn int, keepDays int) (int64, error) {
+	if maxPerConn <= 0 || keepDays <= 0 {
+		return 0, nil
+	}
+	cutoff := time.Now().AddDate(0, 0, -keepDays).UnixMilli()
+
+	// 全量加载会话（数据量小），按连接分组统计
+	rows, err := s.cli.List(tableAISession, nil)
+	if err != nil {
+		return 0, err
+	}
+	type rec struct {
+		id        string
+		connID    string
+		updatedAt int64
+	}
+	recs := make([]rec, 0, len(rows))
+	for _, m := range rows {
+		recs = append(recs, rec{
+			id:        str(m["id"]),
+			connID:    str(m["conn_id"]),
+			updatedAt: integer(m["updated_at"]),
+		})
+	}
+
+	// 按连接分组计数
+	counts := map[string]int{}
+	for _, r := range recs {
+		counts[r.connID]++
+	}
+
+	var n int64
+	// 找出超额连接，收集其「超期」会话，按最旧优先删除
+	for connID, cnt := range counts {
+		if cnt <= maxPerConn {
+			continue
+		}
+		excess := cnt - maxPerConn
+		// 该连接下超期的会话（updated_at < cutoff），按最旧排序
+		var stale []rec
+		for _, r := range recs {
+			if r.connID == connID && r.updatedAt < cutoff {
+				stale = append(stale, r)
+			}
+		}
+		// 按 updated_at 升序（最旧在前）
+		sort.Slice(stale, func(i, j int) bool { return stale[i].updatedAt < stale[j].updatedAt })
+		// 最多删 excess 条（超期会话可能不足 excess，此时保留部分超额，等后续超期再清）
+		toDelete := excess
+		if len(stale) < toDelete {
+			toDelete = len(stale)
+		}
+		for i := 0; i < toDelete; i++ {
+			if _, derr := s.cli.Delete(tableAISession, map[string]any{"id": stale[i].id}, cydb.WithWhere(cydb.EQ("id"))); derr == nil {
+				n++
+			}
+		}
+	}
+	return n, nil
 }
 
 // ---- 类型转换辅助 ----

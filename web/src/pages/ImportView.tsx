@@ -202,6 +202,17 @@ export default function ImportView() {
 
   const set = (patch: Partial<ImportOptions>) => setOpts((o) => ({ ...o, ...patch }))
 
+  // 任务级未显式配置 compatCollation 时，采用设置页的全局默认（设置保存后即时生效）
+  useEffect(() => {
+    api.getConfig()
+      .then((d) => {
+        if (d.config.compatCollation) {
+          setOpts((o) => (o.compatCollation ? o : { ...o, compatCollation: true }))
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   const loadSavedTasks = useCallback(async () => {
     try {
       setSavedTasks((await api.listTasks("import")) || [])

@@ -178,6 +178,8 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 		cylog.Errorf("安全限制: --no-auth 仅允许监听本机回环地址；对外暴露（--host %s）必须启用令牌认证，请去掉 --no-auth 后重启", host)
 		return
 	}
+	// 访问来源白名单过滤器：启动时由 --allow / 配置初始化，配置保存后可热更新（handleSaveConfig）
+	filter := newAccessFilter(allow)
 	eb := cygin.NewEndpointBuilder("/api", "dbx API", []string{"dbx"})
 	apiGroup := eb.Build(
 		// 连接管理
@@ -197,7 +199,7 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 		eb.GROUP("/import", []cygin.APIHandler{
 			eb.POST("", handleImport(svc)),
 			eb.POST("/upload", handleImportUpload(svc)),
-			eb.POST("/inspect", handleImportInspect(svc)),
+			eb.POST("/inspect", handleImportInspect()),
 		}),
 		// 迁移
 		eb.GROUP("/migrate", []cygin.APIHandler{
@@ -244,7 +246,21 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 		// 全局配置
 		eb.GROUP("/config", []cygin.APIHandler{
 			eb.GET("", handleGetConfig(svc)),
-			eb.PUT("", handleSaveConfig(svc)),
+			eb.PUT("", handleSaveConfig(svc, filter)),
+			eb.GET("/browse-dirs", handleBrowseDirs(svc)),
+		}),
+		// AI 辅助 SQL
+		eb.GROUP("/ai", []cygin.APIHandler{
+			eb.GET("/status", handleAIStatus(svc)),
+			eb.GET("/usage", handleAIProcessUsage(svc)),
+			eb.POST("/sessions", handleAICreateSession(svc)),
+			eb.GET("/sessions", handleAIListSessions(svc)),
+			eb.DELETE("/sessions/by-tab", handleAIDeleteSessionByTab(svc)),
+			eb.DELETE("/sessions/:id", handleAIDeleteSession(svc)),
+			eb.POST("/sessions/:id/reset", handleAIResetSession(svc)),
+			eb.GET("/sessions/:id/usage", handleAISessionUsage(svc)),
+			eb.GET("/sessions/:id/history", handleAISessionHistory(svc)),
+			eb.POST("/chat", handleAIChat(svc)),
 		}),
 		// SQL 查询终端
 		eb.GROUP("/sql", []cygin.APIHandler{
@@ -256,6 +272,10 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 			eb.POST("/insert-row", handleInsertRow(svc)),
 			eb.GET("/history", handleSQLHistory(svc)),
 			eb.DELETE("/history", handleClearSQLHistory(svc)),
+			eb.GET("/favorites", handleListFavorites(svc)),
+			eb.POST("/favorites", handleAddFavorite(svc)),
+			eb.DELETE("/favorites", handleDeleteFavorite(svc)),
+			eb.PATCH("/favorites", handleRenameFavorite(svc)),
 			eb.GET("/audit", handleSQLAudit(svc)),
 			eb.POST("/ping", handleSQLPing(svc)),
 			eb.GET("/ddl", handleSQLDDL(svc)),
@@ -273,10 +293,10 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 		// 前端资源：直接内嵌 web/dist（构建前需先 npm run build）
 		cygin.WithEmbeddedFiles("/", webui.DistFS, "dist"),
 	}
-	middlewares := []gin.HandlerFunc{securityHeaders()}
-	if filter := newAccessFilter(allow); len(filter.rules) > 0 {
-		middlewares = append(middlewares, accessControl(filter))
-		cylog.Infof("访问来源白名单已启用: %d 条规则（本机回环始终放行）", len(filter.rules))
+	// 始终挂载访问控制中间件：空规则放行，配置保存后热更新（无需重启）
+	middlewares := []gin.HandlerFunc{securityHeaders(), accessControl(filter)}
+	if len(filter.rules) > 0 {
+		cylog.Infof("访问来源白名单已启用: %d 条规则（本机回环始终放行，保存配置后热更新）", len(filter.rules))
 	}
 	token := ""
 	issuedAt := time.Now()

@@ -19,13 +19,14 @@ import (
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
 )
 
-// Service 业务服务层：Web/CLI 共用，编排引擎 + 连接 + 任务 + 历史
+// Service 业务服务层：Web/CLI 共用，编排引擎 + 连接 + 任务 + 历史 + AI 辅助
 type Service struct {
 	persist     *PersistMgr
 	runner      *TaskRunner
 	cfg         *AppConfig
 	configFile  string // 全局配置文件路径（空 = 未发现，使用默认值）
 	dataDirFlag string // --data-dir 启动参数（用于 ResolveDirs 覆盖）
+	ai          *aiMgr // AI 会话管理（懒加载，见 ai.go）
 }
 
 // NewService 创建业务服务（自动发现全局配置 config.yaml）
@@ -50,6 +51,7 @@ func NewServiceWith(dataDirFlag, configFile string) (*Service, error) {
 		cfg:         cfg,
 		configFile:  resolvedPath,
 		dataDirFlag: dataDirFlag,
+		ai:          newAIMgr(),
 	}, nil
 }
 
@@ -143,9 +145,17 @@ func (s *Service) ListConnections() []ConnInfo {
 
 // DeleteConnection 删除连接（按主键 ID，兼容名称）
 func (s *Service) DeleteConnection(key string) error {
+	// 先取连接主键 ID（兼容名称/短名），用于级联清理其 AI 会话与工作区
+	connID := key
+	if rec, ok := s.persist.GetConn(key); ok {
+		connID = rec.ID
+	}
 	if err := s.persist.DeleteConn(key); err != nil {
 		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
 	}
+	// 级联清理该连接的 AI 会话与工作区（连接删除后其对话/布局一并失效）
+	_ = s.persist.DeleteAISessionsByConn(connID)
+	_ = s.persist.DeleteWorkspace(connID)
 	return nil
 }
 

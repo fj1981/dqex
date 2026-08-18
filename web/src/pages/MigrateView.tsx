@@ -58,6 +58,17 @@ export default function MigrateView() {
 
   const set = (patch: Partial<MigrateOptions>) => setOpts((o) => ({ ...o, ...patch }))
 
+  // 任务级未显式配置 compatCollation 时，采用设置页的全局默认（设置保存后即时生效）
+  useEffect(() => {
+    api.getConfig()
+      .then((d) => {
+        if (d.config.compatCollation) {
+          setOpts((o) => (o.compatCollation ? o : { ...o, compatCollation: true }))
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   // 按主键 id（兼容旧任务配置中的连接名）查找连接
   const findConn = (key: string) => connections.find((c) => c.id === key || c.name === key)
 

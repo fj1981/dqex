@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/peterh/liner"
@@ -44,8 +45,11 @@ func loadHistory(line *liner.State, path string) {
 	if len(entries) > maxHistoryEntries {
 		entries = entries[len(entries)-maxHistoryEntries:]
 	}
-	for i := len(entries) - 1; i >= 0; i-- {
-		line.AppendHistory(entries[i])
+	if err := scanner.Err(); err != nil {
+		return
+	}
+	for _, e := range slices.Backward(entries) {
+		line.AppendHistory(e)
 	}
 }
 
@@ -98,6 +102,10 @@ func saveHistory(line *liner.State, path string) {
 			seen[text] = true
 			count++
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		os.Remove(tmpFile)
+		return
 	}
 	os.Remove(tmpFile)
 }

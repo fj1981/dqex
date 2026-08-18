@@ -1,0 +1,56 @@
+# Air 配置文件（DEBUG 变体）：与 .air.toml 相同，但后端进程额外加 --debug
+# 使用方法: DEBUG=1 make dev（air 使用本配置启动，后端自动输出 debug 及以上级别日志）
+root = "."
+testdata_dir = "testdata"
+tmp_dir = ".gotmp"
+
+[build]
+  # 与 go run ./cmd 等效
+  cmd = "go build -o .gotmp/dbx_dev ./cmd"
+  # 编译后执行的二进制（带参数）
+  bin = ".gotmp/dbx_dev"
+  # 额外参数：--no-browser 避免重复打开浏览器；--debug 开启全局 debug 日志
+  full_bin = ".gotmp/dbx_dev --no-browser --debug"
+  # 排除的文件和目录
+  exclude_dir = [
+    "assets",
+    ".gotmp",
+    "vendor",
+    "testdata",
+    "web/node_modules",
+    "web/dist",
+    ".git",
+    ".vscode",
+    ".qoder",
+    "release",
+    "exports",
+    ".dbimpex-exports",
+  ]
+  exclude_regex = ["_test.go"]
+  exclude_unchanged = false
+  follow_symlink = false
+  # 日志输出
+  log = ".gotmp/air-debug.log"
+  poll = false
+  poll_interval = 0
+  rerun = false
+  rerun_delay = 500
+  # 监听文件变更的延迟（毫秒），避免频繁重编译
+  delay = 1000
+  stop_on_error = false
+  # 发送中断信号
+  send_interrupt = true
+  kill_delay = "500ms"
+
+[color]
+  main = "magenta"
+  watcher = "cyan"
+  build = "yellow"
+  runner = "green"
+
+[misc]
+  clean_on_exit = true
+
+[screen]
+  clear_on_rebuild = true
+  keep_scroll = true

@@ -71,6 +71,7 @@ export interface TableColumn {
   autoIncrement?: boolean
   unique?: boolean // 唯一约束（非主键）
   indexed?: boolean // 普通索引（非主键/非唯一）
+  comment?: string // 列注释（可为空）
 }
 
 export interface ExportOptions {
@@ -479,6 +480,18 @@ export interface SQLAuditEntry {
   pkValues?: unknown[]
 }
 
+// SQL 收藏（用户主动、跨会话、按连接隔离，不受执行历史环形上限影响）
+// 仅在「全部替换」回填动作下才还原 db/mode 上下文，其余动作只插文本。
+export interface SQLFavorite {
+  id: string
+  connId: string
+  title: string // 默认取 SQL 去注释后首行前 40 字符，可重命名
+  db?: string // 执行上下文：目标库（仅 replace_all 回填时还原）
+  mode?: SQLExecMode // 执行模式（仅 replace_all 回填时还原）
+  sql: string
+  createdAt: number
+}
+
 // ---- 全局配置（config.yaml） ----
 
 export interface DirConfig {
@@ -494,11 +507,84 @@ export interface WebConfig {
   allow: string[] // 访问来源白名单（IP/CIDR/域名），留空 = 不限制
 }
 
+// AI 辅助 SQL 配置（OpenAI 兼容协议，可对接 OpenAI / 国产模型）
+export interface AIConfig {
+  baseUrl: string // OpenAI 兼容端点，如 https://api.openai.com/v1 或国内中转
+  apiKey: string // API Key（保存后回显为掩码，重存时后端保留原值）
+  model: string // 模型名，如 gpt-4o-mini / deepseek-chat
+  temperature: number // 温度 0-2，默认 0.2
+  maxTokens: number // 单次回复最大 token，默认 2048
+  timeoutSec: number // 请求超时（秒），默认 60
+  maxSchemaTables: number // 注入上下文的最大表数量，默认 30
+  maxSchemaChars: number // 注入表结构文本字符上限，默认 20000
+  systemPrompt: string // 自定义 system prompt 模板（支持 {dialect}/{schema} 占位符），留空用内置默认
+}
+
 export interface AppConfig {
   dirs: DirConfig
   web: WebConfig
+  ai: AIConfig
   // 兼容排序规则：将 MySQL 8.0 特有排序规则替换为 5.7 兼容版本（全局默认）
   compatCollation: boolean
+  // 全局 debug 日志开关：输出 debug 及以上级别日志（含 AI 链路），等效命令行 --debug；修改后重启服务生效
+  debug: boolean
+}
+
+// AI 能力状态（后端掩码后返回，供前端门控 AI 面板）
+export interface AIStatus {
+  enabled: boolean
+  baseUrl: string
+  model: string
+  temperature: number
+  maxTokens: number
+  timeoutSec: number
+  maxSchemaTables: number
+  maxSchemaChars: number
+  hasPrompt: boolean
+}
+
+// AI token 消耗（与后端 llm.Usage 对齐）
+export interface AIUsage {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
+export interface AISession {
+  sessionID: string
+  dbName: string
+  dialect: string
+}
+
+// AI 会话持久化记录（与后端 store.AISessionRecord 对齐）
+export interface AISessionRecord {
+  id: string
+  connId: string
+  tabId: string
+  db: string
+  dialect?: string
+  messages: {
+    role: string
+    content: string
+    tool_calls?: unknown[]
+    tool_call_id?: string
+    tool_name?: string
+    // 后端在 user 消息上附加的元信息：action 为动作类型，raw 为原始输入（纯 SQL / 需求）
+    extra?: { action?: string; raw?: string }
+  }[]
+  usage?: AIUsage
+  createdAt: number
+  updatedAt: number
+}
+
+// AI 会话元信息（列表项，不含消息体）
+export interface AISessionMeta {
+  id: string
+  connId: string
+  tabId: string
+  db: string
+  createdAt: number
+  updatedAt: number
 }
 
 export interface ResolvedDirs {
@@ -515,6 +601,19 @@ export interface ConfigInfo {
   resolved: ResolvedDirs
   configFile: string // 全局配置文件路径（空 = 未发现）
   dataDirOverride: boolean // --data-dir 是否覆盖了 dirs.data（此时目录修改不生效）
+}
+
+// 目录浏览（设置页目录选择器）：后端仅返回目录、范围限制在用户主目录内
+export interface DirEntry {
+  name: string
+  path: string
+}
+
+export interface DirBrowseResult {
+  path: string // 当前浏览路径
+  parent: string // 上级目录（已到范围边界时为空）
+  root: string // 浏览范围根目录（用户主目录）
+  entries: DirEntry[] // 子目录列表
 }
 
 export interface VersionInfo {

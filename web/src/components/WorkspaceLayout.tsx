@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels"
-import { AlertCircle, Check, ChevronLeft, ChevronRight, Code2, FunctionSquare, List, Loader2, Plus, Table2, View, X } from "lucide-react"
+import { AlertCircle, Check, ChevronLeft, ChevronRight, Code2, FunctionSquare, List, Loader2, Plus, Sparkles, Star, Table2, View, X } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -19,16 +19,20 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
+import { setSqlEditor } from "@/lib/editorRef"
 import { useClickOutside } from "@/lib/useClickOutside"
 import { useQueryStore, type WorkspaceTab } from "@/stores/queryStore"
 import { useObjectTreeStore } from "@/stores/objectTreeStore"
-import SqlEditor from "@/components/SqlEditor"
+import { useFavoriteStore } from "@/stores/favoriteStore"
+import SqlEditor, { type SqlEditorInstance } from "@/components/SqlEditor"
 import ResultGrid from "@/components/ResultGrid"
 import ObjectTree from "@/components/ObjectTree"
 import TableBrowser from "@/components/TableBrowser"
 import { useAppStore } from "@/stores/app"
 import { pingConnection } from "@/api/sql"
-import { SQL_EXEC_MODE_LABEL, type ObjectNode, type SQLExecMode } from "@/types"
+import { getAIStatus } from "@/api"
+import { AIPanel } from "@/components/AIPanel"
+import { SQL_EXEC_MODE_LABEL, type AIStatus, type ObjectNode, type SQLExecMode } from "@/types"
 
 // 合并后的类 Navicat 工作区：左侧常驻对象树 + 右侧多 Tab（查询 / 对象）
 // 对象树始终显示，与右侧区域左右分栏；视图/函数/过程按类型分组展示
@@ -62,11 +66,38 @@ export default function WorkspaceLayout() {
     setObjectViewLayout,
   } = useQueryStore()
   const { loadTree, nodes: treeNodes } = useObjectTreeStore()
+  const { add: addFavorite } = useFavoriteStore()
   // 连接健康状态：null=未检测 / checking=检测中 / ok=正常 / fail=不可用
   const [ping, setPing] = useState<null | "checking" | "ok" | "fail">(null)
   const [pingMs, setPingMs] = useState(0)
   // 左侧对象树折叠状态
   const [treeCollapsed, setTreeCollapsed] = useState(false)
+  // AI 助手：面板开关 + 能力状态（未配置时入口隐藏）
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiStatus, setAiStatus] = useState<AIStatus | null>(null)
+  // AI 采纳预览：预览中标记 + 预览前的原始 SQL（用于 diff 高亮与「取消」回滚）
+  const [aiPreviewing, setAiPreviewing] = useState(false)
+  const [aiPreviewBase, setAiPreviewBase] = useState("")
+  // AI 快捷触发请求：编辑器「解释/优化」、报错卡片「AI 修复」点击后设置，AIPanel 消费后清除
+  const [quickRequest, setQuickRequest] = useState<{ action: "explain" | "optimize" | "fix"; text: string } | null>(null)
+  // 主 SQL 编辑器实例 + 光标/选中状态（供 AI 插入定位：替换所选/插入光标/追加末尾）
+  const sqlEditorRef = useRef<SqlEditorInstance | null>(null)
+  const editorSelectionRef = useRef<{ hasSelection: boolean; selectionOffset: number; selectionLength: number; cursorOffset: number }>({ hasSelection: false, selectionOffset: -1, selectionLength: 0, cursorOffset: -1 })
+  // 是否有选中（用 state 驱动 AIPanel 菜单项显示；仅在值变化时更新，避免光标移动导致高频重渲染）
+  const [hasEditorSelection, setHasEditorSelection] = useState(false)
+  useEffect(() => {
+    let alive = true
+    getAIStatus()
+      .then((st) => {
+        if (alive) setAiStatus(st)
+      })
+      .catch(() => {
+        if (alive) setAiStatus({ enabled: false, baseUrl: "", model: "", temperature: 0, maxTokens: 0, timeoutSec: 0, maxSchemaTables: 0, maxSchemaChars: 0, hasPrompt: false })
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
   // 双击重命名状态
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState("")
@@ -138,6 +169,8 @@ export default function WorkspaceLayout() {
 
   // 查询 tab 编辑器/结果区上下分割布局，自动持久化到 localStorage
   const querySplit = useDefaultLayout({ id: "dbx-query-split" })
+  // AI 面板横向宽度（右侧面板，可拖动调整，比例存 localStorage）
+  const aiSplit = useDefaultLayout({ id: "dbx-ai-split" })
 
   const checkHealth = useCallback(async () => {
     if (!connId) return
@@ -152,6 +185,39 @@ export default function WorkspaceLayout() {
       toast.error(`连接检测失败: ${(e as Error).message}`)
     }
   }, [connId])
+
+  // 读取快捷动作（解释/优化）的作用对象 SQL，优先级：
+  //   1. 编辑器当前选中部分（有选中）
+  //   2. 上次实际执行的 SQL（选中执行=选中部分，全文执行=全文）
+  //   3. 当前 query tab 的完整 SQL（兜底）
+  const getTargetSql = useCallback((): string => {
+    const ed = sqlEditorRef.current
+    const m = ed?.getModel()
+    const s = ed?.getSelection()
+    if (m && s && !s.isEmpty()) {
+      return m.getValueInRange(s).trim()
+    }
+    // 无选中或编辑器不可用：优先上次执行的 SQL，否则回退为当前 query tab 的完整 SQL
+    const active = tabs.find((t) => t.id === activeId)
+    if (active && active.kind === "query") {
+      return (active.lastExecSql || active.sql).trim()
+    }
+    return ""
+  }, [tabs, activeId])
+
+  // 快捷触发解释/优化：打开 AI 面板并以指定动作立即发送（对象 = 选中 SQL 或全文）
+  const triggerQuickAction = useCallback(
+    (action: "explain" | "optimize") => {
+      const sql = getTargetSql()
+      if (!sql) {
+        toast.info("编辑器中没有可用的 SQL")
+        return
+      }
+      setAiOpen(true)
+      setQuickRequest({ action, text: sql })
+    },
+    [getTargetSql],
+  )
 
   // 切换激活 tab 时，自动把激活 tab 滚动到视区内（tab 过多时不依赖用户手动横向滚动）
   useEffect(() => {
@@ -497,28 +563,141 @@ export default function WorkspaceLayout() {
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => addTab()}>
                 <Plus className="mr-1 h-3.5 w-3.5" /> 新建查询
               </Button>
+
+              {/* AI 助手开关（配置启用时显示）：纯图标，位于「新建查询」右侧，对应右侧 AI 面板 */}
+              {aiStatus?.enabled && (
+                <Button
+                  size="icon"
+                  variant={aiOpen ? "secondary" : "outline"}
+                  className={cn("h-7 w-7", aiOpen && "border-violet-500/50 text-violet-600")}
+                  onClick={() => setAiOpen((v) => !v)}
+                  title={aiOpen ? "收起 AI 助手" : "打开 AI 助手（生成 / 解释 / 修复 / 优化 SQL）"}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                </Button>
+              )}
             </div>
           </div>
 
           {/* 内容区 */}
           {queryActive ? (
-            /* 查询 tab：编辑器 + 结果（中间分割条可拖动调整上下比例，比例自动存 localStorage） */
-            <Group orientation="vertical" defaultLayout={querySplit.defaultLayout} onLayoutChanged={querySplit.onLayoutChanged} className="min-h-0 flex-1">
+            /* 查询 tab：编辑器 + 结果（中间分割条可拖动调整上下比例）；AI 面板在右侧，
+               横向跨整个 tab 高度（含编辑器+结果区），宽度可拖动调整，比例存 localStorage */
+            <Group orientation="horizontal" defaultLayout={aiSplit.defaultLayout} onLayoutChanged={aiSplit.onLayoutChanged} className="min-h-0 flex-1">
+              {/* 左：编辑器 + 结果（上下分割） */}
+              <Panel id="query" minSize="40" className="min-h-0 overflow-hidden">
+                <Group orientation="vertical" defaultLayout={querySplit.defaultLayout} onLayoutChanged={querySplit.onLayoutChanged} className="h-full min-h-0">
               {/* 上：SQL 编辑器 + 工具栏 */}
-              <Panel id="editor" defaultSize="42" minSize="15" className="flex min-h-0 flex-col">
-                <div className="flex min-h-0 flex-1 flex-col">
-                  <SqlEditor
-                    value={queryActive.sql}
-                    onChange={(sql) => updateTabSql(queryActive.id, sql)}
-                    onRun={(selection) => runTab(queryActive.id, selection)}
-                    disabled={running}
-                    placeholder="SELECT * FROM 表名;  (Cmd/Ctrl + Enter 执行，选中可仅执行选中部分)"
-                  />
+              <Panel id="editor" defaultSize="50" minSize="15" className="flex min-h-0 flex-col overflow-hidden">
+                <div className="flex min-w-0 flex-1 overflow-hidden">
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                    {aiPreviewing && (
+                      <div className="z-10 flex shrink-0 items-center gap-2 border-b bg-emerald-50/80 px-3 py-1.5">
+                        <Sparkles className="h-3.5 w-3.5 text-emerald-600" />
+                        <span className="text-xs text-emerald-700">
+                          AI 生成的 SQL 已暂存到编辑器，绿色为新增、红色为删除
+                        </span>
+                        <div className="ml-auto flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            className="h-6 gap-1 text-xs"
+                            onClick={() => {
+                              setAiPreviewing(false)
+                              setAiPreviewBase("")
+                              toast.success("已应用 AI 生成的 SQL")
+                            }}
+                          >
+                            <Check className="h-3.5 w-3.5" /> 应用
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 gap-1 text-xs"
+                            onClick={() => {
+                              updateTabSql(queryActive.id, aiPreviewBase)
+                              setAiPreviewing(false)
+                              setAiPreviewBase("")
+                            }}
+                          >
+                            <X className="h-3.5 w-3.5" /> 取消
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    <SqlEditor
+                      value={queryActive.sql}
+                      onChange={(sql) => updateTabSql(queryActive.id, sql)}
+                      onRun={(selection) => runTab(queryActive.id, selection)}
+                      disabled={running}
+                      placeholder="SELECT * FROM 表名;  (Cmd/Ctrl + Enter 执行，选中可仅执行选中部分)"
+                      diffBase={aiPreviewing ? aiPreviewBase : undefined}
+                      onReady={(ed) => {
+                        sqlEditorRef.current = ed
+                        setSqlEditor(ed)
+                      }}
+                      onSelectionChange={(info) => {
+                        editorSelectionRef.current = {
+                          hasSelection: info.hasSelection,
+                          selectionOffset: info.selectionOffset,
+                          selectionLength: info.selectionLength,
+                          cursorOffset: info.cursorOffset,
+                        }
+                        // 仅在选中状态变化时更新 state，驱动菜单项显示（避免高频重渲染）
+                        setHasEditorSelection((prev) => (prev === info.hasSelection ? prev : info.hasSelection))
+                      }}
+                    />
+                  </div>
                 </div>
 
                 <div className="flex shrink-0 items-center justify-between border-t bg-card px-3 py-1.5">
-                  {/* 左：成功时的结果统计（行数 / 耗时）；错误由下方结果区卡片展示，避免重复 */}
+                  {/* 左：AI 快捷动作（解释/优化）+ 成功时的结果统计（行数 / 耗时）；错误由下方结果区卡片展示，避免重复 */}
                   <div className="flex min-w-0 items-center gap-2">
+                    {aiStatus?.enabled && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
+                          title={hasEditorSelection ? "解释选中的 SQL" : "解释编辑器中的 SQL"}
+                          onClick={() => triggerQuickAction("explain")}
+                        >
+                          <Sparkles className="h-3.5 w-3.5 text-violet-500" /> 解释
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
+                          title={hasEditorSelection ? "优化选中的 SQL" : "优化编辑器中的 SQL"}
+                          onClick={() => triggerQuickAction("optimize")}
+                        >
+                          <Sparkles className="h-3.5 w-3.5 text-violet-500" /> 优化
+                        </Button>
+                        {/* 收藏当前 SQL：存入独立收藏表（按连接隔离），与右侧「收藏」Tab 联动 */}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 gap-1 text-xs text-muted-foreground hover:text-amber-600"
+                          title="收藏当前编辑器 SQL"
+                          disabled={!queryActive || !queryActive.sql.trim()}
+                          onClick={async () => {
+                            if (!queryActive) return
+                            const sql = queryActive.sql.trim()
+                            if (!sql) {
+                              toast.info("编辑器中没有可用的 SQL")
+                              return
+                            }
+                            try {
+                              await addFavorite(connId, sql, queryActive.db, queryActive.mode)
+                              toast.success("已收藏当前 SQL")
+                            } catch (e) {
+                              toast.error(`收藏失败: ${(e as Error).message}`)
+                            }
+                          }}
+                        >
+                          <Star className="h-3.5 w-3.5" /> 收藏
+                        </Button>
+                      </>
+                    )}
                     {queryActive.results.length > 0 && (() => {
                       const r = queryActive.results[queryActive.activeResult] ?? queryActive.results[0]
                       if (r.error) return null
@@ -568,7 +747,13 @@ export default function WorkspaceLayout() {
                     <Button
                       size="sm"
                       className="h-7 w-[112px] text-xs"
-                      onClick={() => runTab(queryActive.id)}
+                      onClick={() => {
+                        const ed = sqlEditorRef.current
+                        const m = ed?.getModel()
+                        const s = ed?.getSelection()
+                        const sel = m && s && !s.isEmpty() ? m.getValueInRange(s) : undefined
+                        runTab(queryActive.id, sel)
+                      }}
                       disabled={running}
                     >
                       {running ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
@@ -584,7 +769,7 @@ export default function WorkspaceLayout() {
               </Separator>
 
               {/* 下：结果区 */}
-              <Panel id="result" defaultSize="58" minSize="15" className="min-h-0">
+              <Panel id="result" defaultSize="50" minSize="15" className="min-h-0">
                 <div className="h-full p-2 pt-1">
                   {queryActive.error ? (
                     <div className="flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
@@ -593,6 +778,26 @@ export default function WorkspaceLayout() {
                         <div className="font-medium text-destructive">执行失败</div>
                         <div className="mt-0.5 break-words text-foreground/80">{queryActive.error}</div>
                       </div>
+                      {/* 一键修复：自动打开 AI 面板并以「修复」动作附带报错信息 + 出错 SQL 触发。
+                          作用对象 = 上次实际执行的 SQL（选中执行=选中部分，全文执行=全文），非编辑器全文 */}
+                      {aiStatus?.enabled && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 shrink-0 gap-1 text-xs"
+                          onClick={() => {
+                            setAiOpen(true)
+                            const failSql = getTargetSql()
+                            setQuickRequest({
+                              action: "fix",
+                              text: `以下 SQL 执行报错：\n\n${failSql}\n\n报错信息：\n${queryActive.error}\n\n请修复`,
+                            })
+                          }}
+                        >
+                          <Sparkles className="h-3.5 w-3.5 text-violet-500" />
+                          AI 修复
+                        </Button>
+                      )}
                     </div>
                   ) : queryActive.results.length > 0 ? (
                     <div className="flex h-full min-h-0 flex-col gap-1.5">
@@ -653,6 +858,75 @@ export default function WorkspaceLayout() {
                   )}
                 </div>
               </Panel>
+                </Group>
+              </Panel>
+
+              {/* 右侧 AI 面板：跨整个 tab 高度，宽度可拖动 */}
+              {aiOpen && (
+                <>
+                  <Separator className="group relative z-10 flex items-center justify-center border-x bg-muted/40 transition-colors hover:bg-muted data-[resize-handle-active]:bg-primary/30">
+                    <div className="h-8 w-0.5 rounded-full bg-border transition-colors group-hover:bg-primary/60 group-data-[resize-handle-active]:bg-primary" />
+                  </Separator>
+                  <Panel id="ai" defaultSize="24" minSize="18" maxSize="60" className="min-h-0 overflow-hidden">
+                    <AIPanel
+                      connId={connId}
+                      db={queryActive.db}
+                      tabId={queryActive.id}
+                      quickRequest={quickRequest}
+                      onQuickConsumed={() => setQuickRequest(null)}
+                      onPreviewSql={(sql, action) => {
+                        // 进入采纳预览：按插入动作（替换所选/插入光标/追加末尾）计算最终 SQL
+                        const base = queryActive.sql
+                        // 优先实时从编辑器实例读取光标/选中偏移（权威来源），
+                        // 避免依赖 editorSelectionRef 缓存：该缓存经 onSelectionChange 异步上报，
+                        // 若上报未及时触发会停留在初始 -1，导致「插入光标处/替换所选」分支静默不命中，
+                        // 表现为点击后编辑器内容毫无变化（仅顶部确认横条出现）。
+                        const ed = sqlEditorRef.current
+                        let sel = editorSelectionRef.current
+                        if (ed) {
+                          const m = ed.getModel()
+                          const s = ed.getSelection()
+                          if (m && s) {
+                            sel = {
+                              hasSelection: !s.isEmpty(),
+                              selectionOffset: s.isEmpty() ? -1 : m.getOffsetAt(s.getStartPosition()),
+                              selectionLength: s.isEmpty() ? 0 : m.getValueInRange(s).length,
+                              cursorOffset: m.getOffsetAt(s.getPosition()),
+                            }
+                          }
+                        }
+                        let final = base
+                        let applied = false
+                        if (action === "replace_all") {
+                          // 全部替换：整个编辑器内容直接替换为生成的 SQL（忽略光标/选中）
+                          final = sql
+                          applied = true
+                        } else if (action === "append") {
+                          // 追加到末尾：与已有内容之间空一行（\n\n），避免 SQL 语句紧贴已有内容
+                          final = base.trim() ? `${base.trim()}\n\n${sql}` : sql
+                          applied = true
+                        } else if (action === "replace_selection" && sel.hasSelection && sel.selectionOffset >= 0) {
+                          final = base.slice(0, sel.selectionOffset) + sql + base.slice(sel.selectionOffset + sel.selectionLength)
+                          applied = true
+                        } else if (action === "insert_cursor" && sel.cursorOffset >= 0) {
+                          final = base.slice(0, sel.cursorOffset) + sql + base.slice(sel.cursorOffset)
+                          applied = true
+                        }
+                        if (!applied) {
+                          // 无法定位（光标/选中无效）：回退为追加到末尾，并明确提示，避免静默无响应
+                          toast.info("未获取到编辑器光标位置，已改为追加到末尾")
+                          final = base.trim() ? `${base.trim()}\n\n${sql}` : sql
+                        }
+                        setAiPreviewBase(queryActive.sql)
+                        setAiPreviewing(true)
+                        updateTabSql(queryActive.id, final)
+                      }}
+                      hasSelection={hasEditorSelection}
+                      onClose={() => setAiOpen(false)}
+                    />
+                  </Panel>
+                </>
+              )}
             </Group>
           ) : objectActive ? (
             /* 对象 tab：数据 + 结构 + DDL。

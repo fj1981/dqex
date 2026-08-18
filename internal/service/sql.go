@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -371,6 +372,80 @@ func (s *Service) SQLHistory(connID string) []SQLHistoryItem {
 // ClearSQLHistory 清空某连接的历史记录
 func (s *Service) ClearSQLHistory(connID string) {
 	_ = s.persist.ClearSQLHistory(connID)
+}
+
+// ---- SQL 收藏（独立表，按连接隔离） ----
+
+// AddFavorite 新增一条收藏。校验 SQL 非空、长度合理，标题缺省时取首行。
+func (s *Service) AddFavorite(f *SQLFavorite) error {
+	if f == nil || f.ConnID == "" {
+		return errors.New("connId 必填")
+	}
+	if strings.TrimSpace(f.SQL) == "" {
+		return errors.New("SQL 不可为空")
+	}
+	if len(f.SQL) > 64*1024 {
+		return errors.New("SQL 过长（≤64KB）")
+	}
+	if f.Title == "" {
+		f.Title = defaultFavoriteTitle(f.SQL)
+	}
+	if len(f.Title) > 256 {
+		f.Title = f.Title[:256]
+	}
+	if f.CreatedAt == 0 {
+		f.CreatedAt = nowMillis()
+	}
+	return s.persist.AddFavorite(f)
+}
+
+// ListFavorites 返回全部收藏（全局共享，不按连接隔离；新→旧）
+func (s *Service) ListFavorites() []*SQLFavorite {
+	return s.persist.ListFavorites()
+}
+
+// DeleteFavorite 删除收藏（按全局唯一 id 定位）
+func (s *Service) DeleteFavorite(id string) error {
+	if id == "" {
+		return errors.New("id 必填")
+	}
+	return s.persist.DeleteFavorite(id)
+}
+
+// RenameFavorite 重命名收藏（按全局唯一 id 定位）
+func (s *Service) RenameFavorite(id, title string) error {
+	if id == "" {
+		return errors.New("id 必填")
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return errors.New("标题不可为空")
+	}
+	if len(title) > 256 {
+		title = title[:256]
+	}
+	return s.persist.RenameFavorite(id, title)
+}
+
+// defaultFavoriteTitle 取 SQL 去注释后首行前 40 字符作为默认标题。
+func defaultFavoriteTitle(sql string) string {
+	var first string
+	for _, line := range strings.Split(sql, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "--") || strings.HasPrefix(t, "#") || strings.HasPrefix(t, "/*") {
+			continue
+		}
+		first = t
+		break
+	}
+	if first == "" {
+		first = strings.TrimSpace(sql)
+	}
+	first = strings.TrimSuffix(first, ";")
+	if len([]rune(first)) > 40 {
+		first = string([]rune(first)[:40]) + "…"
+	}
+	return first
 }
 
 // SQLAudit 读取某连接的审计日志（倒序，分页）。审计只读、不提供删除。

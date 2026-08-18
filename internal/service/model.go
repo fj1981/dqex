@@ -53,6 +53,8 @@ type (
 	ConnInfo = store.ConnInfo
 	// SQLHistoryItem 查询终端历史记录
 	SQLHistoryItem = store.SQLHistoryItem
+	// SQLFavorite 收藏的 SQL
+	SQLFavorite = store.SQLFavorite
 	// SQLAuditEntry 审计日志条目
 	SQLAuditEntry = store.SQLAuditEntry
 	// WebAccessInfo Web 访问凭证
@@ -61,6 +63,8 @@ type (
 	WorkspaceTab = store.WorkspaceTab
 	// WorkspaceState 查询工作区状态
 	WorkspaceState = store.WorkspaceState
+	// AISessionRecord AI 会话持久化记录
+	AISessionRecord = store.AISessionRecord
 )
 
 // 重置模式常量

@@ -141,7 +141,7 @@ func (cf *connFlags) toConn() *engine.DBConnInfo {
 
 // ---- 主流程 ----
 
-func run(cmd *cobra.Command, opts *options, args []string) error {
+func run(_ *cobra.Command, opts *options, args []string) error {
 	if opts.noColor {
 		colorOn = false
 	}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
+	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
 )
 
 // StartResp 异步任务启动响应
@@ -233,7 +234,7 @@ type InspectReq struct {
 	Path string `json:"path" binding:"required"`
 }
 
-func handleImportInspect(svc *service.Service) gin.HandlerFunc {
+func handleImportInspect() gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req InspectReq) (any, error) {
 		return engine.InspectImportFile(req.Path)
 	})
@@ -507,12 +508,27 @@ func handleGetConfig(svc *service.Service) gin.HandlerFunc {
 	})
 }
 
-// handleSaveConfig 保存全局配置（写回 config.yaml，重启后生效）。
-func handleSaveConfig(svc *service.Service) gin.HandlerFunc {
+// handleSaveConfig 保存全局配置（写回 config.yaml，内存、白名单、目录均即时更新）。
+// 白名单类配置热生效：保存后立即刷新访问过滤器，无需重启服务。
+func handleSaveConfig(svc *service.Service, filter *accessFilter) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req service.AppConfig) (any, error) {
 		if err := svc.SaveConfig(req); err != nil {
 			return nil, err
 		}
+		filter.Set(req.Web.Allow)
+		cylog.Infof("访问来源白名单已热更新: %d 条规则", len(req.Web.Allow))
 		return gin.H{"ok": true}, nil
+	})
+}
+
+// BrowseDirsReq 目录浏览请求（设置页目录选择器）
+type BrowseDirsReq struct {
+	Path string `query:"path"`
+}
+
+// handleBrowseDirs 浏览本机目录（仅目录、限制在用户主目录内），供设置页目录选择器使用。
+func handleBrowseDirs(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req BrowseDirsReq) (service.DirBrowseResult, error) {
+		return svc.BrowseDirs(req.Path)
 	})
 }

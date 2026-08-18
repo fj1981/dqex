@@ -56,6 +56,17 @@ type sqlHistoryRow struct {
 
 func (sqlHistoryRow) TableName() string { return tableSQLHist }
 
+// sqlFavoriteRow SQL 收藏行（独立表，不受执行历史环形上限影响）。
+type sqlFavoriteRow struct {
+	ID        string `cydb:"column:id;type:varchar;size:64;primary_key"`
+	ConnID    string `cydb:"column:conn_id;type:varchar;size:32;index"`
+	Title     string `cydb:"column:title;type:varchar;size:256"` // 默认取 SQL 去注释后首行前 40 字符
+	CreatedAt int64  `cydb:"column:created_at;type:bigint;index"`
+	BodyJSON  string `cydb:"column:body_json;type:text"` // 完整 SQLFavorite 序列化
+}
+
+func (sqlFavoriteRow) TableName() string { return tableSQLFav }
+
 // sqlAuditRow SQL 审计日志行（只增不删）。
 type sqlAuditRow struct {
 	ID        string `cydb:"column:id;type:varchar;size:64;primary_key"`
@@ -85,6 +96,20 @@ type workspaceRow struct {
 
 func (workspaceRow) TableName() string { return tableWorkspace }
 
+// aiSessionRow AI 会话行（按会话一份；messages_json 存整组对话消息，updated_at 用于过期清理）。
+type aiSessionRow struct {
+	ID           string `cydb:"column:id;type:varchar;size:64;primary_key"`
+	ConnID       string `cydb:"column:conn_id;type:varchar;size:32;index"`
+	TabID        string `cydb:"column:tab_id;type:varchar;size:64;index"`
+	DB           string `cydb:"column:db;type:varchar;size:128"`
+	MessagesJSON string `cydb:"column:messages_json;type:text"` // schema.Message[] 序列化（含 system/user/assistant/tool）
+	UsageJSON    string `cydb:"column:usage_json;type:text"`    // llm.Usage 序列化
+	CreatedAt    int64  `cydb:"column:created_at;type:bigint"`
+	UpdatedAt    int64  `cydb:"column:updated_at;type:bigint;index"`
+}
+
+func (aiSessionRow) TableName() string { return tableAISession }
+
 // allModels 统一迁移注册表：新增表时只需在此切片追加一个行模型结构体，
 // Migrate 遍历执行 AutoMigrate，其余代码零改动。
 var allModels = []any{
@@ -95,5 +120,7 @@ var allModels = []any{
 	&sqlAuditRow{},
 	&webAccessRow{},
 	&workspaceRow{},
+	&aiSessionRow{},
+	&sqlFavoriteRow{},
 	// 未来新表：在此追加 &newRow{}，仅此一处。
 }

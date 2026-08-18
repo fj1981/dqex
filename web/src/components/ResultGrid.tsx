@@ -702,8 +702,11 @@ export default function ResultGrid({ result }: Props) {
               </div>
             )}
           </div>
+        </div>
+
+        <div className="flex items-center gap-1">
           <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1) }}>
-            <SelectTrigger className="h-7 w-[70px] px-2 text-xs">
+            <SelectTrigger className="h-7 w-[74px] px-2 text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -712,9 +715,6 @@ export default function ResultGrid({ result }: Props) {
               ))}
             </SelectContent>
           </Select>
-        </div>
-
-        <div className="flex items-center gap-1">
           <Button variant="outline" size="sm" className="h-7 w-7 p-0" disabled={safePage <= 1} onClick={() => goTo(safePage - 1)}>
             <ChevronLeft className="h-3.5 w-3.5" />
           </Button>

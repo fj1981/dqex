@@ -2,6 +2,8 @@
 package web
 
 import (
+	"errors"
+
 	"dbimpex/internal/engine"
 	"dbimpex/internal/service"
 
@@ -170,6 +172,70 @@ func handleSQLHistory(svc *service.Service) gin.HandlerFunc {
 func handleClearSQLHistory(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req SQLHistoryReq) (any, error) {
 		svc.ClearSQLHistory(req.ConnID)
+		return gin.H{"ok": true}, nil
+	})
+}
+
+// FavoriteReq 收藏列表请求（全局共享，无需连接过滤；保留 ConnID 仅作来源标记上下文）
+type FavoriteReq struct {
+	ConnID string `query:"connId"`
+}
+
+// FavoriteAddReq 新增收藏请求
+type FavoriteAddReq struct {
+	ConnID string `json:"connId" binding:"required"`
+	Title  string `json:"title"`
+	DB     string `json:"db"`
+	Mode   string `json:"mode"`
+	SQL    string `json:"sql" binding:"required"`
+}
+
+// FavoriteRenameReq 重命名收藏请求
+type FavoriteRenameReq struct {
+	ID    string `json:"id" binding:"required"`
+	Title string `json:"title" binding:"required"`
+}
+
+func handleListFavorites(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req FavoriteReq) ([]*service.SQLFavorite, error) {
+		return svc.ListFavorites(), nil
+	})
+}
+
+func handleAddFavorite(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req FavoriteAddReq) (any, error) {
+		f := &service.SQLFavorite{
+			ConnID: req.ConnID, // 仅作来源标记，便于跨连接回填时提示
+			Title:  req.Title,
+			DB:     req.DB,
+			Mode:   req.Mode,
+			SQL:    req.SQL,
+		}
+		if err := svc.AddFavorite(f); err != nil {
+			return nil, err
+		}
+		return gin.H{"ok": true, "id": f.ID}, nil
+	})
+}
+
+func handleDeleteFavorite(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req FavoriteReq) (any, error) {
+		id := c.Query("id")
+		if id == "" {
+			return nil, errors.New("id 必填")
+		}
+		if err := svc.DeleteFavorite(id); err != nil {
+			return nil, err
+		}
+		return gin.H{"ok": true}, nil
+	})
+}
+
+func handleRenameFavorite(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req FavoriteRenameReq) (any, error) {
+		if err := svc.RenameFavorite(req.ID, req.Title); err != nil {
+			return nil, err
+		}
 		return gin.H{"ok": true}, nil
 	})
 }

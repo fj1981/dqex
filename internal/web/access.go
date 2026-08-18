@@ -21,7 +21,7 @@ type allowRule struct {
 // accessFilter 访问来源过滤器：无规则 = 不限制；本机回环始终放行（避免误锁自己）
 type accessFilter struct {
 	rules []allowRule
-	mu    sync.Mutex
+	mu    sync.RWMutex
 	cache map[string]domainCache // 域名 → 解析结果缓存
 }
 
@@ -35,7 +35,17 @@ const domainResolveTTL = 5 * time.Minute
 
 // newAccessFilter 解析白名单条目（IP / CIDR / 域名）；非法条目记录日志后跳过
 func newAccessFilter(entries []string) *accessFilter {
-	f := &accessFilter{cache: map[string]domainCache{}}
+	f := &accessFilter{}
+	f.Set(entries)
+	return f
+}
+
+// Set 运行时整体替换白名单规则（配置保存后热生效，无需重启）。
+// 非法条目记录日志后跳过；同时清空域名解析缓存，避免命中旧记录。
+func (f *accessFilter) Set(entries []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rules := make([]allowRule, 0, len(entries))
 	for _, e := range entries {
 		e = strings.TrimSpace(e)
 		if e == "" {
@@ -44,19 +54,20 @@ func newAccessFilter(entries []string) *accessFilter {
 		switch {
 		case strings.Contains(e, "/"):
 			if _, cidr, err := net.ParseCIDR(e); err == nil {
-				f.rules = append(f.rules, allowRule{cidr: cidr})
+				rules = append(rules, allowRule{cidr: cidr})
 				continue
 			}
 		case net.ParseIP(e) != nil:
-			f.rules = append(f.rules, allowRule{ip: net.ParseIP(e)})
+			rules = append(rules, allowRule{ip: net.ParseIP(e)})
 			continue
 		case looksLikeDomain(e):
-			f.rules = append(f.rules, allowRule{domain: strings.ToLower(e)})
+			rules = append(rules, allowRule{domain: strings.ToLower(e)})
 			continue
 		}
 		cylog.Warnf("访问白名单条目无效，已忽略: %s（支持 IP / CIDR / 域名）", e)
 	}
-	return f
+	f.rules = rules
+	f.cache = map[string]domainCache{}
 }
 
 // looksLikeDomain 粗判域名形态：含点号或为 localhost（其余情况视为非法条目）
@@ -66,10 +77,18 @@ func looksLikeDomain(s string) bool {
 
 // allow 判定客户端 IP 是否允许访问
 func (f *accessFilter) allow(ip net.IP) bool {
-	if len(f.rules) == 0 || ip == nil || ip.IsLoopback() {
+	if ip == nil || ip.IsLoopback() {
 		return true
 	}
-	for _, r := range f.rules {
+	// 快照读取当前规则：允许 Set 热更新时安全替换，且避免持读锁调用 resolve（其内部需写锁）造成死锁
+	f.mu.RLock()
+	rules := make([]allowRule, len(f.rules))
+	copy(rules, f.rules)
+	f.mu.RUnlock()
+	if len(rules) == 0 {
+		return true
+	}
+	for _, r := range rules {
 		switch {
 		case r.ip != nil:
 			if r.ip.Equal(ip) {

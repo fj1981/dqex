@@ -1,5 +1,10 @@
 import { toast } from "sonner"
 import type {
+  AIStatus,
+  AIUsage,
+  AISession,
+  AISessionMeta,
+  AISessionRecord,
   AppConfig,
   CompareOptions,
   CompareResult,
@@ -7,6 +12,7 @@ import type {
   ConnInfo,
   DBConn,
   DBTables,
+  DirBrowseResult,
   DictionaryOptions,
   ExecutionRecord,
   ExportOptions,
@@ -193,6 +199,146 @@ export const getConfig = () => request<ConfigInfo>("/api/config")
 
 export const saveConfig = (config: AppConfig) =>
   request<{ ok: boolean }>("/api/config", { method: "PUT", body: JSON.stringify(config) })
+
+export const browseDirs = (path?: string) =>
+  request<DirBrowseResult>(`/api/config/browse-dirs${path ? `?path=${encodeURIComponent(path)}` : ""}`)
+
+// ---- AI 辅助 SQL ----
+
+export const getAIStatus = () => request<AIStatus>("/api/ai/status")
+
+export const createAISession = (connId: string, db?: string, history?: { role: string; content: string }[], tabId?: string) =>
+  post<AISession>("/api/ai/sessions", { connId, db, history, tabId })
+
+export const deleteAISession = (sessionID: string) =>
+  request<{ ok: boolean }>(`/api/ai/sessions/${encodeURIComponent(sessionID)}`, { method: "DELETE" })
+
+// 删除某连接下指定 tab 的会话（tab 关闭时调用）
+export const deleteAISessionByTab = (connId: string, tabId: string) =>
+  request<{ ok: boolean }>(
+    `/api/ai/sessions/by-tab?connId=${encodeURIComponent(connId)}&tabId=${encodeURIComponent(tabId)}`,
+    { method: "DELETE" },
+  )
+
+export const resetAISession = (sessionID: string) =>
+  post<{ ok: boolean }>(`/api/ai/sessions/${encodeURIComponent(sessionID)}/reset`, {})
+
+// 列出某连接（可选指定 tab）的会话（新→旧，仅元信息），供前端恢复历史对话
+export const listAISessions = (connId: string, tabId?: string) =>
+  request<{ sessions: AISessionMeta[] }>(
+    `/api/ai/sessions?connId=${encodeURIComponent(connId)}${tabId ? `&tabId=${encodeURIComponent(tabId)}` : ""}`,
+  )
+
+// 读取某会话的对话历史（含 messages/usage），供前端恢复展示
+export const getAISessionHistory = (sessionID: string) =>
+  request<{ session: AISessionRecord }>(`/api/ai/sessions/${encodeURIComponent(sessionID)}/history`)
+
+export const getAISessionUsage = (sessionID: string) =>
+  request<{ usage: AIUsage }>(`/api/ai/sessions/${encodeURIComponent(sessionID)}/usage`)
+
+// 进程级累计 token（服务启动以来所有会话总消耗）
+export const getAIProcessUsage = () =>
+  request<{ processUsage: AIUsage }>("/api/ai/usage")
+
+export const aiChat = (sessionID: string, text: string) =>
+  post<{ content: string; usage: AIUsage }>("/api/ai/chat", { sessionID, text })
+
+// SSE 流式对话：fetch + ReadableStream 解析（打字机效果），返回终止函数。
+// 事件：delta {delta} / tool {name,args} / done {usage} / error {message}
+export function aiChatStream(
+  sessionID: string,
+  text: string,
+  handlers: {
+    onDelta: (delta: string) => void
+    onDone: (usage: AIUsage, schemaVerified: boolean) => void
+    onError: (msg: string) => void
+    onTool?: (name: string, args: string) => void
+  },
+  // 会话失效时后端透明重建所需的上下文
+  rebuildCtx?: { connId?: string; db?: string; tabId?: string; history?: { role: string; content: string }[] },
+  action?: string,
+): () => void {
+  const ctrl = new AbortController()
+  // 总超时保险丝：后端也有 ai.timeout_sec 兜底，这里多一层保护，
+  // 保证任何情况下（连接挂起、后端无响应、代理异常）加载态都能被复位。
+  const TIMEOUT_MS = 180_000
+  let finished = false
+  const finish = (msg: string) => {
+    if (finished) return
+    finished = true
+    handlers.onError(msg)
+  }
+  const fuse = setTimeout(() => {
+    finish(`生成超时（${TIMEOUT_MS / 1000} 秒无响应），请重试或检查模型服务`)
+    ctrl.abort()
+  }, TIMEOUT_MS)
+  void (async () => {
+    try {
+      const res = await fetch("/api/ai/chat/stream", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { "X-Auth-Token": authToken } : {}),
+        },
+        body: JSON.stringify({
+          sessionID,
+          text,
+          action,
+          connId: rebuildCtx?.connId,
+          db: rebuildCtx?.db,
+          tabId: rebuildCtx?.tabId,
+          history: rebuildCtx?.history,
+        }),
+        signal: ctrl.signal,
+      })
+      if (!res.ok || !res.body) {
+        finish(`请求失败 (HTTP ${res.status})`)
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ""
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        // 按 \n\n 切分事件
+        let idx: number
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const raw = buf.slice(0, idx)
+          buf = buf.slice(idx + 2)
+          const event = /^event: (.+)$/m.exec(raw)?.[1] ?? ""
+          const data = /^data: (.+)$/m.exec(raw)?.[1]
+          if (!data) continue
+          try {
+            const obj = JSON.parse(data)
+            if (event === "delta" && obj.delta) handlers.onDelta(String(obj.delta))
+            else if (event === "tool" && obj.name && handlers.onTool) handlers.onTool(String(obj.name), String(obj.args ?? ""))
+            else if (event === "done") {
+              finished = true
+              handlers.onDone(obj.usage as AIUsage, obj.schemaVerified === true)
+            } else if (event === "error") {
+              finished = true
+              handlers.onError(String(obj.message ?? "未知错误"))
+            }
+          } catch {
+            // 忽略无法解析的分片
+          }
+        }
+      }
+      // 连接正常关闭但未收到 done/error：视为异常中断
+      if (!finished) finish("连接意外中断，请重试")
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") handlers.onError((e as Error).message)
+    } finally {
+      clearTimeout(fuse)
+    }
+  })()
+  return () => {
+    clearTimeout(fuse)
+    ctrl.abort()
+  }
+}
 
 // ---- 导出文件操作 ----
 

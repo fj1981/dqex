@@ -1,8 +1,11 @@
 # AI 辅助写 SQL 功能计划（CLI + Web）
 
-> 文档状态：计划（待评审 / 可执行）
+> 文档状态：**实施中**（Phase 1 完成，Phase 2 完成，Phase 3 完成）
 > 生成日期：2026-08-17
 > 目标：为 CLI（`dbx sql`）与 Web（查询终端）新增"大模型动态辅助写 SQL"能力。**AI 是完全可选的增量功能：未配置大模型时入口自动隐藏，全链路零侵入，行为与现状完全一致。**
+>
+> **实施进度（2026-08-17）**：依赖已装（Eino v0.9.14 + openai 组件 v0.1.13 + atotto/clipboard）；`internal/llm`（2 文件）✓；`AppConfig.AI` + 掩码/保留密钥 + `Service.AIEnabled()` ✓；`service/ai.go` 会话/元数据缓存/流式编排/token 累计/进程级累计 ✓；CLI `\ai`（生成/run/explain/fix/optimize/continue/again/copy/status/config/clear/help）✓；Web `/api/ai/*`（status/usage/sessions/chat/SSE）✓；`AIPanel` 抽屉（流式 + diff 预览替换/追加 + 进程 token 展示）+ Settings AI 配置区（保存即热生效）✓；设置页左侧导航四区（通用/安全/AI/兼容）分区独立保存 ✓；未配置时入口隐藏 ✓。
+> **与计划的实现差异**：① Web diff 预览用 Monaco `DiffEditor` 侧并排对比，提供「替换编辑器内容 / 追加到末尾」两种确认（计划 §6.3）；② CLI `\ai config` 为逐项引导式写入 `config.yaml`（回车保持原值、`.` 退出），`\ai copy` 用 atotto/clipboard 跨平台复制缓冲区 SQL；③ 设置页四区导航实现（通用/安全/AI/兼容），AI 区独立「保存并立即生效」，其余区「保存后重启生效」；④ 进程级 token 累计：后端 `GET /api/ai/usage`，Web 面板底部展示「进程累计」，CLI `\ai status` 展示进程级消耗；⑤ schema 注入采用「表 + 字段定义」摘要格式（非完整 DDL）：透传表/列注释（`engine.GetTableMeta`）、PII 列脱敏、单表列数上限 80、单条注释截断 60 字、按 rune 安全裁剪不产生乱码（**仅 CLI 全量注入路径保留，Web 端已改为统一工具探索，见 ⑥**）；⑥ **React Agent 统一工具探索（Phase 4）**：Web 侧所有会话统一走 agent 模式——system prompt 只注入轻量「库+表名录」+ 工具使用约束（不再注入全量字段摘要，也不按表数路由），模型通过三个只读工具（`list_databases`/`list_tables`/`get_schema`，复用 engine 元数据，无 SQL 执行能力）自主探索后生成 SQL；agent 使用**会话独立 ChatModel 实例**避免工具绑定竞争，历史含工具轮次按「组」裁剪，SSE 新增 `tool` 事件供前端展示中间态；**CLI 侧保持全量注入（不启用 agent 模式）**。
 
 ---
 
@@ -184,17 +187,17 @@ ai:
 
 | 命令 | 行为 |
 |---|---|
-| `\ai <自然语言>` | 携带当前连接+库表结构上下文调 LLM，整块输出 SQL 并写入缓冲区（可编辑后回车执行）；写操作仍需确认 |
-| `\ai run` | 执行缓冲区中的 SQL（只读直接跑；写操作仍二次确认，过 `checkDangerous`） |
-| `\ai copy` | 复制缓冲区 SQL 到剪贴板 |
-| `\ai again` | 重新生成（换 temperature 或要求更简洁） |
+| `\ai <自然语言>` | 携带当前连接+库表结构上下文调 LLM，整块输出 SQL 并写入缓冲区（可编辑后 `\g` 执行）；写操作仍需确认 |
 | `\ai continue <追问>` / `\ai c` | 基于上一轮会话继续，结果追加进缓冲区 |
 | `\ai explain [SQL]` | 解释当前缓冲区/`lastSQL` 或指定 SQL 的意图/风险 |
 | `\ai fix <报错>` | 带上失败 SQL + 报错让模型修复，结果进缓冲区 |
-| `\ai optimize` | 对缓冲区 SQL 给索引/改写建议 |
-| `\ai clear` / `\ai status` | 清空会话 / 查看配置模型、可用状态、**会话已消耗 tokens（含进程累计）** |
+| `\ai copy` | 复制缓冲区 SQL 到剪贴板 |
+| `\ai clear` / `\ai status` | 清空会话 / 查看配置模型、可用状态、**进程累计 tokens** |
 | `\ai config` | 引导式设置 base_url / api_key / model，写入 config.yaml |
 | `\ai help` | AI 子命令帮助（仅当 AI 可用时显示） |
+
+> 命令精简说明（参考 GitHub Copilot CLI / OpenAI Codex / Claude Code 的命令集）：
+> 移除 `\ai run`（与 `\ai` + `\g` 执行链路冗余）、`\ai again`（直接重输需求即可）、`\ai optimize`（低频，可用 `\ai continue 请优化这段 SQL` 覆盖），并收敛别名（`\ai clear`、`\ai c`）。
 
 实现要点：复用 `handleMeta` 分派 + `sess.tableCache`；缓冲区复用现有写操作确认的编辑链路；生成结果必须过 `classifySQL` + `checkDangerous` + 写操作确认，不绕过安全链路。
 
@@ -272,6 +275,14 @@ ai:
 10. 自动表结构上下文 + 会话记忆（多轮）+ LRU 上限。
 11. Prompt 调优、模型切换、审计完善。
 
+### Phase 4（React Agent 统一工具探索）
+12. `internal/llm/agent.go`：Eino `react.Agent` 封装——`NewReactAgent`（会话独立 ChatModel + 幂等 MessageModifier + MaxStep 16）、`Stream`（用 `GetMessageStreams` 主动 drain 流式消息收集历史 + usage 累加 + tool 事件回调）。**注意**：流式模式必须用 `GetMessageStreams`（而非 `GetMessages`）并逐流 drain，否则工具结果流（`Copy(2)` 扇出）无人消费会导致父流背压阻塞、agent 卡死（前端一直转圈）。
+13. `service/ai.go`：`AISession` 加 `Agent/Sys/ToolSink`；**所有会话统一走 agent 模式**——`AINewSession` 只注入轻量「库+表名录」+ 工具使用约束（不再注入全量字段摘要，也不按表数路由）；新增三个只读工具 `list_databases`/`list_tables`/`get_schema`（复用 engine 元数据，纯只读）；`aiAgentChat` 统一对话入口（工具事件回调 + 历史持久化 + usage 累计）；`trimMessages` 按「组」裁剪兼容工具轮次。
+14. Web：SSE 新增 `tool` 事件；`aiChatStream` 加 `onTool`；`AIPanel` 展示「正在查询 xxx 表结构…」中间态。
+15. 说明：**CLI `\ai` 不启用 agent 模式**（保持全量注入）；模型不支持工具调用时报错提示，后续可加 `ai.agent_enabled` 开关兜底。
+16. **会话失效透明重建**：后端 `AIChatStreamWithFallback` 检测「会话不存在」时，用请求携带的 `connId/db/history` 透明重建并回放历史（保留多轮上下文），SSE `session` 事件回传新会话 ID 供前端复用；前端无需感知会话生命周期（职责后移，消除前端正则匹配错误类型的脆弱逻辑）。
+17. **历史压缩机制（分层，第 1 层已落地）**：`trimMessages` 分两级——① 字符预算 `aiMaxHistoryChars`（约 6K token）超限时按轮次裁剪，**优先丢不含 SQL 的旧轮次、保留含 SQL 的关键轮次**；② 条数上限 `aiMaxMessages` 兜底。**预留演进**：第 2 层为「大模型摘要压缩」（历史过长时用一次 LLM 调用把旧历史压缩成摘要，摘要 prompt 定制保留表名/字段/业务约束/SQL 片段）；第 3 层为「滚动摘要 + 滑动窗口」混合（业界主流终态）。当前未遇到膨胀问题，仅落地零成本的软裁剪作为地基。
+
 ---
 
 ## 10. 审核（风险与对策）
@@ -291,7 +302,9 @@ ai:
 | 风险 | 对策 |
 |---|---|
 | 未配置时误显示入口 | `useAIStatus` 统一 gate + 后端接口兜底报错 |
-| 生成 SQL 质量差/方言错 | temperature 低 + 注入表结构 DDL + 支持 `\ai continue` 多轮修正 |
+| 生成 SQL 质量差/方言错 | temperature 低 + 注入「表 + 字段定义」摘要（含注释）+ 支持 `\ai continue` 多轮修正 |
+| 库表众多注入不全/跨库多表关联 | Web 统一走 React Agent：只注入「库+表名录」，模型经只读工具按需探索后生成；可多轮并发调用工具跨库探索 |
+| 模型不支持工具调用 | agent 模式错误提示明确（含排查建议）；后续加 `ai.agent_enabled` 开关强制回退全量注入 |
 | CLI 与 Web 体验不一致 | 共用 `internal/llm` + `service/ai.go` 编排，前端仅做展示层差异 |
 
 ### 10.3 审核结论

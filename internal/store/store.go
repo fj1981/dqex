@@ -81,6 +81,17 @@ type Store interface {
 	// ClearSQLHistory 清空某连接的历史。
 	ClearSQLHistory(connID string) error
 
+	// ---- SQL 收藏（全局共享，conn_id/db 仅作来源标记） ----
+
+	// AddFavorite 新增一条收藏。
+	AddFavorite(f *SQLFavorite) error
+	// ListFavorites 返回全部收藏（全局共享，不按连接隔离；新→旧）。
+	ListFavorites() ([]*SQLFavorite, error)
+	// DeleteFavorite 删除收藏（按全局唯一 id 定位；无 conn_id 隔离，跨连接可见）。
+	DeleteFavorite(id string) error
+	// RenameFavorite 重命名收藏（按全局唯一 id 定位）。
+	RenameFavorite(id, title string) error
+
 	// ---- SQL 审计（只增不删） ----
 
 	// AppendSQLAudit 追加一条 SQL 审计日志（只追加，不提供删除）。
@@ -96,6 +107,24 @@ type Store interface {
 	LoadWorkspace(connID string) (WorkspaceState, bool)
 	// DeleteWorkspace 删除某连接的工作区。
 	DeleteWorkspace(connID string) error
+
+	// ---- AI 会话（对话历史，按连接持久化） ----
+
+	// SaveAISession 保存/更新一个 AI 会话（整组消息覆盖写）。
+	SaveAISession(rec AISessionRecord) error
+	// LoadAISession 读取指定会话；无记录时 ok=false。
+	LoadAISession(sessionID string) (AISessionRecord, bool)
+	// ListAISessions 列出某连接（可选指定 tab）的会话（新→旧，仅元信息不含消息，供前端恢复选择）。
+	ListAISessions(connID, tabID string) ([]AISessionRecord, error)
+	// DeleteAISession 删除指定会话。
+	DeleteAISession(sessionID string) error
+	// DeleteAISessionByTab 删除某连接下指定 tab 的会话（tab 关闭时调用）。
+	DeleteAISessionByTab(connID, tabID string) error
+	// DeleteAISessionsByConn 删除某连接的全部会话。
+	DeleteAISessionsByConn(connID string) error
+	// PurgeExcessAISessions 清理超额会话：当某连接会话数 > maxPerConn 时，
+	// 删除其中「超过 keepDays 天未活动」的会话（从最旧开始），返回删除条数。
+	PurgeExcessAISessions(maxPerConn int, keepDays int) (int64, error)
 }
 
 // maxSQLHistoryPerConn 每个连接保留的 SQL 历史条数。

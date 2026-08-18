@@ -33,6 +33,11 @@ func runWeb(args *cli.WebArgs) {
 		os.Exit(1)
 	}
 	defer svc.Close() // 释放 SQLite 连接
+	// 全局 debug 日志：--debug flag 或 config 顶层 debug=true 时把日志级别切到 debug（覆盖上方 InitDefault 的默认 info）
+	if args.Debug || svc.Config().Debug {
+		cylog.InitDefault(cylog.WithLevelStr("debug"))
+		cylog.Infof("全局 debug 日志已开启，输出 debug 及以上级别日志（含 AI 链路）")
+	}
 	// 访问来源白名单：--allow flag 优先，未给出时取配置文件 web.allow
 	allow := []string{}
 	for _, item := range strings.Split(args.Allow, ",") {

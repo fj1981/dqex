@@ -237,17 +237,27 @@ type TableColumnInfo struct {
 	AutoIncrement bool   `json:"autoIncrement,omitempty"`
 	Unique        bool   `json:"unique,omitempty"` // 是否唯一约束（非主键）
 	Indexed       bool   `json:"indexed,omitempty"` // 是否有普通索引（非主键/非唯一）
+	Comment       string `json:"comment,omitempty"` // 列注释（可能为空）
 }
 
-// GetTableColumns 获取指定表的列信息（名称/类型/可空/主键/默认值，复用池化连接）
-func GetTableColumns(conn DBConnInfo, tableName string) ([]TableColumnInfo, error) {
+// TableMeta 表级元数据（表注释 + 列信息，供 AI 上下文等场景一次取全）。
+type TableMeta struct {
+	Comment string            // 表注释（可能为空）
+	Columns []TableColumnInfo // 列信息（含列注释）
+}
+
+// GetTableMeta 获取指定表的元数据（表注释 + 列信息含注释，复用池化连接）。
+func GetTableMeta(conn DBConnInfo, tableName string) (TableMeta, error) {
 	cli, err := ConnectPooled(conn, conn.DBName)
 	if err != nil {
-		return nil, err
+		return TableMeta{}, err
 	}
 	info, err := cli.GetTableInfo(tableName)
 	if err != nil {
-		return nil, fmt.Errorf("获取表 %s 的列信息失败: %w", tableName, err)
+		return TableMeta{}, fmt.Errorf("获取表 %s 的元数据失败: %w", tableName, err)
+	}
+	if info == nil {
+		return TableMeta{}, fmt.Errorf("获取表 %s 的元数据失败: 返回空结构", tableName)
 	}
 	cols := info.GetColumns()
 	result := make([]TableColumnInfo, 0, len(cols))
@@ -263,13 +273,23 @@ func GetTableColumns(conn DBConnInfo, tableName string) ([]TableColumnInfo, erro
 			// 唯一约束/普通索引均排除主键（主键自带唯一 + 索引，避免重复标识）
 			Unique:  !isPK && isUnique,
 			Indexed: !isPK && !isUnique && col.IsIndex(),
+			Comment: col.GetComment(),
 		}
 		if d := col.GetDefault(); d != nil {
 			c.Default = *d
 		}
 		result = append(result, c)
 	}
-	return result, nil
+	return TableMeta{Comment: info.GetComment(), Columns: result}, nil
+}
+
+// GetTableColumns 获取指定表的列信息（名称/类型/可空/主键/默认值/注释，复用池化连接）。
+func GetTableColumns(conn DBConnInfo, tableName string) ([]TableColumnInfo, error) {
+	meta, err := GetTableMeta(conn, tableName)
+	if err != nil {
+		return nil, err
+	}
+	return meta.Columns, nil
 }
 
 // firstString 取查询结果行的第一个非空字符串值
