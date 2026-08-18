@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { ArrowDown, ArrowUp, BarChart3, ChevronLeft, ChevronRight, ChevronsUpDown, Columns3, Copy, Download, EyeOff, Filter, Pin, PinOff, X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useGridColors } from "@/lib/theme"
 import { useClickOutside } from "@/lib/useClickOutside"
 import { applyFilters, computeColWidths, computeColumnStat, copyCellValue, copyToClipboard, downloadText, FILTER_OP_LABEL, FILTER_OPS, fmtNum, isNullCell, renderCellText, rowsToCSV, rowToTSV } from "@/lib/table"
 import { Button } from "@/components/ui/button"
@@ -34,6 +35,8 @@ function compareCells(a: unknown, b: unknown): number {
 // 单元格超长截断，悬停 title 查看完整内容；NULL 灰色斜体。支持全量内存排序 + 分页展示。
 export default function ResultGrid({ result }: Props) {
   const { columns, rows } = result
+  // 网格底色：随主题切换响应式重算（见 lib/theme.ts）
+  const grid = useGridColors()
 
   // 分页状态
   const [page, setPage] = useState(1)
@@ -566,8 +569,8 @@ export default function ResultGrid({ result }: Props) {
                             )}
                             style={{
                               ...(frozenLeft !== undefined ? { left: frozenLeft } : {}),
-                              // 所有单元格背景色统一内联绝对颜色（斑马 > 默认）
-                              backgroundColor: (start + ri) % 2 === 1 ? "#f8fafc" : "#ffffff",
+                              // 所有单元格背景色统一内联（斑马 > 默认），色值取自主题变量
+                              backgroundColor: (start + ri) % 2 === 1 ? grid.zebra : grid.base,
                             }}
                             title={`${text}\n（点击查看）`}
                             onClick={() => {

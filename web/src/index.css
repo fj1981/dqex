@@ -25,14 +25,21 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 221.2 83.2% 53.3%;
     --radius: 0.5rem;
+    color-scheme: light;
+    /* 数据网格专用色(HSL 值)：底色/斑马/选中/悬停，供网格内联取色与 CSS 规则共用 */
+    --grid-row-base: 0 0% 100%;
+    --grid-row-zebra: 210 40% 98%;
+    --grid-row-selected: 214 95% 93%;
+    --grid-row-hover: 214 32% 94%;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
+    /* 背景用柔和深蓝灰而非近纯黑，与浅色「柔和深灰」设计语言保持一致 */
+    --background: 224 30% 8%;
     --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
+    --card: 224 30% 8%;
     --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
+    --popover: 224 30% 8%;
     --popover-foreground: 210 40% 98%;
     --primary: 217.2 91.2% 59.8%;
     --primary-foreground: 222.2 47.4% 11.2%;
@@ -47,6 +54,12 @@
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 224.3 76.3% 48%;
+    color-scheme: dark;
+    /* 数据网格专用色(HSL 值)：底色与背景一致，斑马/选中/悬停在暗色下适度提亮 */
+    --grid-row-base: 224 30% 8%;
+    --grid-row-zebra: 224 25% 11%;
+    --grid-row-selected: 217 60% 26%;
+    --grid-row-hover: 217 33% 17%;
   }
 }
 
@@ -146,16 +159,44 @@
   }
 }
 
-/* 右键聚焦行：临时高亮，与 checkbox 选中用同一套视觉（蓝底 #dbeafe）。
+/* 右键聚焦行：临时高亮，与 checkbox 选中用同一套视觉（蓝底）。
    <tr> 上设置背景色在 border-separate 表格中不会透到 <td>，必须作用到每个 <td>。
    用 !important 覆盖 <td> 内联 style 的斑马/默认色，菜单关闭后 focusRow 移除 class 即还原 */
 .row-context-focused > td {
-  background-color: #dbeafe !important;
+  background-color: hsl(var(--grid-row-selected)) !important;
 }
 
 /* 数据表格冻结列 hover：冻结列用内联 style 设绝对色，hover 需覆盖为浅灰 */
 .data-grid-table tbody td[style*="background"]:hover {
-  background-color: #eef2f7 !important;
+  background-color: hsl(var(--grid-row-hover)) !important;
+}
+
+/* ---- JSON 预览暗色适配（@uiw/react-json-view 2.x 通过 --w-rjv-* CSS 变量着色，根容器类名 w-rjv-inner）---- */
+.dark .w-rjv-inner {
+  --w-rjv-color: #0184a6;
+  --w-rjv-key-string: #0184a6;
+  --w-rjv-background-color: transparent;
+  --w-rjv-line-color: #323232;
+  --w-rjv-arrow-color: var(--w-rjv-color);
+  --w-rjv-edit-color: var(--w-rjv-color);
+  --w-rjv-info-color: #656565;
+  --w-rjv-update-color: #ebcb8b;
+  --w-rjv-copied-color: #0184a6;
+  --w-rjv-copied-success-color: #28a745;
+  --w-rjv-curlybraces-color: #1896b6;
+  --w-rjv-brackets-color: #1896b6;
+  --w-rjv-quotes-color: var(--w-rjv-key-string);
+  --w-rjv-quotes-string-color: var(--w-rjv-type-string-color);
+  --w-rjv-type-string-color: #cb4b16;
+  --w-rjv-type-int-color: #268bd2;
+  --w-rjv-type-float-color: #859900;
+  --w-rjv-type-bigint-color: #268bd2;
+  --w-rjv-type-boolean-color: #2aa198;
+  --w-rjv-type-date-color: #586e75;
+  --w-rjv-type-url-color: #649bd8;
+  --w-rjv-type-null-color: #d33682;
+  --w-rjv-type-nan-color: #076678;
+  --w-rjv-type-undefined-color: #586e75;
 }
 
 /* ---- AI 执行过程动画 ---- */

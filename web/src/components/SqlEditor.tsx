@@ -1,6 +1,7 @@
 import Editor, { type OnMount } from "@monaco-editor/react"
 import { useEffect, useMemo, useRef } from "react"
 import { cn } from "@/lib/utils"
+import { useIsDark } from "@/lib/theme"
 import { monaco } from "@/lib/monaco"
 
 interface Props {
@@ -76,6 +77,7 @@ function computeDiff(base: string, target: string): { added: number[]; removed: 
 // diffBase 非空时启用行级 diff 高亮（绿=新增，红=删除），供 AI 采纳预览。
 export default function SqlEditor({ value, onChange, onRun, disabled, className, diffBase, onReady, onSelectionChange }: Props) {
   const { KeyCode, KeyMod } = monaco
+  const isDark = useIsDark()
   const decoRef = useRef<string[]>([])
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
 
@@ -183,7 +185,7 @@ export default function SqlEditor({ value, onChange, onRun, disabled, className,
       <Editor
         language="sql"
         value={value}
-        theme="vs"
+        theme={isDark ? "vs-dark" : "vs"}
         onChange={(v) => onChange(v ?? "")}
         onMount={handleMount}
         options={editorOptions}

@@ -333,27 +333,28 @@ export default function ImportView() {
         }
       />
 
-      <StepWizard steps={STEPS} current={step} onStepClick={(i) => !runningTaskID && setStep(i)} />
+      <Card className="flex flex-1 flex-col gap-5 bg-gradient-to-br from-muted/50 via-muted/15 to-muted/85 p-5 dark:from-muted/30 dark:via-muted/10 dark:to-muted/55">
+        <StepWizard steps={STEPS} current={step} onStepClick={(i) => !runningTaskID && setStep(i)} />
 
-      {/* 单卡宽度与迁移/对比页双卡布局中的卡片同宽（CONN_SINGLE_W），各任务页卡片尺寸统一 */}
-      {step === 0 && (
-        <div className={`mx-auto w-full space-y-4 ${CONN_SINGLE_W}`}>
-          <ConnectionSelect
-            title="目标数据库"
-            subtitle="选择要导入到的数据库连接"
-            value={opts.targetConn}
-            onChange={(name) => set({ targetConn: name })}
-          />
-          {/* 提示位置与迁移/对比页 step0 保持一致：连接卡下方、操作按钮上方 */}
-          <Hint>
-            导入文件需与目标库为同类型数据库（如 MySQL 导出的文件只能导入 MySQL，不支持跨类型转换）。
-          </Hint>
-          <WizardFooter
-            onNext={() => setStep(1)}
-            next={<Button disabled={!opts.targetConn} onClick={() => setStep(1)}>下一步</Button>}
-          />
-        </div>
-      )}
+        {/* 单卡宽度与迁移/对比页双卡布局中的卡片同宽（CONN_SINGLE_W），各任务页卡片尺寸统一 */}
+        {step === 0 && (
+          <div className={`mx-auto w-full space-y-4 ${CONN_SINGLE_W}`}>
+            <ConnectionSelect
+              title="目标数据库"
+              subtitle="选择要导入到的数据库连接"
+              value={opts.targetConn}
+              onChange={(name) => set({ targetConn: name })}
+            />
+            {/* 提示位置与迁移/对比页 step0 保持一致：连接卡下方、操作按钮上方 */}
+            <Hint>
+              导入文件需与目标库为同类型数据库（如 MySQL 导出的文件只能导入 MySQL，不支持跨类型转换）。
+            </Hint>
+            <WizardFooter
+              onNext={() => setStep(1)}
+              next={<Button disabled={!opts.targetConn} onClick={() => setStep(1)}>下一步</Button>}
+            />
+          </div>
+        )}
 
       {step === 1 && (
         <div className="mx-auto flex w-full max-w-3xl min-h-0 flex-1 flex-col gap-4">
@@ -555,6 +556,8 @@ export default function ImportView() {
           }}
         />
       )}
+
+      </Card>
 
       <SaveTaskDialog
         open={saveOpen}

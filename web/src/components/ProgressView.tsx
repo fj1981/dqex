@@ -132,13 +132,13 @@ export default function ProgressView({ taskID, taskType, onSaveTask, onBack, onD
   const statusMeta: Record<string, { label: string; icon: React.ReactNode; cls: string }> = {
     done: {
       label: "执行完成",
-      icon: <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />,
-      cls: "border-green-200 bg-green-50 text-green-800",
+      icon: <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600 dark:text-green-400" />,
+      cls: "border-green-500/30 bg-green-500/10 text-green-800 dark:text-green-300",
     },
     error: {
       label: "执行失败",
       icon: <XCircle className="h-5 w-5 shrink-0 text-destructive" />,
-      cls: "border-red-200 bg-red-50 text-red-800",
+      cls: "border-red-500/30 bg-red-500/10 text-red-800 dark:text-red-300",
     },
     cancelled: {
       label: "已取消",
@@ -148,7 +148,7 @@ export default function ProgressView({ taskID, taskType, onSaveTask, onBack, onD
     running: {
       label: "执行中",
       icon: <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" />,
-      cls: "border-blue-200 bg-blue-50 text-blue-800",
+      cls: "border-blue-500/30 bg-blue-500/10 text-blue-800 dark:text-blue-300",
     },
   }
   const meta = statusMeta[state] || statusMeta.running
@@ -185,7 +185,7 @@ export default function ProgressView({ taskID, taskType, onSaveTask, onBack, onD
           <Button
             variant="outline"
             size="sm"
-            className="h-7 shrink-0 border-red-300 bg-white/60 text-xs text-red-800 hover:bg-white"
+            className="h-7 shrink-0 border-red-500/30 bg-background text-xs text-red-800 dark:text-red-300"
             onClick={() => setErrDetailOpen(true)}
           >
             查看详情
@@ -201,7 +201,7 @@ export default function ProgressView({ taskID, taskType, onSaveTask, onBack, onD
               <XCircle className="h-4 w-4" /> 执行失败详情
             </DialogTitle>
           </DialogHeader>
-          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all rounded-md border bg-red-50/50 p-3 font-mono text-xs leading-relaxed text-red-900">
+          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all rounded-md border border-red-500/30 bg-red-500/10 p-3 font-mono text-xs leading-relaxed text-red-900 dark:text-red-300">
             {errorMsg || progress?.message || "未知错误"}
           </div>
           <div className="flex shrink-0 justify-end gap-2">

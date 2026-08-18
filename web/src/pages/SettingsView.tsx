@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
-import { Bot, FolderCog, FolderOpen, Globe, KeyRound, Loader2, Plus, RefreshCw, Save, ShieldCheck, Trash2 } from "lucide-react"
+import { Bot, FolderCog, FolderOpen, Globe, KeyRound, Loader2, Monitor, Moon, Plus, RefreshCw, Save, ShieldCheck, Sun, Trash2 } from "lucide-react"
+import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import * as api from "@/api"
 import PageHeader from "@/components/PageHeader"
@@ -31,6 +39,8 @@ const TABS: { key: SettingsTab; label: string; desc: string; icon: typeof Folder
 ]
 
 export default function SettingsView() {
+  // 主题：浅色 / 深色 / 跟随系统（与 Header 按钮同源，next-themes 持久化）
+  const { theme, setTheme } = useTheme()
   const [info, setInfo] = useState<ConfigInfo | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -167,6 +177,30 @@ export default function SettingsView() {
 
           {tab === "general" && (
             <div className="space-y-4">
+            <Section title="外观" description="界面主题，即时生效">
+              <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    {theme === "dark" ? <Moon className="h-4 w-4" /> : theme === "light" ? <Sun className="h-4 w-4" /> : <Monitor className="h-4 w-4" />}
+                    主题
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    深色模式降低夜间强光刺激；「跟随系统」随操作系统外观自动切换
+                  </div>
+                </div>
+                <Select value={theme} onValueChange={setTheme}>
+                  <SelectTrigger className="h-8 w-32 shrink-0 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="light">浅色</SelectItem>
+                    <SelectItem value="dark">深色</SelectItem>
+                    <SelectItem value="system">跟随系统</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </Section>
+
             <Section title="数据目录" description="六类数据存储目录；留空 = 由数据目录自动派生">
               <div className="space-y-3">
                 {DIR_FIELDS.map(({ key, label, desc }) => {
@@ -220,7 +254,7 @@ export default function SettingsView() {
                   <div className="flex items-center gap-2 text-sm font-medium">
                     调试日志（Debug）
                     {config.debug && (
-                      <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600">
+                      <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
                         开启
                       </span>
                     )}

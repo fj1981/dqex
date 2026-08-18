@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { HashRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
+import { useTheme } from "next-themes"
 import {
   ArrowLeftRight,
   BookOpenText,
@@ -12,6 +13,8 @@ import {
   FolderOpen,
   HelpCircle,
   Info,
+  Monitor,
+  Moon,
   PanelRightClose,
   PanelRightOpen,
   Plus,
@@ -20,10 +23,12 @@ import {
   Settings,
   ShieldCheck,
   Star,
+  Sun,
   Terminal,
   Trash2,
   Zap,
 } from "lucide-react"
+
 import * as api from "@/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -65,7 +70,7 @@ import {
 import { cn, formatTime, shortPaths } from "@/lib/utils"
 
 const NAV = [
-  { path: "/query", label: "查询浏览", desc: "SQL · 对象 · 表数据", icon: Terminal },
+  { path: "/query", label: "工作台", desc: "SQL · 对象 · 表数据", icon: Terminal },
   { path: "/export", label: "导出", desc: "数据库 → 文件", icon: FileDown },
   { path: "/import", label: "导入", desc: "文件 → 数据库", icon: FileUp },
   { path: "/migrate", label: "迁移", desc: "数据库 → 数据库", icon: ArrowLeftRight },
@@ -76,9 +81,9 @@ const NAV = [
 
 // 历史状态样式：底色胶囊 + 状态圆点，强化状态辨识度
 const STATUS_META: Record<string, { label: string; cls: string; dot: string }> = {
-  done: { label: "成功", cls: "bg-green-50 text-green-700", dot: "bg-green-600" },
-  error: { label: "失败", cls: "bg-red-50 text-destructive", dot: "bg-destructive" },
-  running: { label: "运行中", cls: "bg-blue-50 text-blue-600", dot: "animate-pulse bg-blue-600" },
+  done: { label: "成功", cls: "bg-green-500/10 text-green-700 dark:text-green-400", dot: "bg-green-600" },
+  error: { label: "失败", cls: "bg-red-500/10 text-destructive", dot: "bg-destructive" },
+  running: { label: "运行中", cls: "bg-blue-500/10 text-blue-600 dark:text-blue-400", dot: "animate-pulse bg-blue-600" },
   cancelled: { label: "已取消", cls: "bg-muted text-muted-foreground", dot: "bg-muted-foreground" },
 }
 
@@ -764,7 +769,7 @@ function AuditList({ connId, items }: { connId: string; items: SQLAuditEntry[] }
   const SOURCE_LABEL: Record<string, { text: string; cls: string }> = {
     manual: { text: "手写", cls: "bg-primary/10 text-primary" },
     tree: { text: "浏览", cls: "bg-muted text-muted-foreground" },
-    cell: { text: "编辑", cls: "bg-amber-500/10 text-amber-600" },
+    cell: { text: "编辑", cls: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
   }
 
   const renderValue = (v: unknown): string => {
@@ -867,6 +872,8 @@ function Layout() {
   const setPanelOpen = useAppStore((s) => s.setPanelOpen)
   const panelOpen = useAppStore((s) => s.panelOpen)
   const togglePanel = useAppStore((s) => s.togglePanel)
+  // 主题切换：浅色 / 深色 / 跟随系统（next-themes 持久化到 localStorage）
+  const { theme, setTheme } = useTheme()
   const [aboutOpen, setAboutOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
 
@@ -911,6 +918,25 @@ function Layout() {
         >
           <Settings className={cn("h-4 w-4", location.pathname === "/settings" ? "text-primary" : "text-muted-foreground")} />
         </Button>
+        {/* 主题切换：浅色 / 深色 / 跟随系统（全局入口） */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" title="切换主题">
+              {theme === "dark" ? <Moon className="h-4 w-4 text-muted-foreground" /> : theme === "light" ? <Sun className="h-4 w-4 text-muted-foreground" /> : <Monitor className="h-4 w-4 text-muted-foreground" />}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setTheme("light")}>
+              <Sun className="mr-2 h-3.5 w-3.5" /> 浅色
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setTheme("dark")}>
+              <Moon className="mr-2 h-3.5 w-3.5" /> 深色
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setTheme("system")}>
+              <Monitor className="mr-2 h-3.5 w-3.5" /> 跟随系统
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -948,7 +974,7 @@ function Layout() {
             <Route path="/dictionary" element={<DictionaryView />} />
             <Route path="/settings" element={<SettingsView />} />
             <Route path="/tasks" element={<TaskView />} />
-            {/* 旧数据浏览入口重定向到合并后的查询浏览页 */}
+            {/* 旧数据浏览入口重定向到合并后的工作台页 */}
             <Route path="/browser" element={<Navigate to="/query" replace />} />
           </Routes>
         </main>

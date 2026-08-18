@@ -459,11 +459,12 @@ export default function CompareView() {
         }
       />
 
-      <StepWizard steps={STEPS} current={step} onStepClick={(i) => !runningTaskID && setStep(i)} />
+      <Card className="flex flex-1 flex-col gap-5 bg-gradient-to-br from-muted/50 via-muted/15 to-muted/85 p-5 dark:from-muted/30 dark:via-muted/10 dark:to-muted/55">
+        <StepWizard steps={STEPS} current={step} onStepClick={(i) => !runningTaskID && setStep(i)} />
 
-      {/* 数据源卡片布局共用 ConnectionPair，各任务页卡片尺寸统一 */}
-      {step === 0 && (
-        <ConnectionPair
+        {/* 数据源卡片布局共用 ConnectionPair，各任务页卡片尺寸统一 */}
+        {step === 0 && (
+          <ConnectionPair
           source={{
             title: "源数据库",
             subtitle: "对比基准",
@@ -825,8 +826,8 @@ export default function CompareView() {
         <div className="flex min-h-0 flex-1 flex-col gap-4">
           {taskState === "done" && report ? (
             /* 完成后进度面板压缩为单行状态条，日志可展开，把空间让给报告 */
-            <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800">
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" />
+            <div className="flex items-center gap-3 rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-2 text-sm text-green-800 dark:text-green-300">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
               <span className="font-medium">执行完成</span>
               <span className="text-xs opacity-80">
                 共 {report.summary.total} 项 · 一致 {report.summary.matched} · 差异 {report.summary.total - report.summary.matched}
@@ -876,6 +877,8 @@ export default function CompareView() {
           )}
         </div>
       )}
+
+      </Card>
 
       <SaveTaskDialog
         open={saveOpen}

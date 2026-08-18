@@ -125,9 +125,10 @@ export default function DictionaryView() {
         }
       />
 
-      <StepWizard steps={STEPS} current={step} onStepClick={(i) => runningTaskID ? undefined : setStep(i)} />
+      <Card className="flex flex-1 flex-col gap-5 bg-gradient-to-br from-muted/50 via-muted/15 to-muted/85 p-5 dark:from-muted/30 dark:via-muted/10 dark:to-muted/55">
+        <StepWizard steps={STEPS} current={step} onStepClick={(i) => runningTaskID ? undefined : setStep(i)} />
 
-      {step === 0 && (
+        {step === 0 && (
         <div className={`mx-auto w-full space-y-4 ${CONN_SINGLE_W}`}>
           <ConnectionSelect
             title="源数据库"
@@ -212,6 +213,8 @@ export default function DictionaryView() {
           onBack={resetWizard}
         />
       )}
+
+      </Card>
 
       <SaveTaskDialog
         open={saveOpen}

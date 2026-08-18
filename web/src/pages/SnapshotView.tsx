@@ -290,12 +290,12 @@ export default function SnapshotView() {
           </div>
         </Card>
 
-        {/* 右侧主操作区：固定头部，仅「包含的表」列表区滚动 */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col space-y-4 overflow-hidden">
+        {/* 右侧主操作区：统一工作区卡片，内部按需分区 */}
+        <Card className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden bg-gradient-to-br from-muted/50 via-muted/15 to-muted/85 p-5 dark:from-muted/30 dark:via-muted/10 dark:to-muted/55">
           {detail && (
             <>
               {/* 快照摘要信息块 */}
-              <Card className="shrink-0 p-4">
+              <div className="shrink-0">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
@@ -322,7 +322,7 @@ export default function SnapshotView() {
                     </Button>
                   </div>
                 </div>
-              </Card>
+              </div>
 
               {/* 对比配置 — Section 分区，与其他页面风格一致 */}
               <div className="shrink-0">
@@ -452,7 +452,7 @@ export default function SnapshotView() {
 
               {/* 对比进度 / 报告（在快照信息与表列表下方追加） */}
               {runningTaskID && comparing && (
-                <Card className="shrink-0 p-4">
+                <div className="shrink-0">
                   <ProgressView
                     taskID={runningTaskID}
                     taskType="snapshot_compare"
@@ -461,14 +461,14 @@ export default function SnapshotView() {
                     wide
                     compactLog
                   />
-                </Card>
+                </div>
               )}
 
               {report && (
                 <>
                   {/* 完成后状态条：与实时对比风格一致 */}
-                  <div className="flex shrink-0 items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800">
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" />
+                  <div className="flex shrink-0 items-center gap-3 rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-2 text-sm text-green-800 dark:text-green-300">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
                     <span className="font-medium">执行完成</span>
                     <span className="text-xs opacity-80">
                       共 {report.summary.total} 项 · 一致 {report.summary.matched} · 差异 {report.summary.total - report.summary.matched}
@@ -514,7 +514,7 @@ export default function SnapshotView() {
               <Loader2 className="h-4 w-4 animate-spin" /> 加载快照详情...
             </div>
           )}
-        </div>
+        </Card>
       </div>
 
       <CreateSnapshotDialog

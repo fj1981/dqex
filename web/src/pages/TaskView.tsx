@@ -22,11 +22,11 @@ import { TASK_TYPE_LABEL, type ConnInfo, type ExecutionRecord, type TaskConfig }
 import { formatTime } from "@/lib/utils"
 
 const TYPE_ICON: Record<string, { icon: React.ReactNode; cls: string }> = {
-  export: { icon: <FileDown className="h-5 w-5" />, cls: "bg-blue-50 text-blue-500" },
-  import: { icon: <FileUp className="h-5 w-5" />, cls: "bg-green-50 text-green-500" },
-  migrate: { icon: <ArrowLeftRight className="h-5 w-5" />, cls: "bg-purple-50 text-purple-500" },
-  compare: { icon: <Scale className="h-5 w-5" />, cls: "bg-orange-50 text-orange-500" },
-  dictionary: { icon: <BookOpenText className="h-5 w-5" />, cls: "bg-cyan-50 text-cyan-600" },
+  export: { icon: <FileDown className="h-5 w-5" />, cls: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
+  import: { icon: <FileUp className="h-5 w-5" />, cls: "bg-green-500/10 text-green-600 dark:text-green-400" },
+  migrate: { icon: <ArrowLeftRight className="h-5 w-5" />, cls: "bg-purple-500/10 text-purple-600 dark:text-purple-400" },
+  compare: { icon: <Scale className="h-5 w-5" />, cls: "bg-orange-500/10 text-orange-600 dark:text-orange-400" },
+  dictionary: { icon: <BookOpenText className="h-5 w-5" />, cls: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400" },
 }
 
 // 连接主键（或旧配置中的连接名）转显示名，未命中时回退原值

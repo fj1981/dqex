@@ -109,30 +109,26 @@ export default function ConnectionSelect({ title, subtitle, value, onChange, fil
 
       {/* 摘要条固定渲染（未选连接时为占位）：保证各页卡片高度恒定；fill 模式下钉在底部支撑双卡等高 */}
       <div className={cn(fill ? "mt-auto pt-3" : "mt-3")}>
-        <div className="flex min-h-11 items-center justify-between rounded-md bg-muted/50 px-3 py-2">
+        <div className="flex min-h-11 items-center justify-between gap-x-3 rounded-md bg-muted/50 px-3 py-2">
           {selected ? (
             <>
-              <div className="min-w-0 text-sm text-muted-foreground">
-                <span className="text-xs">
+              <div className="flex min-w-0 items-center gap-x-2 text-sm text-muted-foreground">
+                <span className="truncate text-xs">
                   {selected.conn.Host}:{selected.conn.Port}
                   {selected.conn.DBName ? ` / ${selected.conn.DBName}` : ""}
                   {selected.conn.Service ? ` / ${selected.conn.Service}` : ""}
                   {selected.conn.Schema ? ` / ${selected.conn.Schema}` : ""}
                 </span>
                 {!selected.conn.DBName && !selected.conn.Service && (
-                  <span className="ml-2 text-xs text-amber-600">未指定库</span>
+                  <span className="shrink-0 whitespace-nowrap text-xs text-amber-600">未指定库</span>
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {tested[value] === true && (
-                  <span className="flex items-center gap-1 text-xs font-medium text-green-600">
-                    <CheckCircle2 className="h-3.5 w-3.5" /> 已连通
-                  </span>
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" />
                 )}
                 {tested[value] === false && (
-                  <span className="flex items-center gap-1 text-xs font-medium text-destructive">
-                    <XCircle className="h-3.5 w-3.5" /> 连接失败
-                  </span>
+                  <XCircle className="h-4 w-4 shrink-0 text-destructive" />
                 )}
                 <Button variant="outline" size="sm" className="h-7 text-xs" onClick={doTest} disabled={testing}>
                   {testing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <PlugZap className="mr-1 h-3.5 w-3.5" />}

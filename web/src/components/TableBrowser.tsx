@@ -13,6 +13,7 @@ import CellEditor from "@/components/CellEditor"
 import * as api from "@/api"
 import { deleteTableRows, exportTableExcel, fetchTableData, fetchTableCellValue, getObjectDDL, insertTableRow, updateTableCell } from "@/api/sql"
 import { cn } from "@/lib/utils"
+import { useGridColors } from "@/lib/theme"
 import { computeColWidths, computeColumnStat, copyCellValue, copyToClipboard, downloadText, FILTER_OP_LABEL, FILTER_OPS, fmtNum, isNullCell, renderCellText, rowsToCSV, rowToTSV, rowsToTSV } from "@/lib/table"
 import { useClickOutside } from "@/lib/useClickOutside"
 import type { ColumnFilter, FilterOp, ObjectDDLType, SortSpec, TableColumn, TableViewLayout } from "@/types"
@@ -57,6 +58,8 @@ function isBigField(dataType: string): boolean {
 
 // 对象浏览器：数据（表/视图）+ 结构（表/视图）+ DDL（全部对象类型）
 export default function TableBrowser({ connId, db, name, objType, subTab, page, viewLayout, onSubTabChange, onPageChange, onViewLayoutChange, running, persistFailed, onClearPersistFailed }: Props) {
+  // 网格底色：随主题切换响应式重算（见 lib/theme.ts）
+  const grid = useGridColors()
   const [columns, setColumns] = useState<string[]>([])
   const [rows, setRows] = useState<unknown[][]>([])
   // 页大小：从持久化布局恢复（默认 100）
@@ -1043,104 +1046,104 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
         <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px] font-normal">{meta.label}</Badge>
         {db && <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px] font-normal">{db}</Badge>}
 
-        {/* 数据视图的高频操作 + 「更多」菜单：与对象信息同行（不额外占垂直空间）。
-            常驻高频：列 / 统计 / 新增行；低频（导出/重置/删除）收进「更多」菜单。 */}
-        {subTab === "data" && columns.length > 0 && (
-          <>
-            <span className="ml-2 h-4 w-px shrink-0 bg-border" />
-            {/* 新增行：写入主操作，常驻 */}
-            {objType === "table" && (
-              <Button
-                size="sm"
-                className="h-7 gap-1 px-2 text-xs"
-                onClick={() => { setInserting(true); setInsertValues({}); setSaveError("") }}
-              >
-                <Plus className="h-3.5 w-3.5" /> 新增行
-              </Button>
-            )}
-            {/* 删除选中：写入操作，选中行时常驻显示（重要的写入反馈，不放「更多」菜单） */}
-            {objType === "table" && selectedRows.size > 0 && (
-              <Button
-                variant="destructive"
-                size="sm"
-                className="h-7 gap-1 px-2 text-xs"
-                disabled={deleting}
-                onClick={() => handleDeleteRows(Array.from(selectedRows))}
-              >
-                {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-                删除 {selectedRows.size} 行
-              </Button>
-            )}
-            {/* 「更多」菜单：导出 / 重置视图 */}
-            <div className="relative" ref={moreMenuRef}>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                title="更多操作"
-                onClick={() => setMoreMenuOpen((v) => !v)}
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-              {moreMenuOpen && (
-                <div className="absolute right-0 top-full z-30 mt-1 w-44 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent disabled:pointer-events-none disabled:opacity-40"
-                    disabled={!hasViewState}
-                    onClick={() => { resetView(); setMoreMenuOpen(false) }}
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" /> 重置视图
-                  </button>
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent disabled:pointer-events-none disabled:opacity-40"
-                    disabled={rows.length === 0}
-                    onClick={() => {
-                      downloadText(
-                        `${name}-page${page}-${Date.now()}.csv`,
-                        rowsToCSV(
-                          visibleCols.map((v) => v.name),
-                          rows.map((r) => visibleCols.map((v) => r[v.idx])),
-                        ),
-                      )
-                      setMoreMenuOpen(false)
-                    }}
-                  >
-                    <Download className="h-3.5 w-3.5" /> 导出 CSV（当前页）
-                  </button>
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent disabled:pointer-events-none disabled:opacity-40"
-                    disabled={loadingData}
-                    onClick={async () => {
-                      setMoreMenuOpen(false)
-                      try {
-                        await exportTableExcel({
-                          connId,
-                          db,
-                          table: name,
-                          page: 1,
-                          pageSize: 1,
-                          sortSpecs: sortSpecs.length > 0 ? sortSpecs : undefined,
-                          filters: filters.length > 0 ? filters : undefined,
-                        })
-                      } catch (e) {
-                        setSaveError(e instanceof Error ? e.message : String(e))
-                      }
-                    }}
-                  >
-                    <FileSpreadsheet className="h-3.5 w-3.5" /> 导出 Excel（全表）
-                  </button>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          {/* 数据视图的高频操作：新增行 / 删除 / 更多，放在右侧 Tab 左侧空白处 */}
+          {subTab === "data" && columns.length > 0 && (
+            <>
+              <span className="mr-2 h-4 w-px shrink-0 bg-border" />
+              {/* 新增行：写入主操作，常驻 */}
+              {objType === "table" && (
+                <Button
+                  size="sm"
+                  className="h-7 gap-1 px-2 text-xs"
+                  onClick={() => { setInserting(true); setInsertValues({}); setSaveError("") }}
+                >
+                  <Plus className="h-3.5 w-3.5" /> 新增行
+                </Button>
+              )}
+              {/* 删除选中：写入操作，选中行时常驻显示 */}
+              {objType === "table" && selectedRows.size > 0 && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="h-7 gap-1 px-2 text-xs"
+                  disabled={deleting}
+                  onClick={() => handleDeleteRows(Array.from(selectedRows))}
+                >
+                  {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                  删除 {selectedRows.size} 行
+                </Button>
+              )}
+              {/* 「更多」菜单：导出 / 重置视图 */}
+              <div className="relative" ref={moreMenuRef}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                  title="更多操作"
+                  onClick={() => setMoreMenuOpen((v) => !v)}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+                {moreMenuOpen && (
+                  <div className="absolute right-0 top-full z-30 mt-1 w-44 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent disabled:pointer-events-none disabled:opacity-40"
+                      disabled={!hasViewState}
+                      onClick={() => { resetView(); setMoreMenuOpen(false) }}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" /> 重置视图
+                    </button>
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent disabled:pointer-events-none disabled:opacity-40"
+                      disabled={rows.length === 0}
+                      onClick={() => {
+                        downloadText(
+                          `${name}-page${page}-${Date.now()}.csv`,
+                          rowsToCSV(
+                            visibleCols.map((v) => v.name),
+                            rows.map((r) => visibleCols.map((v) => r[v.idx])),
+                          ),
+                        )
+                        setMoreMenuOpen(false)
+                      }}
+                    >
+                      <Download className="h-3.5 w-3.5" /> 导出 CSV（当前页）
+                    </button>
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent disabled:pointer-events-none disabled:opacity-40"
+                      disabled={loadingData}
+                      onClick={async () => {
+                        setMoreMenuOpen(false)
+                        try {
+                          await exportTableExcel({
+                            connId,
+                            db,
+                            table: name,
+                            page: 1,
+                            pageSize: 1,
+                            sortSpecs: sortSpecs.length > 0 ? sortSpecs : undefined,
+                            filters: filters.length > 0 ? filters : undefined,
+                          })
+                        } catch (e) {
+                          setSaveError(e instanceof Error ? e.message : String(e))
+                        }
+                      }}
+                    >
+                      <FileSpreadsheet className="h-3.5 w-3.5" /> 导出 Excel（全表）
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
           {hasData && (
             <>
+              <span className="mx-2 h-4 w-px shrink-0 bg-border" />
               <button
                 type="button"
                 className={cn(
@@ -1545,7 +1548,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                             {objType === "table" ? (
                               <td
                                 className="sticky left-0 z-10 cursor-pointer select-none px-2 py-1 frozen-col"
-                                style={{ backgroundColor: selected ? "#dbeafe" : (ri) % 2 === 1 ? "#f8fafc" : "#ffffff" }}
+                                style={{ backgroundColor: selected ? grid.selected : ri % 2 === 1 ? grid.zebra : grid.base }}
                                 title={selected ? "取消选中" : "选中该行"}
                                 onClick={(e) => {
                                   e.stopPropagation()
@@ -1569,7 +1572,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                             ) : (
                               <td
                                 className="select-none px-2 py-1 text-right font-mono text-[11px] tabular-nums text-muted-foreground/50"
-                                style={{ backgroundColor: selected ? "#dbeafe" : (ri) % 2 === 1 ? "#f8fafc" : "#ffffff" }}
+                                style={{ backgroundColor: selected ? grid.selected : ri % 2 === 1 ? grid.zebra : grid.base }}
                                 onContextMenu={(e) => {
                                   focusRow(e.currentTarget.closest("tr") as HTMLTableRowElement)
                                   rowMenuRef.current?.show({ rowIndex: ri, colIndex: null })
@@ -1596,13 +1599,13 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                                   style={{
                                     // 冻结列：left 偏移（水平固定位置）
                                     ...(frozenLeft !== undefined ? { left: frozenLeft } : {}),
-                                    // 所有单元格背景色统一用内联绝对颜色（选中 > 斑马 > 默认），
-                                    // 冻结列与非冻结列用同一套色值，避免 Tailwind 类与 hex 不一致
+                                    // 所有单元格背景色统一用内联（选中 > 斑马 > 默认），
+                                    // 色值取自主题变量，深浅色一致
                                     backgroundColor: selected
-                                      ? "#dbeafe"
-                                      : (ri) % 2 === 1
-                                        ? "#f8fafc"
-                                        : "#ffffff",
+                                      ? grid.selected
+                                      : ri % 2 === 1
+                                        ? grid.zebra
+                                        : grid.base,
                                   }}
                                   title={isBig ? "点击加载完整内容" : objType === "table" ? "双击就地编辑" : undefined}
                                   onMouseDown={() => {
@@ -2029,14 +2032,14 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
               <tbody>
                 {struct.map((col, i) => (
                   <tr key={i} className="border-b">
-                    <td className={cn("border-r px-2 py-1 font-medium", i % 2 === 1 && "bg-slate-50")}>{col.name}</td>
-                    <td className={cn("border-r px-2 py-1 text-muted-foreground", i % 2 === 1 && "bg-slate-50")}>{col.dataType}</td>
-                    <td className={cn("border-r px-2 py-1", i % 2 === 1 && "bg-slate-50")}>{col.nullable ? "是" : "否"}</td>
-                    <td className={cn("border-r px-2 py-1", i % 2 === 1 && "bg-slate-50")}>{col.primaryKey ? <TableIcon icon={KeyRound} className="text-amber-500" /> : ""}</td>
-                    <td className={cn("border-r px-2 py-1", i % 2 === 1 && "bg-slate-50")}>{col.unique ? <TableIcon icon={ShieldCheck} className="text-blue-500" /> : ""}</td>
-                    <td className={cn("border-r px-2 py-1", i % 2 === 1 && "bg-slate-50")}>{col.indexed ? <TableIcon icon={ListOrdered} className="text-muted-foreground/70" /> : ""}</td>
-                    <td className={cn("border-r px-2 py-1", i % 2 === 1 && "bg-slate-50")}>{col.autoIncrement ? "✓" : ""}</td>
-                    <td className={cn("px-2 py-1 text-muted-foreground", i % 2 === 1 && "bg-slate-50")}>{col.default || "—"}</td>
+                    <td className={cn("border-r px-2 py-1 font-medium", i % 2 === 1 && "bg-muted/40")}>{col.name}</td>
+                    <td className={cn("border-r px-2 py-1 text-muted-foreground", i % 2 === 1 && "bg-muted/40")}>{col.dataType}</td>
+                    <td className={cn("border-r px-2 py-1", i % 2 === 1 && "bg-muted/40")}>{col.nullable ? "是" : "否"}</td>
+                    <td className={cn("border-r px-2 py-1", i % 2 === 1 && "bg-muted/40")}>{col.primaryKey ? <TableIcon icon={KeyRound} className="text-amber-500" /> : ""}</td>
+                    <td className={cn("border-r px-2 py-1", i % 2 === 1 && "bg-muted/40")}>{col.unique ? <TableIcon icon={ShieldCheck} className="text-blue-500" /> : ""}</td>
+                    <td className={cn("border-r px-2 py-1", i % 2 === 1 && "bg-muted/40")}>{col.indexed ? <TableIcon icon={ListOrdered} className="text-muted-foreground/70" /> : ""}</td>
+                    <td className={cn("border-r px-2 py-1", i % 2 === 1 && "bg-muted/40")}>{col.autoIncrement ? "✓" : ""}</td>
+                    <td className={cn("px-2 py-1 text-muted-foreground", i % 2 === 1 && "bg-muted/40")}>{col.default || "—"}</td>
                   </tr>
                 ))}
               </tbody>

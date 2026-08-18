@@ -5,6 +5,12 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -37,7 +43,7 @@ import { SQL_EXEC_MODE_LABEL, type AIStatus, type ObjectNode, type SQLExecMode }
 // 合并后的类 Navicat 工作区：左侧常驻对象树 + 右侧多 Tab（查询 / 对象）
 // 对象树始终显示，与右侧区域左右分栏；视图/函数/过程按类型分组展示
 export default function WorkspaceLayout() {
-  const { connections } = useAppStore()
+  const { connections, panelOpen } = useAppStore()
   const {
     tabs,
     activeId,
@@ -553,8 +559,8 @@ export default function WorkspaceLayout() {
             </div>
 
             {/* 右侧操作按钮组：脱敏 + 新建查询；连接切换已迁到左侧对象树顶部；
-                pr-9 为右上角展开/收起按钮让位 */}
-            <div className="ml-auto flex shrink-0 items-center gap-2 py-1 pl-3 pr-9">
+                pr-9 为右上角展开/收起按钮让位（面板收起时才需要） */}
+            <div className={cn("ml-auto flex shrink-0 items-center gap-2 py-1 pl-3", !panelOpen && "pr-9")}>
               <label className="flex h-6 items-center gap-1.5 text-[11px] text-muted-foreground" title="敏感列（password/token/secret 等）结果统一打码">
                 <Switch checked={mask} onCheckedChange={setMask} />
                 脱敏
@@ -592,9 +598,9 @@ export default function WorkspaceLayout() {
                 <div className="flex min-w-0 flex-1 overflow-hidden">
                   <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                     {aiPreviewing && (
-                      <div className="z-10 flex shrink-0 items-center gap-2 border-b bg-emerald-50/80 px-3 py-1.5">
-                        <Sparkles className="h-3.5 w-3.5 text-emerald-600" />
-                        <span className="text-xs text-emerald-700">
+                      <div className="z-10 flex shrink-0 items-center gap-2 border-b border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5">
+                        <Sparkles className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                        <span className="text-xs text-emerald-700 dark:text-emerald-300">
                           AI 生成的 SQL 已暂存到编辑器，绿色为新增、红色为删除
                         </span>
                         <div className="ml-auto flex items-center gap-2">

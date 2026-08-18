@@ -4,6 +4,7 @@ import JsonView from "@uiw/react-json-view"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
+import { useIsDark } from "@/lib/theme"
 
 interface Props {
   column: string // 列名
@@ -58,6 +59,7 @@ function isJSONValue(v: unknown): v is object {
 }
 
 export default function CellEditor({ column, dataType, value, nullable, onSave, onCancel, saving, readonly, maximized }: Props) {
+  const isDark = useIsDark()
   const kind = useMemo(() => detectKind(value, dataType), [value, dataType])
   // 内容区高度：最大化时撑满剩余高度，否则用固定 min-h（240px）与 max-h（40vh）
   const boxH = maximized ? "min-h-0 flex-1" : "min-h-[240px] max-h-[40vh]"
@@ -125,6 +127,7 @@ export default function CellEditor({ column, dataType, value, nullable, onSave, 
               height={maximized ? "100%" : "240px"}
               language={kind === "sql" ? "sql" : "xml"}
               value={String(value ?? "")}
+              theme={isDark ? "vs-dark" : "vs"}
               options={{
                 minimap: { enabled: false },
                 fontSize: 12,
@@ -164,6 +167,7 @@ export default function CellEditor({ column, dataType, value, nullable, onSave, 
                   height={maximized ? "100%" : "240px"}
                   language={kind === "sql" ? "sql" : "xml"}
                   value={String(value ?? "")}
+                  theme={isDark ? "vs-dark" : "vs"}
                   options={{
                     minimap: { enabled: false },
                     fontSize: 12,
@@ -192,6 +196,7 @@ export default function CellEditor({ column, dataType, value, nullable, onSave, 
                   height={maximized ? "100%" : "240px"}
                   language={kind === "sql" ? "sql" : kind === "xml" ? "xml" : "plaintext"}
                   value={text}
+                  theme={isDark ? "vs-dark" : "vs"}
                   onChange={(v) => {
                     setText(v ?? "")
                     setJsonError("")

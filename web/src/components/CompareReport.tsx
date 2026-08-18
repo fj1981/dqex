@@ -161,10 +161,10 @@ function qualifiedName(t: CompareTableResult): string {
 }
 
 function statusBadgeOf(t: CompareTableResult) {
-  if (t.status === "source_only") return <Badge variant="secondary" className="bg-amber-50 text-amber-700">仅源有</Badge>
-  if (t.status === "target_only") return <Badge variant="secondary" className="bg-blue-50 text-blue-700">仅目标有</Badge>
-  if ((t.columns?.matched ?? true) && (t.data?.equal ?? true)) return <Badge variant="secondary" className="bg-green-50 text-green-700">一致</Badge>
-  return <Badge variant="secondary" className="bg-red-50 text-red-700">有差异</Badge>
+  if (t.status === "source_only") return <Badge variant="secondary" className="bg-amber-500/10 text-amber-700 dark:text-amber-400">仅源有</Badge>
+  if (t.status === "target_only") return <Badge variant="secondary" className="bg-blue-500/10 text-blue-700 dark:text-blue-400">仅目标有</Badge>
+  if ((t.columns?.matched ?? true) && (t.data?.equal ?? true)) return <Badge variant="secondary" className="bg-green-500/10 text-green-700 dark:text-green-400">一致</Badge>
+  return <Badge variant="secondary" className="bg-red-500/10 text-red-700 dark:text-red-400">有差异</Badge>
 }
 
 // 表差异明细：弹窗内容，列级差异 + 缺失/多出采样行，内部滚动
@@ -175,12 +175,12 @@ function TableDiffDetail({ t }: { t: CompareTableResult }) {
   return (
     <div className="scrollbar-thin max-h-[72vh] space-y-3 overflow-y-auto pr-1">
       {t.status === "source_only" && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
           该表仅存在于源库，目标库中不存在。
         </div>
       )}
       {t.status === "target_only" && (
-        <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+        <div className="rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-800 dark:text-blue-300">
           该表仅存在于目标库，源库中不存在。
         </div>
       )}

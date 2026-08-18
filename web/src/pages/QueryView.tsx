@@ -1,6 +1,6 @@
 import WorkspaceLayout from "@/components/WorkspaceLayout"
 
-// 查询浏览（终端 + 数据浏览合并）：类 Navicat 工作区（对象浏览 tab + 查询 tab + 表数据 tab）
+// 工作台（终端 + 数据浏览合并）：类 Navicat 工作区（对象浏览 tab + 查询 tab + 表数据 tab）
 // 连接选择以内联紧凑下拉形式置于顶部连接栏，不再使用外层 ConnectionSelect 大卡片
 export default function QueryView() {
   return (

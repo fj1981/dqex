@@ -105,7 +105,7 @@ function parseThinking(text: string): { thinking: string; answer: string } {
 function StreamingStatus({ toolHint, hasAnswer }: { toolHint: string; hasAnswer: boolean }) {
   if (toolHint) {
     return (
-      <div className="mb-1.5 inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-medium text-violet-600 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300">
+      <div className="mb-1.5 inline-flex items-center gap-2 rounded-full border border-violet-500/30 bg-violet-500/10 px-2.5 py-1 text-[11px] font-medium text-violet-700 dark:text-violet-300">
         <span className="flex items-center gap-0.5">
           <span className="ai-bounce-dot h-1 w-1 rounded-full bg-violet-500" />
           <span className="ai-bounce-dot h-1 w-1 rounded-full bg-violet-500" />
@@ -610,6 +610,13 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
     stopRef.current = null
     setStreaming(false)
     setToolHint("")
+    // 模型尚未输出任何内容就停止时，移除空占位，避免留下空白 AI 卡片
+    setMessages((m) => {
+      const next = [...m]
+      const last = next[next.length - 1]
+      if (last && last.role === "assistant" && last.content === "" && !last.error) next.pop()
+      return next
+    })
   }
 
   // 请求应用到编辑器：交给父组件做编辑器内 diff 高亮 + 应用/取消确认
@@ -669,7 +676,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
                   <div className="max-w-[85%]">
                     {m.action && m.action !== "generate" ? (
                       <div className="mb-1 flex justify-end">
-                        <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-600 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-300">
                           {m.action === "explain" ? (
                             <BookOpen className="h-3 w-3" />
                           ) : m.action === "optimize" ? (

@@ -624,7 +624,7 @@ export default function TablePicker({
           {/* 树中库名已由父节点体现，仅显示裸表名；title 保留限定名便于悬停确认 */}
           <span className="truncate" title={t}>{stripDB(t)}</span>
           {sourceOnlySet.has(t) && (
-            <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] text-amber-600">{extraLabel}</span>
+            <span className="rounded bg-amber-500/10 px-1 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">{extraLabel}</span>
           )}
           {dataMode === "skip" && (
             <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">不导出数据</span>
@@ -779,12 +779,12 @@ export default function TablePicker({
           </label>
         </div>
         {extraConnId && extraError && (
-          <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
+          <div className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-300">
             目标库表加载失败：{extraError}，无法合并「仅目标库有」的表（树与已选内容仅含源端）。
           </div>
         )}
         {extraConnId && !extraError && extraTree.length === 0 && !loading && (
-          <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
+          <div className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-300">
             目标库返回为空，未合并「仅目标库有」的表（请确认目标连接与库映射是否正确）。
           </div>
         )}
@@ -827,12 +827,12 @@ export default function TablePicker({
                   <span className="flex items-center gap-1.5 text-sm font-medium" title={t}>
                     <Table2 className="h-3.5 w-3.5 text-muted-foreground" /> {t}
                     {isExtra && (
-                      <span className="flex items-center gap-0.5 rounded bg-amber-50 px-1 py-0.5 text-[10px] font-normal text-amber-600">
+                      <span className="flex items-center gap-0.5 rounded bg-amber-500/10 px-1 py-0.5 text-[10px] font-normal text-amber-600 dark:text-amber-400">
                         {extraLabel}
                       </span>
                     )}
                     {cond && (
-                      <span className="flex items-center gap-0.5 rounded bg-blue-50 px-1 py-0.5 text-[10px] font-normal text-blue-600">
+                      <span className="flex items-center gap-0.5 rounded bg-blue-500/10 px-1 py-0.5 text-[10px] font-normal text-blue-600 dark:text-blue-400">
                         <Filter className="h-2.5 w-2.5" /> 有条件
                       </span>
                     )}

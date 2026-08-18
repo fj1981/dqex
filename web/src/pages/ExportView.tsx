@@ -149,22 +149,23 @@ export default function ExportView() {
         }
       />
 
-      <StepWizard steps={STEPS} current={step} onStepClick={(i) => runningTaskID ? undefined : setStep(i)} />
+      <Card className="flex flex-1 flex-col gap-5 bg-gradient-to-br from-muted/50 via-muted/15 to-muted/85 p-5 dark:from-muted/30 dark:via-muted/10 dark:to-muted/55">
+        <StepWizard steps={STEPS} current={step} onStepClick={(i) => runningTaskID ? undefined : setStep(i)} />
 
-      {/* 单卡宽度与迁移/对比页双卡布局中的卡片同宽（CONN_SINGLE_W），各任务页卡片尺寸统一 */}
-      {step === 0 && (
-        <div className={`mx-auto w-full space-y-4 ${CONN_SINGLE_W}`}>
-          <ConnectionSelect
-            title="源数据库"
-            subtitle="选择要导出的数据库连接"
-            value={opts.sourceConn}
-            onChange={(name) => set({ sourceConn: name })}
-          />
-          {/* 提示位置与其他任务页 step0 保持一致：连接卡下方、操作按钮上方 */}
-          <Hint>导出的 SQL 为源库方言格式，之后只能导入到同类型数据库（如 MySQL 导出只能导入 MySQL）。</Hint>
-          <WizardFooter onNext={() => setStep(1)} />
-        </div>
-      )}
+        {/* 单卡宽度与迁移/对比页双卡布局中的卡片同宽（CONN_SINGLE_W），各任务页卡片尺寸统一 */}
+        {step === 0 && (
+          <div className={`mx-auto w-full space-y-4 ${CONN_SINGLE_W}`}>
+            <ConnectionSelect
+              title="源数据库"
+              subtitle="选择要导出的数据库连接"
+              value={opts.sourceConn}
+              onChange={(name) => set({ sourceConn: name })}
+            />
+            {/* 提示位置与其他任务页 step0 保持一致：连接卡下方、操作按钮上方 */}
+            <Hint>导出的 SQL 为源库方言格式，之后只能导入到同类型数据库（如 MySQL 导出只能导入 MySQL）。</Hint>
+            <WizardFooter onNext={() => setStep(1)} />
+          </div>
+        )}
 
       {step === 1 && (
         <div className="space-y-4">
@@ -299,6 +300,7 @@ export default function ExportView() {
           onBack={resetWizard}
         />
       )}
+      </Card>
 
       <SaveTaskDialog
         open={saveOpen}

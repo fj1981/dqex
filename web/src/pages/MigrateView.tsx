@@ -183,11 +183,12 @@ export default function MigrateView() {
         }
       />
 
-      <StepWizard steps={STEPS} current={step} onStepClick={(i) => !runningTaskID && setStep(i)} />
+      <Card className="flex flex-1 flex-col gap-5 bg-gradient-to-br from-muted/50 via-muted/15 to-muted/85 p-5 dark:from-muted/30 dark:via-muted/10 dark:to-muted/55">
+        <StepWizard steps={STEPS} current={step} onStepClick={(i) => !runningTaskID && setStep(i)} />
 
-      {/* 数据源卡片布局共用 ConnectionPair，各任务页卡片尺寸统一 */}
-      {step === 0 && (
-        <ConnectionPair
+        {/* 数据源卡片布局共用 ConnectionPair，各任务页卡片尺寸统一 */}
+        {step === 0 && (
+          <ConnectionPair
           source={{
             title: "源数据库",
             subtitle: "从中读取结构与数据",
@@ -332,6 +333,7 @@ export default function MigrateView() {
           }}
         />
       )}
+      </Card>
 
       <SaveTaskDialog
         open={saveOpen}

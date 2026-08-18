@@ -256,6 +256,27 @@ dbx sql -c 生产库
 dbx (mysql @ ...)> \ai 帮我统计昨日新增用户数
 ```
 
+**`\ai` 子命令一览**（在 `dbx sql` 交互终端内使用）：
+
+| 命令 | 说明 |
+|---|---|
+| `\ai <需求>` | 生成 SQL 到缓冲区，可 `\e` 编辑、`\g` 执行 |
+| `\ai explain [SQL]` | 解释 SQL，缺省用缓冲区中的 SQL |
+| `\ai fix [报错信息]` | 修复缓冲区中的 SQL，可附带报错信息 |
+| `\ai continue <补充>` | 基于上文继续补充生成 |
+| `\ai copy` | 复制缓冲区 SQL 到系统剪贴板 |
+| `\ai status` | 查看配置状态、上下文消息数与 token 统计 |
+| `\ai config` | 引导式修改 AI 配置（写回 config.yaml，Web 端下次启动读取） |
+| `\ai clear` | 重置当前会话（清空上下文与 token 统计） |
+| `\ai help` | 显示以上帮助 |
+
+```bash
+# 示例：生成 → 修复 → 执行
+dbx (mysql @ ...)> \ai 统计每个部门的人数
+dbx (mysql @ ...)> \ai fix 报错: 字段 dept 不存在
+dbx (mysql @ ...)> \g
+```
+
 > 依赖 `cloudwego/eino`（`go.mod` 中为 indirect 且固定版本，功能可选，升级不影响核心链路）。
 
 ---
