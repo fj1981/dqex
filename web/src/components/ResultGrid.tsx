@@ -34,7 +34,10 @@ function compareCells(a: unknown, b: unknown): number {
 // 前端分页结果表：查询结果一次性返回后在前端切页。
 // 单元格超长截断，悬停 title 查看完整内容；NULL 灰色斜体。支持全量内存排序 + 分页展示。
 export default function ResultGrid({ result }: Props) {
-  const { columns, rows } = result
+  const { columns: rawColumns, rows: rawRows } = result
+  // 兼容写语句等无结果集场景（后端 columns/rows 可能为 null）
+  const columns = rawColumns ?? []
+  const rows = rawRows ?? []
   // 网格底色：随主题切换响应式重算（见 lib/theme.ts）
   const grid = useGridColors()
 
@@ -647,7 +650,7 @@ export default function ResultGrid({ result }: Props) {
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t px-2 py-1.5">
         <div className="flex items-center gap-2">
           <span className="text-xs tabular-nums text-muted-foreground">
-            共 {filteredRows.length} 行
+            共 {filteredRows.length} 行 · {result.elapsedMs} ms
           </span>
           <Button
             variant="outline"

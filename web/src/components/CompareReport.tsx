@@ -509,7 +509,7 @@ export function CompareReport({ result, onSaveTask, onRestart }: { result: Compa
                           <span>
                             {t.columns.matched
                               ? "结构一致"
-                              : `结构: +${t.columns.sourceOnly.length} -${t.columns.targetOnly.length} ±${t.columns.different.length}`}
+                              : `结构: +${t.columns.targetOnly.length} -${t.columns.sourceOnly.length} ±${t.columns.different.length}`}
                           </span>
                         )}
                         {t.data && (
@@ -539,7 +539,7 @@ export function CompareReport({ result, onSaveTask, onRestart }: { result: Compa
                   detail.columns
                     ? detail.columns.matched
                       ? "结构一致"
-                      : `结构差异 +${detail.columns.sourceOnly.length} -${detail.columns.targetOnly.length} ±${detail.columns.different.length}`
+                      : `结构差异 +${detail.columns.targetOnly.length} -${detail.columns.sourceOnly.length} ±${detail.columns.different.length}`
                     : "",
                   detail.data ? tableDataDesc(detail.data) : "",
                 ].filter(Boolean).join(" · ")}

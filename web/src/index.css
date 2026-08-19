@@ -398,19 +398,7 @@
   opacity: 0.6;
 }
 
-/* AI 采纳预览：编辑器内行级 diff 高亮（绿=新增，红=删除） */
-.monaco-editor .ai-diff-added {
-  background: rgba(16, 185, 129, 0.15);
-}
-.monaco-editor .ai-diff-added-gutter {
-  background: rgba(16, 185, 129, 0.35);
-}
-.monaco-editor .ai-diff-removed {
-  background: rgba(239, 68, 68, 0.15);
-}
-.monaco-editor .ai-diff-removed-gutter {
-  background: rgba(239, 68, 68, 0.35);
-}
+/* AI 采纳预览：Monaco DiffEditor inline 模式已内置差异高亮（绿=新增，红=删除），无需自定义样式 */
 
 /* ---- Monaco 编辑器背景统一 ---- */
 /* 编辑器使用内置 vs/vs-dark 主题（语法高亮对比度稳定），仅用 CSS 把壳层背景覆盖为

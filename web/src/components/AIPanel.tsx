@@ -1,4 +1,5 @@
 import { isValidElement, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { toast } from "sonner"
 import {
   BookOpen,
@@ -148,25 +149,39 @@ function CollapsibleContent({ children, maxHeight = 320, live = false }: { child
 
   // 折叠态：定位到「首个 SQL 代码块」位置，使末尾的 SQL（用户核心诉求）优先可见，
   // 前面的解释文字折叠到上方。无代码块时回到顶部。
-  // 注意：用 el.scrollTop 直接滚动自身容器，而非 scrollIntoView——
-  // 后者会级联滚动所有祖先滚动容器（含外层对话区），导致对话区滚动位置错乱。
+  // 使用 IntersectionObserver 监听代码块可见性，自动触发滚动
   useEffect(() => {
     const el = innerRef.current
-    if (!el) return
-    // 无论是否折叠/溢出，只要有 SQL 代码块就尝试滚动到其位置（确保首次渲染时操作区可见）
+    if (!el || !overflow || !collapsed) return
+    
+    // 查找首个 SQL 代码块
     const codeBlock = el.querySelector<HTMLElement>("pre")
-    if (codeBlock) {
-      // 检查代码块是否在可视区域内，如果不在则滚动
-      const containerRect = el.getBoundingClientRect()
-      const blockRect = codeBlock.getBoundingClientRect()
-      // 如果代码块顶部低于容器底部，或底部高于容器顶部，说明不可见
-      if (blockRect.bottom > containerRect.bottom || blockRect.top < containerRect.top) {
-        el.scrollTop = codeBlock.offsetTop - 8 // 留一点上边距
-      }
-    } else if (overflow && collapsed) {
-      // 无代码块且处于折叠溢出状态时回到顶部
+    if (!codeBlock) {
       el.scrollTop = 0
+      return
     }
+    
+    // 创建 IntersectionObserver 监听代码块可见性
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          // 如果代码块完全不可见（intersectionRatio === 0），滚动到其位置
+          if (entry.intersectionRatio === 0 && !entry.isIntersecting) {
+            el.scrollTop = codeBlock.offsetTop - 8
+          }
+        })
+      },
+      {
+        root: el, // 以容器为根
+        threshold: 0, // 只要有一点可见就不触发
+        rootMargin: "0px"
+      }
+    )
+    
+    observer.observe(codeBlock)
+    
+    // 清理函数
+    return () => observer.disconnect()
   }, [overflow, collapsed, children])
 
   if (!overflow) {
@@ -246,11 +261,21 @@ function CodeBlock({ text, lang, isSql, hasSelection, schemaVerified, onApplySql
   onApplySql: (sql: string, action: "replace_all" | "replace_selection" | "insert_cursor" | "append") => void
 }) {
   const [copied, setCopied] = useState(false)
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  
   const copy = async () => {
+    // 清除之前的定时器（防止快速点击导致多个定时器叠加）
+    if (copyTimerRef.current) {
+      clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = null
+    }
     try {
       await navigator.clipboard.writeText(text)
       setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
+      copyTimerRef.current = setTimeout(() => {
+        setCopied(false)
+        copyTimerRef.current = null
+      }, 1500)
     } catch {
       toast.error("复制失败，请手动复制")
     }
@@ -404,6 +429,16 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
   const scrollRef = useRef<HTMLDivElement>(null)
   // 内联 diff 预览：展开预览的消息索引（-1 表示不展开）
 
+  // 虚拟滚动器：只渲染可视区域内的消息，支持大量消息流畅滚动
+  const virtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 120, // 估算每条消息高度（会根据实际渲染调整）
+    overscan: 3, // 预渲染上下各 3 条，避免滚动白屏
+    // 使用动态尺寸：根据实际渲染高度自动调整
+    measureElement: (el) => el.getBoundingClientRect().height,
+  })
+
   // 跟踪用户是否在底部（用于智能跟随滚动）
   const isAtBottomRef = useRef(true) // 默认认为在底部
 
@@ -431,14 +466,27 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
     if (!el || !isAtBottomRef.current) return
 
     // 用 rAF + setTimeout 双重确保 DOM 完全渲染后再滚动
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        if (isAtBottomRef.current) {
-          el.scrollTop = el.scrollHeight
+    let cancelled = false
+    const raf = requestAnimationFrame(() => {
+      const timer = setTimeout(() => {
+        if (!cancelled && isAtBottomRef.current) {
+          // 虚拟滚动：滚动到最后一个虚拟项的底部
+          const virtualItems = virtualizer.getVirtualItems()
+          const lastItem = virtualItems[virtualItems.length - 1]
+          if (lastItem) {
+            el.scrollTop = lastItem.start + lastItem.size - el.clientHeight
+          } else {
+            el.scrollTop = el.scrollHeight
+          }
         }
       }, 50) // 给 DOM 渲染留一点时间
+      return () => clearTimeout(timer)
     })
-  }, [messages])
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(raf)
+    }
+  }, [messages, virtualizer])
 
   // 拉取进程级 token 累计（每次 done 后也刷新）
   const refreshProcUsage = useCallback(() => {
@@ -540,12 +588,18 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
   const messagesRef = useRef(messages)
   messagesRef.current = messages
 
+  // 跟踪是否正在流式输出（用于防止重复发送）
+  const streamingRef = useRef(false)
+  useEffect(() => {
+    streamingRef.current = streaming
+  }, [streaming])
+
   // 核心发送逻辑：text 为任务文本，action 为本次对话动作（generate/explain/fix/optimize）。
   // 与输入框状态解耦：既可被「发送」按钮调用，也可被外部一键修复触发。
   const doSend = useCallback(
     async (text: string, action: AiMode) => {
       const task = text.trim()
-      if (!task || streaming) return
+      if (!task || streamingRef.current) return
       setInput("")
       setMessages((m) => [...m, { role: "user", content: task, action }])
       setStreaming(true)
@@ -615,7 +669,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
         setToolHint("")
       }
     },
-    [streaming, ensureSession, appendError, connId, db, tabId, refreshProcUsage],
+    [ensureSession, appendError, connId, db, tabId, refreshProcUsage],
   )
 
   // 「发送」按钮：读取输入框文本 + 当前 action；解释/修复/优化自动带上当前编辑器 SQL
@@ -692,79 +746,106 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
       </div>
 
       {/* 消息区 */}
-      <div ref={scrollRef} className="scrollbar-thin flex-1 overflow-y-auto">
-        <div className="space-y-3 p-3">
-          {messages.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 pt-8 text-center text-xs text-muted-foreground">
-              <Bot className="h-8 w-8 text-muted-foreground/50" />
-              <p>描述需求生成 SQL，或咨询表结构 / 字段 / 关联关系等信息</p>
-              <p className="text-[11px]">解释 / 优化 / 修复可在编辑器工具栏或报错卡片一键触发，生成的 SQL 请人工审核后再执行</p>
-            </div>
-          ) : (
-            messages.map((m, i) =>
-              m.role === "user" ? (
-                <div key={i} className="flex justify-end">
-                  <div className="max-w-[85%]">
-                    {m.action && m.action !== "generate" ? (
-                      <div className="mb-1 flex justify-end">
-                        <span className="inline-flex items-center gap-1 rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-300">
-                          {m.action === "explain" ? (
-                            <BookOpen className="h-3 w-3" />
-                          ) : m.action === "optimize" ? (
-                            <Gauge className="h-3 w-3" />
-                          ) : (
-                            <Wrench className="h-3 w-3" />
-                          )}
-                          {ACTION_LABEL[m.action]}
-                        </span>
+      <div ref={scrollRef} className="scrollbar-thin flex-1 overflow-y-auto relative">
+        {messages.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 pt-8 text-center text-xs text-muted-foreground">
+            <Bot className="h-8 w-8 text-muted-foreground/50" />
+            <p>描述需求生成 SQL，或咨询表结构 / 字段 / 关联关系等信息</p>
+            <p className="text-[11px]">解释 / 优化 / 修复可在编辑器工具栏或报错卡片一键触发，生成的 SQL 请人工审核后再执行</p>
+          </div>
+        ) : (
+          // 虚拟滚动容器：用总高度撑开滚动条
+          <div
+            style={{
+              height: `${virtualizer.getTotalSize()}px`,
+              width: "100%",
+              position: "relative",
+            }}
+          >
+            {/* 只渲染可视区域内的消息 */}
+            {virtualizer.getVirtualItems().map((virtualItem) => {
+              const m = messages[virtualItem.index]
+              const i = virtualItem.index
+              
+              return (
+                <div
+                  key={m.role + i}
+                  ref={virtualizer.measureElement} // 用于动态测量高度
+                  data-index={virtualItem.index} // react-virtual 需要这个属性
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                  className="p-3"
+                >
+                  {m.role === "user" ? (
+                    <div className="flex justify-end">
+                      <div className="max-w-[85%]">
+                        {m.action && m.action !== "generate" ? (
+                          <div className="mb-1 flex justify-end">
+                            <span className="inline-flex items-center gap-1 rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-300">
+                              {m.action === "explain" ? (
+                                <BookOpen className="h-3 w-3" />
+                              ) : m.action === "optimize" ? (
+                                <Gauge className="h-3 w-3" />
+                              ) : (
+                                <Wrench className="h-3 w-3" />
+                              )}
+                              {ACTION_LABEL[m.action]}
+                            </span>
+                          </div>
+                        ) : null}
+                        <div className="rounded-lg bg-primary/10 px-3 py-2 text-xs">
+                          <CollapsibleContent maxHeight={240}>
+                            <div className="whitespace-pre-wrap">{m.content}</div>
+                          </CollapsibleContent>
+                        </div>
                       </div>
-                    ) : null}
-                    <div className="rounded-lg bg-primary/10 px-3 py-2 text-xs">
-                      <CollapsibleContent maxHeight={240}>
-                        <div className="whitespace-pre-wrap">{m.content}</div>
-                      </CollapsibleContent>
                     </div>
-                  </div>
-                </div>
-              ) : m.content || m.error || (streaming && i === messages.length - 1) ? (
-                <div key={i} className="flex justify-start">
-                  <div
-                    className={`max-w-[92%] rounded-lg border px-3 py-2 text-xs ${
-                      m.error ? "border-destructive/40 bg-destructive/10 text-destructive" : "bg-muted/40"
-                    }`}
-                  >
-                    <div className="mb-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                      <Sparkles className={`h-3 w-3 ${m.error ? "text-destructive" : "text-violet-500"}`} />
-                      AI
+                  ) : m.content || m.error || (streaming && i === messages.length - 1) ? (
+                    <div className="flex justify-start">
+                      <div
+                        className={`max-w-[92%] rounded-lg border px-3 py-2 text-xs ${
+                          m.error ? "border-destructive/40 bg-destructive/10 text-destructive" : "bg-muted/40"
+                        }`}
+                      >
+                        <div className="mb-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                          <Sparkles className={`h-3 w-3 ${m.error ? "text-destructive" : "text-violet-500"}`} />
+                          AI
+                        </div>
+                        {(() => {
+                          const parsed = parseThinking(m.content)
+                          const isStreamingLast = streaming && i === messages.length - 1
+                          return (
+                            <>
+                              {isStreamingLast ? <StreamingStatus toolHint={toolHint} hasAnswer={!!parsed.answer} /> : null}
+                              {parsed.thinking ? (
+                                <ThinkingBlock text={parsed.thinking} defaultOpen={isStreamingLast} />
+                              ) : null}
+                              {parsed.answer ? (
+                                <CollapsibleContent live={isStreamingLast}>
+                                  <MarkdownContent
+                                    content={parsed.answer}
+                                    hasSelection={!!hasSelection}
+                                    schemaVerified={m.schemaVerified === true}
+                                    onApplySql={requestApply}
+                                  />
+                                </CollapsibleContent>
+                              ) : null}
+                            </>
+                          )
+                        })()}
+                      </div>
                     </div>
-                    {(() => {
-                      const parsed = parseThinking(m.content)
-                      const isStreamingLast = streaming && i === messages.length - 1
-                      return (
-                        <>
-                          {isStreamingLast ? <StreamingStatus toolHint={toolHint} hasAnswer={!!parsed.answer} /> : null}
-                          {parsed.thinking ? (
-                            <ThinkingBlock text={parsed.thinking} defaultOpen={isStreamingLast} />
-                          ) : null}
-                          {parsed.answer ? (
-                            <CollapsibleContent live={isStreamingLast}>
-                              <MarkdownContent
-                                content={parsed.answer}
-                                hasSelection={!!hasSelection}
-                                schemaVerified={m.schemaVerified === true}
-                                onApplySql={requestApply}
-                              />
-                            </CollapsibleContent>
-                          ) : null}
-                        </>
-                      )
-                    })()}
-                  </div>
+                  ) : null}
                 </div>
-              ) : null,
-            )
-          )}
-        </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       <Separator />

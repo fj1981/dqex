@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels"
-import { AlertCircle, Braces, Check, ChevronLeft, ChevronRight, Code2, FunctionSquare, List, Loader2, Plus, Sparkles, Star, Table2, View, X } from "lucide-react"
+import { AlertCircle, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, FunctionSquare, List, Loader2, Plus, Sparkles, Star, Table2, View, X } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -17,6 +17,7 @@ import {
   SelectTrigger,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -26,7 +27,7 @@ import {
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 import { setSqlEditor } from "@/lib/editorRef"
-import { formatEditorSQL } from "@/lib/sqlFormat"
+import { formatEditorSQL, formatSQL } from "@/lib/sqlFormat"
 import { useClickOutside } from "@/lib/useClickOutside"
 import { defaultFavoriteTitle } from "@/lib/sql"
 import { prompt } from "@/components/ui/alert-dialog"
@@ -118,6 +119,20 @@ export default function WorkspaceLayout() {
   const [canScrollRight, setCanScrollRight] = useState(false)
   // tab 纵向列表弹层：点击按钮展开，列出全部 tab 供快速激活
   const [tabListOpen, setTabListOpen] = useState(false)
+  // 实际执行 SQL 详情弹层：点击「实际执行」语句查看完整内容（展示格式化后语句）
+  const [sqlDetail, setSqlDetail] = useState<string | null>(null)
+  const [sqlDetailFormatted, setSqlDetailFormatted] = useState<string>("")
+  useEffect(() => {
+    if (!sqlDetail) return
+    let alive = true
+    // 弹窗内展示格式化后的 SQL；失败时回退原文
+    formatSQL(sqlDetail)
+      .then((f) => alive && setSqlDetailFormatted(f))
+      .catch(() => alive && setSqlDetailFormatted(sqlDetail))
+    return () => {
+      alive = false
+    }
+  }, [sqlDetail])
   const tabListRef = useRef<HTMLDivElement>(null)
   useClickOutside(tabListRef, () => setTabListOpen(false), tabListOpen)
 
@@ -599,39 +614,6 @@ export default function WorkspaceLayout() {
               <Panel id="editor" defaultSize="50" minSize="15" className="flex min-h-0 flex-col overflow-hidden">
                 <div className="flex min-w-0 flex-1 overflow-hidden">
                   <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                    {aiPreviewing && (
-                      <div className="z-10 flex shrink-0 items-center gap-2 border-b border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5">
-                        <Sparkles className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                        <span className="text-xs text-emerald-700 dark:text-emerald-300">
-                          AI 生成的 SQL 已暂存到编辑器，绿色为新增、红色为删除
-                        </span>
-                        <div className="ml-auto flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            className="h-6 gap-1 text-xs"
-                            onClick={() => {
-                              setAiPreviewing(false)
-                              setAiPreviewBase("")
-                              toast.success("已应用 AI 生成的 SQL")
-                            }}
-                          >
-                            <Check className="h-3.5 w-3.5" /> 应用
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 gap-1 text-xs"
-                            onClick={() => {
-                              updateTabSql(queryActive.id, aiPreviewBase)
-                              setAiPreviewing(false)
-                              setAiPreviewBase("")
-                            }}
-                          >
-                            <X className="h-3.5 w-3.5" /> 取消
-                          </Button>
-                        </div>
-                      </div>
-                    )}
                     <SqlEditor
                       value={queryActive.sql}
                       onChange={(sql) => updateTabSql(queryActive.id, sql)}
@@ -639,6 +621,18 @@ export default function WorkspaceLayout() {
                       disabled={running}
                       placeholder="SELECT * FROM 表名;  (Cmd/Ctrl + Enter 执行，选中可仅执行选中部分)"
                       diffBase={aiPreviewing ? aiPreviewBase : undefined}
+                      onApply={() => {
+                        // 确认替换：保留当前编辑器内容，退出对比模式
+                        setAiPreviewBase("")
+                        setAiPreviewing(false)
+                        toast.success("已应用 AI 生成的 SQL")
+                      }}
+                      onCancel={() => {
+                        // 取消：还原为替换前的原内容
+                        updateTabSql(queryActive.id, aiPreviewBase)
+                        setAiPreviewBase("")
+                        setAiPreviewing(false)
+                      }}
                       onReady={(ed) => {
                         sqlEditorRef.current = ed
                         setSqlEditor(ed)
@@ -731,10 +725,16 @@ export default function WorkspaceLayout() {
                     {queryActive.results.length > 0 && (() => {
                       const r = queryActive.results[queryActive.activeResult] ?? queryActive.results[0]
                       if (r.error) return null
+                      // 行数与耗时统一在结果网格底部展示，这里只保留写操作影响行数与多结果集提示
+                      const text = r.isWrite
+                        ? `影响 ${r.affectedRows} 行`
+                        : queryActive.results.length > 1
+                          ? `共 ${queryActive.results.length} 个结果集`
+                          : ""
+                      if (!text) return null
                       return (
                         <span className="text-xs tabular-nums text-muted-foreground">
-                          {queryActive.results.length > 1 ? `共 ${queryActive.results.length} 个结果集 · ` : ""}
-                          {r.isWrite ? `影响 ${r.affectedRows} 行` : `${r.rowCount} 行`} · {r.elapsedMs} ms
+                          {text}
                         </span>
                       )
                     })()}
@@ -861,16 +861,44 @@ export default function WorkspaceLayout() {
                             {/* 实际执行 SQL：展示数据库真实收到的语句 */}
                             <div className="flex shrink-0 items-center gap-2 rounded-md border bg-muted/40 px-2.5 py-1.5">
                               <span className="shrink-0 text-[11px] text-muted-foreground">实际执行</span>
-                              <code
-                                className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground/80"
-                                title={r.sql}
+                              <button
+                                type="button"
+                                className="min-w-0 flex-1 cursor-pointer truncate text-left font-mono text-[12px] text-foreground/80 hover:text-foreground hover:underline hover:decoration-dotted"
+                                title="点击查看完整 SQL"
+                                onClick={() => setSqlDetail(r.sql)}
                               >
                                 {r.sql}
-                              </code>
+                              </button>
                             </div>
-                            <div className="min-h-0 flex-1">
-                              <ResultGrid result={r} />
-                            </div>
+                            {r.isWrite || !r.rows ? (
+                              // 写语句无结果集：不渲染 ResultGrid，展示成功状态卡片（影响行数 + 耗时）
+                              <div className="flex min-h-0 flex-1 items-center justify-center">
+                                <div className="flex items-center gap-5 rounded-lg border bg-muted/30 px-6 py-4">
+                                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500/15">
+                                    <Check className="h-5 w-5 text-emerald-500" />
+                                  </div>
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="text-sm font-medium">执行成功</span>
+                                    <span className="text-xs text-muted-foreground">写语句 · 无结果集</span>
+                                  </div>
+                                  <div className="h-8 w-px shrink-0 bg-border" />
+                                  <div className="flex items-center gap-6">
+                                    <div className="flex flex-col gap-0.5">
+                                      <span className="text-[11px] text-muted-foreground">影响行数</span>
+                                      <span className="text-sm font-medium tabular-nums">{r.affectedRows}</span>
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                      <span className="text-[11px] text-muted-foreground">耗时</span>
+                                      <span className="text-sm font-medium tabular-nums">{r.elapsedMs} ms</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="min-h-0 flex-1">
+                                <ResultGrid result={r} />
+                              </div>
+                            )}
                           </>
                         )
                       })()}
@@ -992,6 +1020,32 @@ export default function WorkspaceLayout() {
           )}
         </main>
       </div>
+
+      {/* 实际执行 SQL 详情弹窗：完整语句 + 一键复制 */}
+      <Dialog open={sqlDetail !== null} onOpenChange={(v) => !v && setSqlDetail(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>实际执行 SQL</DialogTitle>
+          </DialogHeader>
+          <pre className="h-[50vh] max-h-[60vh] overflow-auto whitespace-pre rounded-md border bg-muted/40 p-3 font-mono text-[12px] leading-5 text-foreground/90">
+            {sqlDetailFormatted || sqlDetail}
+          </pre>
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1 px-2 text-xs"
+              onClick={async () => {
+                if (!sqlDetail) return
+                await navigator.clipboard.writeText(sqlDetailFormatted || sqlDetail)
+                toast.success("已复制")
+              }}
+            >
+              <Copy className="h-3.5 w-3.5" /> 复制
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
