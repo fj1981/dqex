@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ChevronRight, Database, FileCode2, FolderTree, FunctionSquare, Loader2, Table2, View } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -74,6 +74,15 @@ function GroupNode({ group, node, depth, dbName, onOpenObject }: {
   const groupKey = `${node.name}:${group.type}`
   const isOpen = !!expanded[groupKey]
   const children = (node.children || []).filter((c) => c.type === group.type)
+  // 滚动容器引用 + 溢出状态：列表实际可滚动（内容超高）时才显示过滤框，与滚动出现条件严格对齐
+  // （hooks 须在条件返回前调用，故放在 children 判空之前；isOpen 参与依赖：折叠态下容器未挂载，
+  //  展开瞬间需重新测量，否则折叠期间 children 变化会导致展开后过滤框不出现）
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [needFilter, setNeedFilter] = useState(false)
+  useEffect(() => {
+    const el = scrollRef.current
+    setNeedFilter(!!el && el.scrollHeight > el.clientHeight)
+  }, [children.length, isOpen])
   if (children.length === 0) return null
 
   return (
@@ -94,7 +103,7 @@ function GroupNode({ group, node, depth, dbName, onOpenObject }: {
       </div>
       {isOpen && (
         <div className="mt-0.5">
-          {children.length > 20 && (
+          {needFilter && (
             <div className="px-3 pb-1">
               <Input
                 placeholder="过滤..."
@@ -105,8 +114,9 @@ function GroupNode({ group, node, depth, dbName, onOpenObject }: {
             </div>
           )}
           {/* 子节点列表最大高度固定，内部滚动：避免单个分组（如表）过多把后续库挤到视区外，
-              用户无需折叠整个库也能看到其他库。过滤输入框固定在顶部不参与滚动。 */}
-          <div className="scrollbar-thin max-h-64 overflow-y-auto">
+              用户无需折叠整个库也能看到其他库。过滤框固定在顶部不参与滚动，
+              仅当列表溢出（可滚动）时显示，滚动期间始终可操作。 */}
+          <div ref={scrollRef} className="scrollbar-thin max-h-64 overflow-y-auto">
             {children
               .filter((c) => !filter || c.name.toLowerCase().includes(filter.toLowerCase()))
               .map((c) => (

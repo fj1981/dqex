@@ -46,6 +46,17 @@ import { SQL_EXEC_MODE_LABEL, type AIStatus, type ObjectNode, type SQLExecMode }
 
 // 合并后的类 Navicat 工作区：左侧常驻对象树 + 右侧多 Tab（查询 / 对象）
 // 对象树始终显示，与右侧区域左右分栏；视图/函数/过程按类型分组展示
+
+// 表名拆分：尾部（最后一个 _ 之后的部分，如 templates/logs，区分度最高）固定保留、头部可截断。
+// 长表名时实现「中间省略、尾部优先」：空间不足时头部渐隐出省略号，尾部始终完整可见。
+const splitTableName = (name: string): { head: string; tail: string } => {
+  const idx = name.lastIndexOf("_")
+  if (idx >= 3 && name.length - idx - 1 >= 3) {
+    return { head: name.slice(0, idx + 1), tail: name.slice(idx + 1) }
+  }
+  return { head: name, tail: "" }
+}
+
 export default function WorkspaceLayout() {
   const { connections, panelOpen } = useAppStore()
   const {
@@ -278,6 +289,11 @@ export default function WorkspaceLayout() {
   const queryActive = active && active.kind === "query" ? active : null
   const objectActive = active && active.kind === "object" ? active : null
 
+  // 同库去重：当前连接打开的多个对象 tab 若都在同一库，标签省略 [库名] 后缀（完整库名见 hover title），
+  // 避免每个 tab 重复携带相同库名；跨库混开时才显示 [库名] 以区分
+  const objectDbs = Array.from(new Set(tabs.filter((t) => t.kind === "object").map((t) => t.db)))
+  const showDbSuffix = objectDbs.length > 1
+
   // 对象树点击：表/视图打开对象 tab（默认看数据），函数/过程打开对象 tab（仅 DDL）
   const handleOpenObject = (name: string, db: string, type: ObjectNode["type"]) => {
     if (type === "table" || type === "view" || type === "function" || type === "procedure") {
@@ -293,14 +309,17 @@ export default function WorkspaceLayout() {
           ? { icon: FunctionSquare, cls: "text-violet-600" }
           : { icon: Table2, cls: "text-emerald-600" }
       const Icon = meta.icon
+      // 表名拆分：头部可截断、尾部固定保留（同库时还省去 [库名]，空间更充裕）
+      const { head, tail } = splitTableName(t.name)
       return (
         <>
           <Icon className={cn("h-3.5 w-3.5", meta.cls)} />
-          {/* 表名始终完整显示，库名可截断：避免长库名把表名挤掉。
-              格式：表名[库名]，表名为主、库名为辅，更符合「打开哪个表」的查找直觉。 */}
+          {/* 表名：头部 flex-1 占满剩余空间可截断、尾部（最后一个 _ 后的部分）永远完整；
+              跨库时才带 [库名] 后缀（最多 96px，可截断），不挤占表名空间。 */}
           <span className="flex min-w-0 max-w-40 items-center" title={`${t.db}.${t.name}`}>
-            <span className="shrink-0">{t.name}</span>
-            <span className="min-w-0 truncate text-muted-foreground">[{t.db}]</span>
+            <span className="min-w-0 flex-1 truncate">{head}</span>
+            {tail && <span className="shrink-0">{tail}</span>}
+            {showDbSuffix && <span className="max-w-24 shrink-0 truncate text-muted-foreground">[{t.db}]</span>}
           </span>
         </>
       )
