@@ -24,19 +24,29 @@ func outputTable(r *queryResult) {
 		// 写语句：Query OK；读语句空结果（cydb 可能不返回列信息）：Empty set
 		if !r.IsWrite {
 			fmt.Println(dim("Empty set"))
-			fmt.Printf("%s\n", dim(fmt.Sprintf("(%s)", formatDuration(r.Elapsed))))
+			if showTiming {
+				fmt.Printf("%s\n", dim(fmt.Sprintf("(%s)", formatDuration(r.Elapsed))))
+			}
 			return
 		}
 		if r.AffectedRows > 0 {
-			fmt.Printf("Query OK, %d rows affected (%s)\n", r.AffectedRows, formatDuration(r.Elapsed))
-		} else {
+			if showTiming {
+				fmt.Printf("Query OK, %d rows affected (%s)\n", r.AffectedRows, formatDuration(r.Elapsed))
+			} else {
+				fmt.Printf("Query OK, %d rows affected\n", r.AffectedRows)
+			}
+		} else if showTiming {
 			fmt.Printf("Query OK (%s)\n", formatDuration(r.Elapsed))
+		} else {
+			fmt.Println("Query OK")
 		}
 		return
 	}
 	if len(r.Rows) == 0 {
 		fmt.Println(dim("Empty set"))
-		fmt.Printf("%s\n", dim(fmt.Sprintf("(%s)", formatDuration(r.Elapsed))))
+		if showTiming {
+			fmt.Printf("%s\n", dim(fmt.Sprintf("(%s)", formatDuration(r.Elapsed))))
+		}
 		return
 	}
 
@@ -67,7 +77,9 @@ func outputTable(r *queryResult) {
 	}
 	table.Render()
 
-	fmt.Printf("%d rows in set (%s)\n", r.RowCount, formatDuration(r.Elapsed))
+	if showTiming {
+		fmt.Printf("%d rows in set (%s)\n", r.RowCount, formatDuration(r.Elapsed))
+	}
 }
 
 func formatCell(val any) string {
@@ -180,6 +192,9 @@ func explainFormat(col string, val any) string {
 	return s
 }
 
+// showTiming 是否显示耗时信息（\timing 切换，默认开）。
+var showTiming = true
+
 // ---- 垂直显示 ----
 
 func outputVertical(r *queryResult) {
@@ -193,7 +208,9 @@ func outputVertical(r *queryResult) {
 			fmt.Printf("%20s: %s\n", col, val)
 		}
 	}
-	fmt.Printf("%d rows in set (%s)\n", r.RowCount, formatDuration(r.Elapsed))
+	if showTiming {
+		fmt.Printf("%d rows in set (%s)\n", r.RowCount, formatDuration(r.Elapsed))
+	}
 }
 
 // ---- 宽度检测与垂直降级 ----

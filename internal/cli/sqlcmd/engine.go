@@ -175,6 +175,12 @@ func (s *session) handleMeta(cmd string) (bool, bool) {
 		}
 		return true, false
 	case "\\timing":
+		showTiming = !showTiming
+		if showTiming {
+			fmt.Println(dim("耗时显示: 开"))
+		} else {
+			fmt.Println(dim("耗时显示: 关"))
+		}
 		return true, false
 	case "\\x":
 		// psql 风格扩展显示开关：\x [on|off|auto]，无参数时 toggle；切换后写回 config.yaml
@@ -427,15 +433,32 @@ func exportToFile(s *session, path string) {
 		return
 	}
 	defer f.Close()
-	fmt.Fprintln(f, strings.Join(result.Columns, ","))
+	fmt.Fprintln(f, strings.Join(csvFields(result.Columns), ","))
 	for _, row := range result.Rows {
 		vals := make([]string, len(row))
 		for i, v := range row {
-			vals[i] = fmt.Sprintf("%v", v)
+			vals[i] = csvField(fmt.Sprintf("%v", v))
 		}
 		fmt.Fprintln(f, strings.Join(vals, ","))
 	}
 	fmt.Printf("已导出 %d 行到 %s\n", result.RowCount, path)
+}
+
+// csvFields 批量将字段转为 CSV 转义文本。
+func csvFields(cols []string) []string {
+	out := make([]string, len(cols))
+	for i, c := range cols {
+		out[i] = csvField(c)
+	}
+	return out
+}
+
+// csvField 标准 CSV 字段转义：含逗号/引号/换行时用双引号包裹（内部双引号翻倍）。
+func csvField(s string) string {
+	if strings.ContainsAny(s, ",\"\n\r") {
+		return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+	}
+	return s
 }
 
 func executeFile(s *session, path string) {

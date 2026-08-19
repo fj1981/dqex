@@ -260,7 +260,7 @@ export default function HelpDialog({ open, onOpenChange }: { open: boolean; onOp
                 </table>
               </div>
               <p className="text-xs text-muted-foreground">
-                快捷操作：分号结尾回车即执行，无分号则多行续写；<code className="font-mono">Ctrl+R</code> 搜索历史、<code className="font-mono">Tab</code> 补全、<code className="font-mono">Ctrl+D</code> 退出。
+                快捷操作：分号结尾回车即执行，无分号则多行续写；<code className="font-mono">Ctrl+R</code> 搜索历史、<code className="font-mono">Tab</code> 补全、<code className="font-mono">Ctrl+D</code> 退出。SQL 行尾加 <code className="font-mono">\G</code> 可单次垂直显示（如 <code className="font-mono">SELECT * FROM t \G</code>）；<code className="font-mono">/</code> 前缀与 <code className="font-mono">\</code> 等价（<code className="font-mono">/ai</code>、<code className="font-mono">/dt</code>）。
               </p>
             </section>
 
