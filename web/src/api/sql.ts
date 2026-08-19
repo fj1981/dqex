@@ -1,8 +1,11 @@
 import { post, request } from "@/api"
 import type {
+  ColumnFilter,
+  GenSQLKind,
   ObjectDDLResult,
   ObjectDDLType,
   ObjectNode,
+  SortSpec,
   SQLAuditEntry,
   SQLExecMode,
   SQLFavorite,
@@ -204,3 +207,21 @@ export interface InsertRowPayload {
 // 表浏览新增一行（INSERT），返回影响行数
 export const insertTableRow = (payload: InsertRowPayload) =>
   post<{ affectedRows: number }>("/api/sql/insert-row", payload)
+
+// 表浏览快速生成 SQL 请求（右键菜单 → 后端按方言生成可执行语句，生成不执行）
+export interface GenSQLPayload {
+  connId: string
+  db: string
+  table: string
+  kind: GenSQLKind
+  columns: string[]
+  rows: unknown[][] // 行数据（insert 支持多行；whereCell 时 [[值]]）
+  pkColumns?: string[] // 主键列名（update/delete/selectByPk）
+  skipColumns?: string[] // 跳过的列（insert 的自增列）
+  filters?: ColumnFilter[] // 过滤条件（selectByFilter）
+  sortSpecs?: SortSpec[] // 排序（selectByFilter）
+}
+
+// 快速生成 SQL 文本（方言正确的可执行语句，多条以分号换行分隔）
+export const generateSQL = (payload: GenSQLPayload) =>
+  post<{ sql: string }>("/api/sql/generate", payload)

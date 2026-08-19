@@ -158,6 +158,31 @@ func (s *Service) InsertTableRow(ctx context.Context, connKey, dbName string, p 
 	return affected, nil
 }
 
+// GenerateSQL 快速生成 SQL 文本（表浏览的行/单元格/过滤条件 → 方言正确的可执行语句）。
+// 复用 engine 的 cydb 构建器（InlineLiterals 内联转义），生成仅产出文本不执行、不写审计。
+func (s *Service) GenerateSQL(ctx context.Context, connKey, dbName string, p engine.GenSQLParams) (string, error) {
+	conn, err := s.resolveConn(connKey, nil)
+	if err != nil {
+		return "", err
+	}
+	var cli *cydb.DBCli
+	if dbName != "" {
+		cli, err = engine.ConnectDB(*conn, dbName)
+	} else {
+		cli, err = engine.Connect(*conn)
+	}
+	if err != nil {
+		return "", cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+	}
+	defer cli.Close()
+
+	sql, err := engine.GenerateSQL(ctx, cli, p)
+	if err != nil {
+		return "", err
+	}
+	return sql, nil
+}
+
 // QueryTablePage 对象树数据浏览：分页查询单表数据并一次返回全表总行数。
 // 与 RunSQLQuery 不同：这是系统自动生成的浏览查询，不进「SQL 执行历史」、不写审计，
 // 避免每次点开表都产生一条孤立的 SELECT COUNT(*) 审计记录（此前由前端二次 COUNT 造成）。
@@ -266,15 +291,15 @@ func (s *Service) newAuditEntry(connID, dbName, mode, source, sql string, isWrit
 func (s *Service) newCellAuditEntry(connID, dbName string, p engine.UpdateCellParams, affected int, status, errMsg string) SQLAuditEntry {
 	return SQLAuditEntry{
 		ConnID: connID, DB: dbName, Source: auditSourceCell,
-		SQL:      fmt.Sprintf("UPDATE %s SET %s WHERE (主键)", p.Table, p.SetColumn),
-		IsWrite:  true,
-		RowCount: affected,
-		Status:   status,
-		ErrorMsg: errMsg,
+		SQL:       fmt.Sprintf("UPDATE %s SET %s WHERE (主键)", p.Table, p.SetColumn),
+		IsWrite:   true,
+		RowCount:  affected,
+		Status:    status,
+		ErrorMsg:  errMsg,
 		CreatedAt: nowMillis(),
-		Table:    p.Table,
-		Column:   p.SetColumn,
-		NewValue: p.SetValue,
+		Table:     p.Table,
+		Column:    p.SetColumn,
+		NewValue:  p.SetValue,
 		PKColumns: p.PKColumns,
 		PKValues:  p.PKValues,
 	}

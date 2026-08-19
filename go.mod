@@ -3,6 +3,9 @@ module dbimpex
 go 1.25.1
 
 require (
+	github.com/atotto/clipboard v0.1.4
+	github.com/cloudwego/eino v0.9.14
+	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
 	github.com/gin-gonic/gin v1.10.1
 	github.com/olekukonko/tablewriter v1.1.4
 	github.com/peterh/liner v1.2.2
@@ -10,7 +13,7 @@ require (
 	github.com/rs/xid v1.6.0
 	github.com/spf13/cobra v1.10.1
 	github.com/xuri/excelize/v2 v2.11.0
-	gitlab.mycyclone.com/rpa-platform/pk-infrakit-g v0.1.2
+	gitlab.mycyclone.com/rpa-platform/pk-infrakit-g v0.1.4
 	golang.org/x/term v0.44.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -21,7 +24,6 @@ require (
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect
 	github.com/ajitpratap0/GoSQLX v1.6.0 // indirect
-	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
@@ -31,8 +33,6 @@ require (
 	github.com/clipperhouse/displaywidth v0.10.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.6.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/cloudwego/eino v0.9.14 // indirect
-	github.com/cloudwego/eino-ext/components/model/openai v0.1.13 // indirect
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.17 // indirect
 	github.com/cznic/mathutil v0.0.0-20181122101859-297441e03548 // indirect
 	github.com/dgraph-io/ristretto/v2 v2.4.0 // indirect
@@ -128,4 +128,4 @@ require (
 	modernc.org/sqlite v1.39.0 // indirect
 )
 
-replace gitlab.mycyclone.com/rpa-platform/pk-infrakit-g => /Users/fanjun/project/pk-infrakit-g
+// replace gitlab.mycyclone.com/rpa-platform/pk-infrakit-g => /Users/fanjun/project/pk-infrakit-g

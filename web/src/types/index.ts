@@ -395,6 +395,15 @@ export const RESET_MODE_LABEL: Record<string, string> = {
 
 // ---- SQL 查询终端 ----
 
+// 快速生成 SQL 的类型（表浏览右键 → 后端按方言生成可执行语句）
+export type GenSQLKind =
+  | "insert" // 行/多行 INSERT（跳过自增列）
+  | "update" // 单行 UPDATE（SET 非主键列，WHERE 主键）
+  | "delete" // 单行 DELETE（WHERE 主键）
+  | "selectByPk" // 单行 SELECT（WHERE 主键）
+  | "selectByFilter" // 按当前过滤条件 + 排序 SELECT
+  | "whereCell" // 单元格等于值条件 SELECT
+
 // SQL 执行模式：每个查询视图独立选择（用户可见文案：规范执行 / 原样执行）
 //   transform = 防护 + 智能：系统规范化 SQL 语法 + 自动补行数上限（最多 1000 行），默认
 //   raw       = 原样执行：按用户所写原样发库，不限制行数（用于特殊语法兜底，由用户自行负责）

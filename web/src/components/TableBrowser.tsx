@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
-import { AlertCircle, AlertTriangle, ArrowDown, ArrowUp, BarChart3, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronsUpDown, Columns3, Copy, Download, EyeOff, FileSpreadsheet, Filter, FunctionSquare, KeyRound, ListOrdered, Loader2, Maximize2, Minimize2, MoreHorizontal, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, ShieldCheck, Table2, Trash2, View, X } from "lucide-react"
+import { AlertCircle, AlertTriangle, ArrowDown, ArrowUp, BarChart3, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronsUpDown, Columns3, Copy, Download, EyeOff, FileSpreadsheet, Filter, FunctionSquare, KeyRound, ListOrdered, Loader2, Maximize2, Minimize2, MoreHorizontal, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, ShieldCheck, Table2, Terminal, Trash2, View, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -11,12 +11,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import TableIcon from "@/components/ui/table-icon"
 import CellEditor from "@/components/CellEditor"
 import * as api from "@/api"
-import { deleteTableRows, exportTableExcel, fetchTableData, fetchTableCellValue, getObjectDDL, insertTableRow, updateTableCell } from "@/api/sql"
+import { deleteTableRows, exportTableExcel, fetchTableData, fetchTableCellValue, generateSQL, getObjectDDL, insertTableRow, updateTableCell, type GenSQLPayload } from "@/api/sql"
+import GenSQLDialog from "@/components/GenSQLDialog"
+import { buildCellPayload, buildFilterPayload, buildRowPayload, type GenSQLContext } from "@/lib/sqlgen"
+import { useQueryStore } from "@/stores/queryStore"
 import { cn } from "@/lib/utils"
 import { useGridColors } from "@/lib/theme"
 import { computeColWidths, computeColumnStat, copyCellValue, copyToClipboard, downloadText, FILTER_OP_LABEL, FILTER_OPS, fmtNum, isNullCell, renderCellText, rowsToCSV, rowToTSV, rowsToTSV } from "@/lib/table"
 import { useClickOutside } from "@/lib/useClickOutside"
-import type { ColumnFilter, FilterOp, ObjectDDLType, SortSpec, TableColumn, TableViewLayout } from "@/types"
+import type { ColumnFilter, FilterOp, GenSQLKind, ObjectDDLType, SortSpec, TableColumn, TableViewLayout } from "@/types"
 
 interface Props {
   connId: string
@@ -115,6 +118,14 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
     }
   }
   const [deleting, setDeleting] = useState(false)
+  // 快速生成 SQL（右键菜单 → /api/sql/generate）：payload 打开预览弹窗，sql/loading/error 为当前生成结果。
+  // genSeqRef 防乱序：连续快速生成时仅采纳最后一次请求的结果。
+  const [genPayload, setGenPayload] = useState<GenSQLPayload | null>(null)
+  const [genTitle, setGenTitle] = useState("")
+  const [genSQL, setGenSQL] = useState("")
+  const [genLoading, setGenLoading] = useState(false)
+  const [genError, setGenError] = useState("")
+  const genSeqRef = useRef(0)
 
   // 排序状态（全局数据库排序）：三态循环 asc → desc → 无
   // 多列排序状态：Shift+点击叠加，普通点击单列（三态循环 asc → desc → 移除）
@@ -621,6 +632,77 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
     },
     [pkColumns, connId, db, name, loadData],
   )
+
+  // ---- 快速生成 SQL：组装参数（lib/sqlgen）→ 请求后端 → 打开预览弹窗 ----
+
+  // 插入时跳过的自增列（由数据库生成）
+  const autoIncCols = useMemo(() => struct.filter((c) => c.autoIncrement).map((c) => c.name), [struct])
+
+  // 生成上下文：当前页列/行/主键/过滤排序（值保持原始类型，后端按方言转义内联）
+  const genSQLCtx = useMemo<GenSQLContext>(() => ({
+    connId,
+    db,
+    table: name,
+    columns,
+    rows,
+    pkColumns,
+    skipColumns: autoIncCols,
+    filters,
+    sortSpecs,
+  }), [connId, db, name, columns, rows, pkColumns, autoIncCols, filters, sortSpecs])
+
+  // 发起生成：新请求使旧结果失效（只展示最后一次），失败在弹窗内展示
+  const runGenSQL = useCallback(async (payload: GenSQLPayload, title: string) => {
+    const seq = ++genSeqRef.current
+    setGenPayload(payload)
+    setGenTitle(title)
+    setGenSQL("")
+    setGenError("")
+    setGenLoading(true)
+    try {
+      const res = await generateSQL(payload)
+      if (seq !== genSeqRef.current) return // 已有更新的生成请求，丢弃本次结果
+      setGenSQL(res.sql)
+    } catch (e) {
+      if (seq !== genSeqRef.current) return
+      setGenError((e as Error).message)
+    } finally {
+      if (seq === genSeqRef.current) setGenLoading(false)
+    }
+  }, [])
+
+  // 行级生成：insert 支持多行（选中批量），其余类型按主键定位单行
+  const handleGenRow = useCallback((kind: GenSQLKind, rowIndexes: number[]) => {
+    const payload = buildRowPayload(genSQLCtx, kind, rowIndexes)
+    if (!payload) return
+    const label = { insert: "INSERT", update: "UPDATE", delete: "DELETE", selectByPk: "SELECT", selectByFilter: "SELECT", whereCell: "SELECT" }[kind]
+    const n = rowIndexes.length > 1 ? rowIndexes.length : 1
+    void runGenSQL(payload, `生成 ${label} · ${name}${n > 1 ? `（${n} 行）` : ""}`)
+  }, [genSQLCtx, name, runGenSQL])
+
+  // 单元格条件生成：SELECT * WHERE 列 = 单元格值
+  const handleGenCell = useCallback((rowIndex: number, colIndex: number) => {
+    const payload = buildCellPayload(genSQLCtx, rowIndex, colIndex)
+    if (!payload) return
+    void runGenSQL(payload, `生成 SELECT（WHERE ${payload.columns[0]}）· ${name}`)
+  }, [genSQLCtx, name, runGenSQL])
+
+  // 过滤条件生成：按当前过滤 + 排序 SELECT
+  const handleGenFilter = useCallback(() => {
+    const payload = buildFilterPayload(genSQLCtx)
+    if (!payload) return
+    void runGenSQL(payload, `生成 SELECT（当前过滤条件）· ${name}`)
+  }, [genSQLCtx, name, runGenSQL])
+
+  // 弹窗动作：复制 / 发送到查询页（回填 SQL 到 query tab，库上下文一并还原）
+  const closeGenSQL = useCallback(() => setGenPayload(null), [])
+  const handleCopyGenSQL = useCallback(() => { if (genSQL) copyToClipboard(genSQL) }, [genSQL])
+  const applySQL = useQueryStore((s) => s.applySQL)
+  const handleSendToQuery = useCallback(() => {
+    if (!genSQL) return
+    applySQL(genSQL, db)
+    closeGenSQL()
+  }, [genSQL, db, applySQL, closeGenSQL])
 
   // 新增行提交：组装用户填写的列与值，调用 INSERT；自增列跳过（由数据库生成）。
   const handleInsertRow = async () => {
@@ -1761,6 +1843,9 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                   pkColumns={pkColumns}
                   onQuickFilter={quickFilter}
                   onDeleteRows={handleDeleteRows}
+                  onGenRow={handleGenRow}
+                  onGenCell={handleGenCell}
+                  onGenFilter={handleGenFilter}
                 />
                 </ContextMenu>
               </div>
@@ -1998,6 +2083,18 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
               </div>
             </DialogContent>
           </Dialog>
+
+          {/* 快速生成 SQL 预览弹窗：受控展示后端生成结果，支持复制 / 发送到查询页 */}
+          <GenSQLDialog
+            open={genPayload !== null}
+            title={genTitle}
+            sql={genSQL}
+            loading={genLoading}
+            error={genError}
+            onCopy={handleCopyGenSQL}
+            onSendToQuery={handleSendToQuery}
+            onClose={closeGenSQL}
+          />
         </div>
       ) : subTab === "struct" ? (
         /* 结构 */
@@ -2094,7 +2191,10 @@ const TableBrowserRowMenu = forwardRef<RowMenuHandle, {
   pkColumns: string[]
   onQuickFilter: (col: string, cell: unknown, op: FilterOp) => void
   onDeleteRows: (keys: string[]) => void
-}>(({ columns, rows, bigFieldCols, objType, selectedRows, rowKey, page, pageSize, pkColumns, onQuickFilter, onDeleteRows }, ref) => {
+  onGenRow: (kind: GenSQLKind, rowIndexes: number[]) => void
+  onGenCell: (rowIndex: number, colIndex: number) => void
+  onGenFilter: () => void
+}>(({ columns, rows, bigFieldCols, objType, selectedRows, rowKey, page, pageSize, pkColumns, onQuickFilter, onDeleteRows, onGenRow, onGenCell, onGenFilter }, ref) => {
   const [cell, setCell] = useState<{ rowIndex: number; colIndex: number | null } | null>(null)
   useImperativeHandle(ref, () => ({
     show: (c) => setCell(c),
@@ -2167,10 +2267,19 @@ const TableBrowserRowMenu = forwardRef<RowMenuHandle, {
                   </>
                 )
               })()}
-              {/* 行右键（无列上下文）：复制选中行 + 删除行（仅 table） */}
-              {objType === "table" && colIndex === null && (
+              {/* 单元格右键：按此值生成 WHERE 条件 SELECT（大字段为省略值，不可用） */}
+              {colIndex !== null && columns[colIndex] !== undefined && !bigFieldCols.has(columns[colIndex]) && (
                 <>
-                  {selectedRows.size > 0 && (
+                  <ContextMenuSeparator />
+                  <ContextMenuItem onSelect={() => onGenCell(ri, colIndex)}>
+                    <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 SELECT：WHERE 此值
+                  </ContextMenuItem>
+                </>
+              )}
+              {/* 行右键（无列上下文）：复制选中行 + 生成 SQL + 删除行（SELECT 对所有类型，写操作仅 table） */}
+              {colIndex === null && (
+                <>
+                  {objType === "table" && selectedRows.size > 0 && (
                     <>
                       <ContextMenuItem onSelect={() => {
                         const selRows = rows.filter((_, i) => {
@@ -2184,15 +2293,55 @@ const TableBrowserRowMenu = forwardRef<RowMenuHandle, {
                       <ContextMenuSeparator />
                     </>
                   )}
-                  <ContextMenuItem
-                    disabled={pkColumns.length === 0}
-                    onSelect={() => onDeleteRows(selected && selectedRows.size > 1 ? Array.from(selectedRows) : rk ? [rk] : [])}
-                  >
-                    <Trash2 className="mr-2 h-3.5 w-3.5 text-destructive" />
-                    {selected && selectedRows.size > 1
-                      ? `删除选中的 ${selectedRows.size} 行`
-                      : `删除第 ${(page - 1) * pageSize + ri + 1} 行`}
+                  {/* 生成 SQL：按当前过滤条件 + 排序（无过滤时生成全表 SELECT） */}
+                  <ContextMenuItem onSelect={() => onGenFilter()}>
+                    <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 SELECT：当前过滤条件
                   </ContextMenuItem>
+                  {objType === "table" && (
+                    <>
+                      <ContextMenuSeparator />
+                      {/* 选中多行时 INSERT 批量生成；其余行级类型按主键定位单行 */}
+                      {selected && selectedRows.size > 1 && (
+                        <ContextMenuItem onSelect={() => onGenRow("insert", rows.map((_, i) => i).filter((i) => {
+                          const rk2 = rowKey(i)
+                          return rk2 !== null && selectedRows.has(rk2)
+                        }))}>
+                          <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 INSERT：选中 {selectedRows.size} 行
+                        </ContextMenuItem>
+                      )}
+                      <ContextMenuItem onSelect={() => onGenRow("insert", [ri])}>
+                        <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 INSERT 语句
+                      </ContextMenuItem>
+                      <ContextMenuItem disabled={pkColumns.length === 0} onSelect={() => onGenRow("update", [ri])}>
+                        <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 UPDATE 语句
+                      </ContextMenuItem>
+                      {/* 选中多行时 DELETE 批量生成（后端合并为 IN 条件），INSERT 同样支持批量 */}
+                      {selected && selectedRows.size > 1 && (
+                        <ContextMenuItem disabled={pkColumns.length === 0} onSelect={() => onGenRow("delete", rows.map((_, i) => i).filter((i) => {
+                          const rk2 = rowKey(i)
+                          return rk2 !== null && selectedRows.has(rk2)
+                        }))}>
+                          <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 DELETE：选中 {selectedRows.size} 行
+                        </ContextMenuItem>
+                      )}
+                      <ContextMenuItem disabled={pkColumns.length === 0} onSelect={() => onGenRow("delete", [ri])}>
+                        <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 DELETE 语句
+                      </ContextMenuItem>
+                      <ContextMenuItem disabled={pkColumns.length === 0} onSelect={() => onGenRow("selectByPk", [ri])}>
+                        <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 SELECT：按主键
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem
+                        disabled={pkColumns.length === 0}
+                        onSelect={() => onDeleteRows(selected && selectedRows.size > 1 ? Array.from(selectedRows) : rk ? [rk] : [])}
+                      >
+                        <Trash2 className="mr-2 h-3.5 w-3.5 text-destructive" />
+                        {selected && selectedRows.size > 1
+                          ? `删除选中的 ${selectedRows.size} 行`
+                          : `删除第 ${(page - 1) * pageSize + ri + 1} 行`}
+                      </ContextMenuItem>
+                    </>
+                  )}
                 </>
               )}
             </>

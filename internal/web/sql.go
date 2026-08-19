@@ -14,12 +14,12 @@ import (
 // SQLRunReq SQL 执行请求（统一查询与写操作，支持多语句批量执行）
 type SQLRunReq struct {
 	ConnID string `json:"connId" binding:"required"`
-	DB     string `json:"db"`    // 目标库名（点对象树查表时传入，覆盖连接默认库）
+	DB     string `json:"db"` // 目标库名（点对象树查表时传入，覆盖连接默认库）
 	SQL    string `json:"sql" binding:"required"`
-	Limit  int    `json:"limit"` // 返回行数上限，<=0 走默认（1000），最大 1000
+	Limit  int    `json:"limit"`  // 返回行数上限，<=0 走默认（1000），最大 1000
 	Offset int    `json:"offset"` // 分页偏移
-	Mask   bool   `json:"mask"`  // 结果集脱敏：敏感列（password/token/secret 等）统一打码
-	Mode   string `json:"mode"`  // 执行模式：transform（默认，转换+限制）| raw（原始直传）
+	Mask   bool   `json:"mask"`   // 结果集脱敏：敏感列（password/token/secret 等）统一打码
+	Mode   string `json:"mode"`   // 执行模式：transform（默认，转换+限制）| raw（原始直传）
 }
 
 // handleSQLRun 统一执行 SQL（Navicat 式）：按分号分割多语句，逐条判断读写并执行，
@@ -46,15 +46,15 @@ func handleSQLRun(svc *service.Service) gin.HandlerFunc {
 // TablePageReq 对象树数据浏览分页请求：一次返回当前页数据与全表总行数。
 // 独立于 /query（查询终端），是系统自动生成的浏览查询，不写审计/历史。
 type TablePageReq struct {
-	ConnID         string               `json:"connId" binding:"required"`
-	DB             string               `json:"db"`   // 目标库名（点对象树查表时传入，覆盖连接默认库）
-	Table          string               `json:"table" binding:"required"`
-	Page           int                  `json:"page"`
-	PageSize       int                  `json:"pageSize"`
-	SortSpecs      []engine.SortSpec    `json:"sortSpecs"` // 多列排序（按顺序叠加 ORDER BY）
-	ExcludeColumns []string             `json:"excludeColumns"` // 省略的大字段列名（二进制/超长文本，列表不取真实值）
-	Filters        []engine.ColumnFilter `json:"filters"` // 列过滤条件（AND 叠加）
-	MaxRows        int                  `json:"maxRows"` // 导出时行数上限（仅 /table-export 使用，默认 100000）
+	ConnID         string                `json:"connId" binding:"required"`
+	DB             string                `json:"db"` // 目标库名（点对象树查表时传入，覆盖连接默认库）
+	Table          string                `json:"table" binding:"required"`
+	Page           int                   `json:"page"`
+	PageSize       int                   `json:"pageSize"`
+	SortSpecs      []engine.SortSpec     `json:"sortSpecs"`      // 多列排序（按顺序叠加 ORDER BY）
+	ExcludeColumns []string              `json:"excludeColumns"` // 省略的大字段列名（二进制/超长文本，列表不取真实值）
+	Filters        []engine.ColumnFilter `json:"filters"`        // 列过滤条件（AND 叠加）
+	MaxRows        int                   `json:"maxRows"`        // 导出时行数上限（仅 /table-export 使用，默认 100000）
 }
 
 // handleSQLTablePage 对象树数据浏览：分页查表数据 + 全表总行数一次返回。
@@ -67,10 +67,10 @@ func handleSQLTablePage(svc *service.Service) gin.HandlerFunc {
 // UpdateCellReq 表浏览单元格更新请求（named bind 更新）
 type UpdateCellReq struct {
 	ConnID    string   `json:"connId" binding:"required"`
-	DB        string   `json:"db"`                       // 目标库名
-	Table     string   `json:"table" binding:"required"` // 表名
-	Column    string   `json:"column" binding:"required"` // 目标列名
-	Value     any      `json:"value"`                    // 新值（null 表示 SET NULL）
+	DB        string   `json:"db"`                           // 目标库名
+	Table     string   `json:"table" binding:"required"`     // 表名
+	Column    string   `json:"column" binding:"required"`    // 目标列名
+	Value     any      `json:"value"`                        // 新值（null 表示 SET NULL）
 	PKColumns []string `json:"pkColumns" binding:"required"` // 主键列名
 	PKValues  []any    `json:"pkValues" binding:"required"`  // 主键值
 }
@@ -95,10 +95,10 @@ func handleUpdateCell(svc *service.Service) gin.HandlerFunc {
 // DeleteRowsReq 整行删除请求（按主键定位，支持批量删除）
 type DeleteRowsReq struct {
 	ConnID    string   `json:"connId" binding:"required"`
-	DB        string   `json:"db"`                        // 目标库名
-	Table     string   `json:"table" binding:"required"`  // 表名
+	DB        string   `json:"db"`                           // 目标库名
+	Table     string   `json:"table" binding:"required"`     // 表名
 	PKColumns []string `json:"pkColumns" binding:"required"` // 主键列名
-	Rows      [][]any  `json:"rows" binding:"required"`   // 每行主键值数组（与 PKColumns 顺序一致）
+	Rows      [][]any  `json:"rows" binding:"required"`      // 每行主键值数组（与 PKColumns 顺序一致）
 }
 
 // handleDeleteRows 删除表浏览中选中的整行（按主键定位，支持批量），返回累计影响行数。
@@ -140,9 +140,9 @@ func handleInsertRow(svc *service.Service) gin.HandlerFunc {
 // 用于列表省略的大字段（二进制/超长文本）点击查看，避免列表一次传输大量数据。
 type CellValueReq struct {
 	ConnID    string   `json:"connId" binding:"required"`
-	DB        string   `json:"db"`                        // 目标库名
-	Table     string   `json:"table" binding:"required"`  // 表名
-	Column    string   `json:"column" binding:"required"` // 目标列名
+	DB        string   `json:"db"`                           // 目标库名
+	Table     string   `json:"table" binding:"required"`     // 表名
+	Column    string   `json:"column" binding:"required"`    // 目标列名
 	PKColumns []string `json:"pkColumns" binding:"required"` // 主键列名
 	PKValues  []any    `json:"pkValues" binding:"required"`  // 主键值
 }
@@ -260,8 +260,8 @@ type SQLPingReq struct {
 
 // PingResult 连接健康检测结果
 type PingResult struct {
-	OK        bool  `json:"ok"`
-	ElapsedMS int64 `json:"elapsedMs"`
+	OK        bool   `json:"ok"`
+	ElapsedMS int64  `json:"elapsedMs"`
 	Error     string `json:"error,omitempty"`
 }
 
@@ -275,12 +275,31 @@ func handleSQLPing(svc *service.Service) gin.HandlerFunc {
 	})
 }
 
+// SQLGenReq 快速生成 SQL 请求（表浏览右键生成，字段平铺自 GenSQLParams）
+type SQLGenReq struct {
+	ConnID string `json:"connId" binding:"required"`
+	DB     string `json:"db"` // 目标库名（点对象树查表时传入，覆盖连接默认库）
+	engine.GenSQLParams
+}
+
+// handleSQLGen 快速生成 SQL 文本：行/单元格/过滤条件 → 方言正确的可执行语句，
+// 供表浏览右键菜单生成预览（生成不执行，不写审计）。
+func handleSQLGen(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req SQLGenReq) (map[string]string, error) {
+		sql, err := svc.GenerateSQL(c.Request.Context(), req.ConnID, req.DB, req.GenSQLParams)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"sql": sql}, nil
+	})
+}
+
 // SQLDDLReq 对象创建语句查询请求
 type SQLDDLReq struct {
-	ConnID  string `query:"connId" binding:"required"`
-	DB      string `query:"db"`                     // 库名（Oracle 下为 schema）
-	Type    string `query:"type" binding:"required"` // table / view / function / procedure
-	Name    string `query:"name" binding:"required"`
+	ConnID string `query:"connId" binding:"required"`
+	DB     string `query:"db"`                      // 库名（Oracle 下为 schema）
+	Type   string `query:"type" binding:"required"` // table / view / function / procedure
+	Name   string `query:"name" binding:"required"`
 }
 
 func handleSQLDDL(svc *service.Service) gin.HandlerFunc {
@@ -307,9 +326,9 @@ func handleGetWorkspace(svc *service.Service) gin.HandlerFunc {
 
 // WorkspaceSaveReq 查询工作区保存请求（整体覆盖）
 type WorkspaceSaveReq struct {
-	ConnID string                 `json:"connId" binding:"required"`
-	Tabs   []service.WorkspaceTab `json:"tabs" binding:"required"`
-	ActiveID string               `json:"activeId"`
+	ConnID   string                 `json:"connId" binding:"required"`
+	Tabs     []service.WorkspaceTab `json:"tabs" binding:"required"`
+	ActiveID string                 `json:"activeId"`
 }
 
 // handleSaveWorkspace 保存某连接的查询工作区（整体覆盖）。
