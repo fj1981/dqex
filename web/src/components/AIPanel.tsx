@@ -149,39 +149,12 @@ function CollapsibleContent({ children, maxHeight = 320, live = false }: { child
 
   // 折叠态：定位到「首个 SQL 代码块」位置，使末尾的 SQL（用户核心诉求）优先可见，
   // 前面的解释文字折叠到上方。无代码块时回到顶部。
-  // 使用 IntersectionObserver 监听代码块可见性，自动触发滚动
+  // 仅在进入折叠态时定位一次，不持续纠偏：否则用户向上滚动查看解释文字时会被反复拉回 SQL 处，导致无法滚动
   useEffect(() => {
     const el = innerRef.current
     if (!el || !overflow || !collapsed) return
-    
-    // 查找首个 SQL 代码块
     const codeBlock = el.querySelector<HTMLElement>("pre")
-    if (!codeBlock) {
-      el.scrollTop = 0
-      return
-    }
-    
-    // 创建 IntersectionObserver 监听代码块可见性
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          // 如果代码块完全不可见（intersectionRatio === 0），滚动到其位置
-          if (entry.intersectionRatio === 0 && !entry.isIntersecting) {
-            el.scrollTop = codeBlock.offsetTop - 8
-          }
-        })
-      },
-      {
-        root: el, // 以容器为根
-        threshold: 0, // 只要有一点可见就不触发
-        rootMargin: "0px"
-      }
-    )
-    
-    observer.observe(codeBlock)
-    
-    // 清理函数
-    return () => observer.disconnect()
+    el.scrollTop = codeBlock ? Math.max(0, codeBlock.offsetTop - 8) : 0
   }, [overflow, collapsed, children])
 
   if (!overflow) {
@@ -672,6 +645,29 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
     [ensureSession, appendError, connId, db, tabId, refreshProcUsage],
   )
 
+  // 错误气泡「重试」：回溯到错误前最后一条 user 消息，截断其后的失败对话并重新发送
+  const retrySend = useCallback(
+    (errIndex: number) => {
+      if (streamingRef.current) return
+      const msgs = messagesRef.current
+      let userIdx = -1
+      for (let i = errIndex - 1; i >= 0; i--) {
+        if (msgs[i]?.role === "user") {
+          userIdx = i
+          break
+        }
+      }
+      if (userIdx < 0) return
+      const { content, action } = msgs[userIdx]
+      // 截断该 user 消息之后的所有内容（含错误气泡），doSend 会重新追加 user/assistant；
+      // 同步刷新 ref，避免 doSend 读取到含失败轮次的过期历史
+      messagesRef.current = msgs.slice(0, userIdx)
+      setMessages((m) => m.slice(0, userIdx))
+      void doSend(content, action ?? "generate")
+    },
+    [doSend],
+  )
+
   // 「发送」按钮：读取输入框文本 + 当前 action；解释/修复/优化自动带上当前编辑器 SQL
   const send = useCallback(async () => {
     const text = input.trim()
@@ -816,6 +812,19 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
                           <Sparkles className={`h-3 w-3 ${m.error ? "text-destructive" : "text-violet-500"}`} />
                           AI
                         </div>
+                        {m.error && (
+                          <div className="mb-1.5 flex justify-start">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 gap-1 border-destructive/40 px-2 text-[11px] text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              disabled={streaming}
+                              onClick={() => retrySend(i)}
+                            >
+                              <RotateCcw className="h-3 w-3" /> 重试
+                            </Button>
+                          </div>
+                        )}
                         {(() => {
                           const parsed = parseThinking(m.content)
                           const isStreamingLast = streaming && i === messages.length - 1
