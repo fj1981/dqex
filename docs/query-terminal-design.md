@@ -6,6 +6,8 @@
 
 **核心理念**：让熟悉 MySQL 的用户可以用 MySQL 语法操作 PostgreSQL/Oracle，底层由 `cydb` 的 `preProcess` 自动完成方言翻译。
 
+> ⚠️ **实施偏差（2026-08-19 核实）**：本文档为设计稿，其中关于 `cydb.preProcess` 自动方言翻译的描述**未在实现中落地**——SQL 终端按目标数据库方言原生执行（自动补 LIMIT 为字符串拼接，Oracle 需手写 `FETCH FIRST`），不提供 MySQL→PG/Oracle 语法翻译。实际能力以 [CLI.md](../CLI.md) 为准。
+
 ---
 
 ## 2. 使用方式
@@ -796,7 +798,7 @@ type HistoryEntry struct {
 | 分页器（less -SRX） | ✅ |
 | 审计日志（10MB 轮转） | ✅ |
 | 会话连接池 + 断线重连 | ✅ |
-| MySQL 语法跨库翻译（cydb preProcess） | ✅ |
+| MySQL 语法跨库翻译（cydb preProcess） | ❌ 未接入（按目标方言原生执行，设计稿预留） |
 | 流式 JSON（NDJSON，>10000 行自动切换） | ✅ |
 | 外部编辑器 \e（\ 降级 notepad） | ✅ |
 | 垂直显示 \G（和 mysql CLI 规则一致） | ✅ |

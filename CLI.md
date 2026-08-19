@@ -79,7 +79,7 @@ dbx url --token-only     # 仅输出 token，便于 curl/脚本调试
 | `migrate` | `mig` | `history` | `his` |
 | `compare` | `cmp` | `config` | `cfg` |
 | `dictionary` | `dict` | `sql` | — |
-| `snapshot` | `shot` | `list` | `ls` |
+| `snapshot` | `snap` | `list` | `ls` |
 | `delete` | `del` | | |
 
 **常用短参：**
@@ -171,7 +171,7 @@ dbx history show --id <ID>        # 查看详情
 
 ## SQL 终端（dbx sql）
 
-交互式 REPL / 单次执行 / 智能体友好 JSON 输出。**核心理念：用 MySQL 语法操作 PostgreSQL / Oracle**，底层由 `cydb.preProcess` 自动完成方言翻译（LIMIT 偏移、REPLACE→MERGE、IFNULL→NVL、AUTO_INCREMENT→IDENTITY 等）。
+交互式 REPL / 单次执行 / 智能体友好 JSON 输出。SQL 按**目标数据库方言原生执行**：不提供 MySQL→PG/Oracle 自动语法翻译，跨方言场景请直接写目标方言（PG 用 `LIMIT ... OFFSET ...`、Oracle 用 `FETCH FIRST ... ROWS ONLY`）；DDL 与写入 SQL 的方言转换由迁移/导入引擎负责，与终端无关。
 
 ### 交互式终端
 
