@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels"
-import { AlertCircle, Check, ChevronLeft, ChevronRight, Code2, FunctionSquare, List, Loader2, Plus, Sparkles, Star, Table2, View, X } from "lucide-react"
+import { AlertCircle, Braces, Check, ChevronLeft, ChevronRight, Code2, FunctionSquare, List, Loader2, Plus, Sparkles, Star, Table2, View, X } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 import { setSqlEditor } from "@/lib/editorRef"
+import { formatEditorSQL } from "@/lib/sqlFormat"
 import { useClickOutside } from "@/lib/useClickOutside"
 import { defaultFavoriteTitle } from "@/lib/sql"
 import { prompt } from "@/components/ui/alert-dialog"
@@ -656,9 +657,21 @@ export default function WorkspaceLayout() {
                   </div>
                 </div>
 
-                <div className="flex shrink-0 items-center justify-between border-t bg-card px-3 py-1.5">
+                <div className="flex shrink-0 items-center justify-between border-t bg-muted/40 px-3 py-1.5">
                   {/* 左：AI 快捷动作（解释/优化）+ 成功时的结果统计（行数 / 耗时）；错误由下方结果区卡片展示，避免重复 */}
                   <div className="flex min-w-0 items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
+                      title={hasEditorSelection ? "格式化选中的 SQL" : "格式化 SQL（Shift+Alt+F）"}
+                      onClick={() => {
+                        const ed = sqlEditorRef.current
+                        if (ed) formatEditorSQL(ed)
+                      }}
+                    >
+                      <Braces className="h-3.5 w-3.5" /> 格式化
+                    </Button>
                     {aiStatus?.enabled && (
                       <>
                         <Button

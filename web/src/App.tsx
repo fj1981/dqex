@@ -225,7 +225,7 @@ function RightPanel() {
       )}
       {/* 面板本体：窄屏为浮层，宽屏为常规侧栏；收起时不渲染 */}
       {panelOpen && (
-        <aside className="absolute inset-y-0 right-0 z-30 flex w-72 max-w-[calc(100%-1rem)] shrink-0 flex-col border-l bg-background shadow-xl lg:static lg:z-auto lg:max-w-none lg:bg-muted/20 lg:shadow-none">
+        <aside className="absolute inset-y-0 right-0 z-30 flex w-72 max-w-[calc(100%-1rem)] shrink-0 flex-col border-l bg-background shadow-xl lg:static lg:z-auto lg:max-w-none lg:bg-background lg:shadow-none">
       <div className="flex items-center justify-between px-3 py-2 pr-3">
         <span className="text-xs font-medium text-muted-foreground">
           数据库连接{connections.length > 0 && <span className="ml-1 tabular-nums">({connections.length})</span>}
@@ -243,7 +243,7 @@ function RightPanel() {
               key={c.id}
               type="button"
               title={`${c.conn.Host}:${c.conn.Port} · 点击编辑连接`}
-              className="mb-1 w-full rounded-md border bg-background px-2.5 py-1.5 text-left text-xs transition-colors hover:border-primary/40 hover:shadow-sm"
+              className="mb-1 w-full rounded-md border bg-muted/20 px-2.5 py-1.5 text-left text-xs transition-colors hover:border-primary/40 hover:shadow-sm"
               onClick={() => openDrawer(c)}
             >
               <div className="flex items-center justify-between gap-2">
@@ -320,7 +320,7 @@ function RightPanel() {
                   role="button"
                   tabIndex={0}
                   title="点击查看执行详情"
-                  className="group mb-1.5 min-w-0 cursor-pointer overflow-hidden rounded-md border bg-background px-2.5 py-1.5 text-xs transition-colors hover:border-primary/40 hover:shadow-sm"
+                  className="group mb-1.5 min-w-0 cursor-pointer overflow-hidden rounded-md border bg-muted/20 px-2.5 py-1.5 text-xs transition-colors hover:border-primary/40 hover:shadow-sm"
                   onClick={() => navigate(`${PATH_BY_TYPE[h.taskType] || "/"}?running=${h.id}`)}
                   onKeyDown={(e) => e.key === "Enter" && navigate(`${PATH_BY_TYPE[h.taskType] || "/"}?running=${h.id}`)}
                 >
@@ -565,7 +565,7 @@ function HistoryOrFavoriteCard({
       role="button"
       tabIndex={0}
       title="点击选择回填方式"
-      className="group mb-1.5 min-w-0 cursor-pointer overflow-hidden rounded-md border bg-background px-2.5 py-1.5 text-xs transition-colors hover:border-primary/40 hover:shadow-sm"
+      className="group mb-1.5 min-w-0 cursor-pointer overflow-hidden rounded-md border bg-muted/20 px-2.5 py-1.5 text-xs transition-colors hover:border-primary/40 hover:shadow-sm"
       onClick={() => setMenuOpen((v) => !v)}
       onKeyDown={(e) => e.key === "Enter" && setMenuOpen((v) => !v)}
     >
@@ -694,7 +694,7 @@ function FavoriteList({
         favorites.map((f) => {
           const hint = mismatchHint(f)
           return (
-            <div key={f.id} className="group mb-1.5 min-w-0 overflow-hidden rounded-md border bg-background px-2.5 py-1.5 text-xs">
+            <div key={f.id} className="group mb-1.5 min-w-0 overflow-hidden rounded-md border bg-muted/20 px-2.5 py-1.5 text-xs">
               <div className="flex items-center justify-between gap-1">
                 {editingId === f.id ? (
                   <input
@@ -813,7 +813,7 @@ function AuditList({ connId, items }: { connId: string; items: SQLAuditEntry[] }
             return (
               <div
                 key={a.id}
-                className="mb-1.5 min-w-0 overflow-hidden rounded-md border bg-background px-2.5 py-1.5 text-xs"
+                className="mb-1.5 min-w-0 overflow-hidden rounded-md border bg-muted/20 px-2.5 py-1.5 text-xs"
               >
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
@@ -927,15 +927,6 @@ function Layout() {
         >
           <ClipboardList className={cn("h-4 w-4", location.pathname === "/tasks" ? "text-primary" : "text-muted-foreground")} />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 shrink-0"
-          title="设置"
-          onClick={() => navigate("/settings")}
-        >
-          <Settings className={cn("h-4 w-4", location.pathname === "/settings" ? "text-primary" : "text-muted-foreground")} />
-        </Button>
         {/* 主题切换：浅色 / 深色 / 跟随系统（全局入口） */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -955,6 +946,16 @@ function Layout() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0"
+          title="设置"
+          onClick={() => navigate("/settings")}
+        >
+          <Settings className={cn("h-4 w-4", location.pathname === "/settings" ? "text-primary" : "text-muted-foreground")} />
+        </Button>
+        {/* 帮助与关于：统一入口 */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button

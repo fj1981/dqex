@@ -417,34 +417,29 @@
    shadcn 的 --background，避免 vs-dark 的 #1e1e1e 与页面脱节。
    注意：不要再走 monaco.editor.defineTheme 自定义主题——Monaco 的 token 颜色解析
    只接受 hex/命名色，直接喂 shadcn 的 HSL 变量会在 defineTheme/setTheme 时崩溃。 */
-/* Monaco 编辑器背景与页面统一：外壳 + 行号栏 + 代码行区域全部使用 --background。
-   语法高亮是文字颜色，不受背景影响；当前行高亮 / 选中背景在下面单独保留。 */
+/* Monaco 编辑器背景与页面统一：外壳 + 行号栏使用 --muted/0.2，与主内容区 bg-muted/20 保持一致，避免 vs-dark 的 #1e1e1e 与页面脱节。
+   注意：不要覆盖 .view-line / .lines-content 等内部元素背景，否则会影响选中背景渲染。
+   选中背景通过覆盖 Monaco 的 CSS 变量控制，深浅主题下都清晰可见。 */
 .monaco-editor,
 .monaco-editor .monaco-editor-background,
 .monaco-editor .margin,
-.monaco-editor .glyph-margin,
-.monaco-editor .overflow-guard,
-.monaco-editor .editor-scrollable,
-.monaco-editor .lines-content,
-.monaco-editor .view-lines,
-.monaco-editor .view-line {
-  background-color: hsl(var(--background)) !important;
+.monaco-editor .glyph-margin {
+  background-color: hsl(var(--muted) / 0.2) !important;
 }
-/* 保留 Monaco 当前行高亮和文本选中背景，使用主题 accent/muted 色 */
+/* 覆盖 Monaco 选中背景变量：浅色主题用浅蓝，深色主题用深蓝，对比度足够 */
+.monaco-editor {
+  --vscode-editor-selectionBackground: hsl(var(--primary) / 0.3) !important;
+  --vscode-editor-inactiveSelectionBackground: hsl(var(--primary) / 0.15) !important;
+}
+/* 保留 Monaco 当前行高亮，使用比背景更明显的色调；文本选中背景不覆盖，使用 Monaco 默认的 vs/vs-dark 主题选中色（浅色蓝/深色深蓝，对比度足够） */
 .monaco-editor .current-line,
-.monaco-editor .focused-line,
-.monaco-editor .selected-text,
-.monaco-editor .cslr.selected-text {
-  background-color: hsl(var(--accent)) !important;
+.monaco-editor .focused-line {
+  background-color: hsl(var(--secondary)) !important;
 }
-.monaco-editor .selected-text,
-.monaco-editor .cslr.selected-text {
-  background-color: hsl(var(--muted)) !important;
-}
-/* 建议补全框 / 参数提示浮层：与页面背景一致（vs-dark 默认 #1e1e1e / #252526） */
+/* 建议补全框 / 参数提示浮层：与编辑器区域背景一致（vs-dark 默认 #1e1e1e / #252526） */
 .monaco-editor .suggest-widget,
 .monaco-editor .suggest-details,
 .monaco-editor .parameter-hints-widget {
-  background-color: hsl(var(--background)) !important;
+  background-color: hsl(var(--muted) / 0.2) !important;
   border-color: hsl(var(--border)) !important;
 }

@@ -151,14 +151,20 @@ function CollapsibleContent({ children, maxHeight = 320, live = false }: { child
   // 注意：用 el.scrollTop 直接滚动自身容器，而非 scrollIntoView——
   // 后者会级联滚动所有祖先滚动容器（含外层对话区），导致对话区滚动位置错乱。
   useEffect(() => {
-    if (!overflow || !collapsed) return
     const el = innerRef.current
     if (!el) return
+    // 无论是否折叠/溢出，只要有 SQL 代码块就尝试滚动到其位置（确保首次渲染时操作区可见）
     const codeBlock = el.querySelector<HTMLElement>("pre")
     if (codeBlock) {
-      // 相对容器顶部的偏移（offsetTop 相对最近的定位祖先，这里容器未定位，用 getBoundingClientRect 差值最稳）
-      el.scrollTop = codeBlock.offsetTop
-    } else {
+      // 检查代码块是否在可视区域内，如果不在则滚动
+      const containerRect = el.getBoundingClientRect()
+      const blockRect = codeBlock.getBoundingClientRect()
+      // 如果代码块顶部低于容器底部，或底部高于容器顶部，说明不可见
+      if (blockRect.bottom > containerRect.bottom || blockRect.top < containerRect.top) {
+        el.scrollTop = codeBlock.offsetTop - 8 // 留一点上边距
+      }
+    } else if (overflow && collapsed) {
+      // 无代码块且处于折叠溢出状态时回到顶部
       el.scrollTop = 0
     }
   }, [overflow, collapsed, children])
@@ -177,7 +183,7 @@ function CollapsibleContent({ children, maxHeight = 320, live = false }: { child
         {children}
       </div>
       {collapsed && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-background to-transparent" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-background to-transparent" />
       )}
       <button
         type="button"
@@ -273,7 +279,7 @@ function CodeBlock({ text, lang, isSql, hasSelection, schemaVerified, onApplySql
           {isSql && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="ghost" className="h-5 gap-1 px-1.5 text-[10px] text-violet-600 hover:text-violet-700">
+                <Button size="sm" variant="ghost" className="h-5 gap-1 px-1.5 text-[10px] text-muted-foreground hover:text-violet-600">
                   <CornerDownLeft className="h-3 w-3" /> 插入
                   <ChevronDown className="h-3 w-3" />
                 </Button>
@@ -300,7 +306,7 @@ function CodeBlock({ text, lang, isSql, hasSelection, schemaVerified, onApplySql
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-          <Button size="sm" variant="ghost" className="h-5 gap-1 px-1.5 text-[10px]" onClick={copy} title="复制">
+          <Button size="sm" variant="ghost" className="h-5 gap-1 px-1.5 text-[10px] text-muted-foreground hover:text-foreground" onClick={copy} title="复制">
             {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
             {copied ? "已复制" : "复制"}
           </Button>
@@ -398,20 +404,41 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
   const scrollRef = useRef<HTMLDivElement>(null)
   // 内联 diff 预览：展开预览的消息索引（-1 表示不展开）
 
+  // 跟踪用户是否在底部（用于智能跟随滚动）
+  const isAtBottomRef = useRef(true) // 默认认为在底部
 
-  // 流式输出中：跟随滚动到底部（保持最新内容可见）。
-  // 仅在 streaming 期间跟随；输出完成后不再强制滚动，避免与折叠组件（CollapsibleContent）
-  // 在流式结束时的「高度收缩 + 定位 SQL」产生滚动竞争，导致对话区滚动位置错乱。
+  // 监听用户滚动行为：实时更新「是否在底部」状态
   useEffect(() => {
-    if (!streaming) return
     const el = scrollRef.current
     if (!el) return
-    // 用 rAF 确保本轮消息增量渲染完成后滚动，避免读到旧 scrollHeight
-    const raf = requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight
+
+    const threshold = 80 // 距离底部 80px 以内视为「在底部」
+    
+    const checkBottom = () => {
+      const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
+      isAtBottomRef.current = isNearBottom
+    }
+
+    el.addEventListener('scroll', checkBottom, { passive: true })
+    // 初始化时检查一次
+    checkBottom()
+    return () => el.removeEventListener('scroll', checkBottom)
+  }, [])
+
+  // 当消息内容变化时：如果用户之前在底部，则自动跟随滚动到底部
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || !isAtBottomRef.current) return
+
+    // 用 rAF + setTimeout 双重确保 DOM 完全渲染后再滚动
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        if (isAtBottomRef.current) {
+          el.scrollTop = el.scrollHeight
+        }
+      }, 50) // 给 DOM 渲染留一点时间
     })
-    return () => cancelAnimationFrame(raf)
-  }, [messages, streaming])
+  }, [messages])
 
   // 拉取进程级 token 累计（每次 done 后也刷新）
   const refreshProcUsage = useCallback(() => {
@@ -456,7 +483,11 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
         // 避免后端 ActionPrompt 拼装的指令长文本直接暴露给用户。
         const restored: AiMessage[] = (session.messages ?? [])
           .filter((m) => m.role === "user" || m.role === "assistant")
-          .filter((m) => m.content || m.extra?.raw)
+          .filter((m) => {
+            // 过滤空消息：user 消息必须有 content 或 extra.raw；assistant 消息必须有 content
+            if (m.role === "user") return !!(m.content || m.extra?.raw)
+            return !!m.content
+          })
           .map((m) => {
             if (m.role === "user") {
               const raw = m.extra?.raw || m.content
@@ -695,7 +726,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
                     </div>
                   </div>
                 </div>
-              ) : (
+              ) : m.content || m.error || (streaming && i === messages.length - 1) ? (
                 <div key={i} className="flex justify-start">
                   <div
                     className={`max-w-[92%] rounded-lg border px-3 py-2 text-xs ${
@@ -730,7 +761,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
                     })()}
                   </div>
                 </div>
-              ),
+              ) : null,
             )
           )}
         </div>

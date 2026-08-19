@@ -450,7 +450,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     set((s) => ({
       running: true,
       tabs: s.tabs.map((t) =>
-        t.id === id && t.kind === "query" ? { ...t, running: true, error: null } : t,
+        t.id === id && t.kind === "query" ? { ...t, running: true, error: null, results: [], activeResult: 0 } : t,
       ) as WorkspaceTab[],
     }))
     try {

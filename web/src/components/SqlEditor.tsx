@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from "react"
 import { cn } from "@/lib/utils"
 import { useIsDark } from "@/lib/theme"
 import { monaco } from "@/lib/monaco"
+import { formatEditorSQL } from "@/lib/sqlFormat"
 
 interface Props {
   value: string
@@ -117,6 +118,11 @@ export default function SqlEditor({ value, onChange, onRun, disabled, className,
       } else {
         onRun()
       }
+    })
+
+    // Shift+Alt+F：SQL 格式化（有选中格式化选中部分，无选中格式化全文）
+    ed.addCommand(KeyMod.Shift | KeyMod.Alt | KeyCode.KeyF, () => {
+      formatEditorSQL(ed)
     })
 
     // 光标/选中变化时上报（供 AI 插入菜单默认项判断）
