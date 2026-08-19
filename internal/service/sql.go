@@ -249,12 +249,26 @@ func (s *Service) RunSQLScript(ctx context.Context, connKey, dbName, sql string,
 
 	results, err := engine.RunSQLScript(ctx, cli, sql, limit, offset, mode)
 	if err != nil {
-		// 执行失败：记录历史并审计，返回错误（前端展示）
+		// 连接/分割级失败：记录历史并审计，返回错误（前端展示）
 		item := SQLHistoryItem{ConnID: connKey, DB: dbName, Mode: mode, SQL: sql, Status: "error", ErrorMsg: err.Error(), CreatedAt: nowMillis()}
 		s.recordSQL(item, dbName, mode)
 		return nil, err
 	}
-	// 记录历史（汇总）
+	// 语句级失败（结果中含错误占位）：整次执行记为 error，错误信息取第一条失败语句；
+	// 已成功的结果集仍随 results 返回，前端在多结果集 tab 上对应展示（部分成功）
+	var firstErr string
+	for _, r := range results {
+		if r.Error != "" {
+			firstErr = r.Error
+			break
+		}
+	}
+	if firstErr != "" {
+		item := SQLHistoryItem{ConnID: connKey, DB: dbName, Mode: mode, SQL: sql, Status: "error", ErrorMsg: firstErr, CreatedAt: nowMillis()}
+		s.recordSQL(item, dbName, mode)
+		return results, nil
+	}
+	// 全部成功：记录历史（汇总）
 	totalRows := 0
 	hasWrite := false
 	for _, r := range results {

@@ -308,7 +308,9 @@ func (s *session) buildAgentTools(maxSchemaChars int) ([]tool.InvokableTool, err
 					Comment:  col.Comment,
 				})
 			}
-			return llm.BuildSchemaText([]llm.TableInfo{ti}, 1, maxSchemaChars), nil
+			// 用完整版渲染（不过滤敏感列）：工具语义是返回真实表结构，
+			// 过滤会让模型误判字段不存在（如 email/mobile/password_*），导致臆造或报错
+			return llm.BuildSchemaTextFull([]llm.TableInfo{ti}, 1, maxSchemaChars), nil
 		})
 	if err != nil {
 		return nil, fmt.Errorf("构建工具 get_schema 失败: %w", err)

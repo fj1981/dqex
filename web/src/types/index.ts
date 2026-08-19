@@ -449,6 +449,7 @@ export interface SQLQueryResult {
   isWrite: boolean
   warnings: string[]
   error?: string // 执行失败原因（非空时表示失败结果）
+  skipped?: boolean // 未执行：因前面语句失败而跳过的语句（仅占位，无结果）
 }
 
 export interface SQLHistoryItem {
@@ -578,8 +579,9 @@ export interface AISessionRecord {
     tool_calls?: unknown[]
     tool_call_id?: string
     tool_name?: string
-    // 后端在 user 消息上附加的元信息：action 为动作类型，raw 为原始输入（纯 SQL / 需求）
-    extra?: { action?: string; raw?: string }
+    // 后端在 user 消息上附加的元信息：action 为动作类型，raw 为原始输入（纯 SQL / 需求），
+    // msg_id 为该条 user 消息的发起流水号（会话内递增，幂等去重依据）
+    extra?: { action?: string; raw?: string; msg_id?: string }
   }[]
   usage?: AIUsage
   createdAt: number

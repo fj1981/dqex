@@ -24,7 +24,7 @@ type TableInfo struct {
 	Schema  string       // 库名（可为空）
 	Table   string       // 表名
 	Comment string       // 表注释（可为空）
-	Columns []ColumnInfo // 列信息（已过滤敏感列）
+	Columns []ColumnInfo // 列信息（渲染时可按需过滤敏感列，见 BuildSchemaTextFull）
 }
 
 // ColumnInfo 列信息。
@@ -86,6 +86,17 @@ func RenderSystemPrompt(custom, dialect, schema string) string {
 // - maxChars 控制注入文本的字符上限（<=0 表示不裁剪），超出部分裁剪。
 // 两个上限由调用方从配置（ai.max_schema_tables / ai.max_schema_chars）传入。
 func BuildSchemaText(tables []TableInfo, maxTables, maxChars int) string {
+	return buildSchemaText(tables, maxTables, maxChars, true)
+}
+
+// BuildSchemaTextFull 与 BuildSchemaText 相同，但不做敏感列（PII）过滤，返回完整表结构。
+// 供 get_schema 等「模型主动按需查询真实表结构」的工具使用：
+// 过滤会破坏结构完整性，导致模型误判字段不存在（如 email/mobile/password_* 等）。
+func BuildSchemaTextFull(tables []TableInfo, maxTables, maxChars int) string {
+	return buildSchemaText(tables, maxTables, maxChars, false)
+}
+
+func buildSchemaText(tables []TableInfo, maxTables, maxChars int, filterSensitive bool) string {
 	if len(tables) == 0 {
 		return ""
 	}
@@ -103,7 +114,7 @@ func BuildSchemaText(tables []TableInfo, maxTables, maxChars int) string {
 			b.WriteString("\n# 表结构已裁剪（内容过长）...\n")
 			break
 		}
-		block := formatTable(t)
+		block := formatTableOpt(t, filterSensitive)
 		if maxChars > 0 && len(block) > budget {
 			block = truncateBlock(block, budget)
 		}
@@ -144,6 +155,12 @@ func truncRunes(s string, n int) string {
 }
 
 func formatTable(t TableInfo) string {
+	return formatTableOpt(t, true)
+}
+
+// formatTableOpt 渲染单表结构；filterSensitive=true 时排除敏感列（PII 脱敏），
+// false 时输出全部列（get_schema 工具需要完整结构供模型生成 SQL）。
+func formatTableOpt(t TableInfo, filterSensitive bool) string {
 	var b strings.Builder
 	name := quoteIdent(t.Table)
 	if t.Schema != "" {
@@ -156,7 +173,7 @@ func formatTable(t TableInfo) string {
 	}
 	written := 0
 	for _, c := range t.Columns {
-		if isSensitiveColumn(c.Name) {
+		if filterSensitive && isSensitiveColumn(c.Name) {
 			continue
 		}
 		if written >= maxSchemaColumnsPerTable {

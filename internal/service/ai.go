@@ -241,7 +241,10 @@ func (s *Service) AINewSession(ctx context.Context, connKey, dbName, tabID strin
 		}
 		ses.Messages = append(ses.Messages, h)
 	}
-	trimMessages(ses.Messages)
+	// 防御性去重：折叠历史中连续相同的 user 消息（前端并发发送/失败重试的残留），
+	// 避免重建后重复指令污染模型上下文
+	ses.Messages = dedupeConsecutiveUser(ses.Messages)
+	ses.Messages = trimMessages(ses.Messages)
 	// agent 独立 ChatModel 实例（react 需 BindTools，不能与共享 client 混用避免绑定竞争）
 	lc := llm.Config{
 		BaseURL:     strings.TrimSpace(aiCfg.BaseURL),
@@ -371,23 +374,23 @@ func (s *Service) restoreSession(ctx context.Context, sessionID, connKey, dbName
 // AIChat 非流式对话：追加用户消息 → 生成 → 追加助手消息 → 返回文本 + 本轮 usage。
 // action 取值 generate/explain/fix/optimize，空视为 generate；task 为需求文本或原始 SQL。
 // schemaVerified 表示本轮是否调用过 get_schema（真实表结构已验证），供前端可靠度标记。
-func (s *Service) AIChat(ctx context.Context, sessionID, action, task string) (string, llm.Usage, bool, error) {
-	r, err := s.aiChat(ctx, sessionID, action, task, nil, nil)
+func (s *Service) AIChat(ctx context.Context, sessionID, action, task, msgID string) (string, llm.Usage, bool, error) {
+	r, err := s.aiChat(ctx, sessionID, action, task, msgID, nil, nil)
 	return r.content, r.usage, r.schemaVerified, err
 }
 
 // AIChatStream 流式对话：onDelta 每收到一段增量即回调，onTool 每次工具调用开始时回调（agent 模式）。
 // 返回本轮累计 usage（模型未提供时记 0）+ 本轮是否已验证真实表结构（schemaVerified）。
-func (s *Service) AIChatStream(ctx context.Context, sessionID, action, task string, onDelta func(string), onTool func(string, string)) (llm.Usage, bool, error) {
-	r, err := s.aiChat(ctx, sessionID, action, task, onDelta, onTool)
+func (s *Service) AIChatStream(ctx context.Context, sessionID, action, task, msgID string, onDelta func(string), onTool func(string, string)) (llm.Usage, bool, error) {
+	r, err := s.aiChat(ctx, sessionID, action, task, msgID, onDelta, onTool)
 	return r.usage, r.schemaVerified, err
 }
 
 // AIChatStreamWithFallback 流式对话（Web 主链路）：会话不存在时，用 connID/db/tabID/history
 // 透明重建会话并继续（复用原 sessionID，前端无需感知会话生命周期、也无需更新 ID）。
 // 返回 usage + schemaVerified（本轮是否已验证真实表结构）。
-func (s *Service) AIChatStreamWithFallback(ctx context.Context, sessionID, action, task string, connID, db, tabID string, history []*schema.Message, onDelta func(string), onTool func(string, string)) (llm.Usage, bool, error) {
-	r, err := s.aiChat(ctx, sessionID, action, task, onDelta, onTool)
+func (s *Service) AIChatStreamWithFallback(ctx context.Context, sessionID, action, task, msgID string, connID, db, tabID string, history []*schema.Message, onDelta func(string), onTool func(string, string)) (llm.Usage, bool, error) {
+	r, err := s.aiChat(ctx, sessionID, action, task, msgID, onDelta, onTool)
 	if err != nil {
 		// 会话不存在且提供了重建信息 → 透明重建（复用原 sessionID，回放历史）
 		if connID != "" && isSessionNotFound(err) {
@@ -400,7 +403,7 @@ func (s *Service) AIChatStreamWithFallback(ctx context.Context, sessionID, actio
 				}
 			}
 			// 用原 sessionID 重跑（历史已回放，task 为当前问题）
-			r2, e2 := s.aiChat(ctx, sessionID, action, task, onDelta, onTool)
+			r2, e2 := s.aiChat(ctx, sessionID, action, task, msgID, onDelta, onTool)
 			return r2.usage, r2.schemaVerified, e2
 		}
 		return r.usage, r.schemaVerified, err
@@ -426,7 +429,27 @@ type aiChatResult struct {
 	schemaVerified bool
 }
 
-func (s *Service) aiChat(ctx context.Context, sessionID, action, task string, onDelta func(string), onTool func(string, string)) (aiChatResult, error) {
+// findMsgIDUser 在历史中定位指定流水号（msg_id）的 user 消息。
+// 返回该消息的索引与「其后是否已有 assistant 回答」：
+//   - idx >= 0 且 answered=true：该发起已完整处理过（幂等命中，可重放结果）
+//   - idx >= 0 且 answered=false：该发起悬空（user 已存在但无回答，可复用继续）
+//   - idx < 0：历史中无此流水号
+func findMsgIDUser(msgs []*schema.Message, msgID string) (idx int, answered bool) {
+	if msgID == "" {
+		return -1, false
+	}
+	for i, m := range msgs {
+		if m == nil || m.Role != schema.User {
+			continue
+		}
+		if id, _ := m.Extra["msg_id"].(string); id == msgID {
+			return i, i+1 < len(msgs) && msgs[i+1] != nil && msgs[i+1].Role == schema.Assistant
+		}
+	}
+	return -1, false
+}
+
+func (s *Service) aiChat(ctx context.Context, sessionID, action, task, msgID string, onDelta func(string), onTool func(string, string)) (aiChatResult, error) {
 	ses, err := s.getSession(sessionID)
 	if err != nil {
 		return aiChatResult{}, err
@@ -449,12 +472,75 @@ func (s *Service) aiChat(ctx context.Context, sessionID, action, task string, on
 	userText := llm.ActionPrompt(action, task)
 	userMsg := schema.UserMessage(userText)
 	userMsg.Extra = map[string]any{"action": action, "raw": task}
+	if msgID != "" {
+		userMsg.Extra["msg_id"] = msgID
+	}
+
+	// 流水号幂等：每个发起（msg_id，前端按会话递增生成）在历史中只允许出现一次。
+	// 覆盖：网络重试/重复请求（已处理完 → 重放结果，不写历史）、透明重建回放（悬空 → 复用继续）、
+	// 失败残留（尾部不同流水号的悬空 user → 原位替换）。
+	if msgID != "" {
+		if idx, answered := findMsgIDUser(ses.Messages, msgID); idx >= 0 {
+			if answered {
+				// 该发起已完整处理过：直接重放已有回答（幂等命中），历史不变
+				content := ses.Messages[idx+1].Content
+				if onDelta != nil {
+					onDelta(content)
+				}
+				s.aiDebugf("[ai] 流水号幂等命中（已处理），重放结果 session=%s msgID=%s", sessionID, msgID)
+				return aiChatResult{content: content, schemaVerified: ses.schemaQueried.Load()}, nil
+			}
+			// 该发起悬空（重建回放后重复到达）：保留该 user，丢弃其后的未完成残留后继续处理
+			ses.Messages = ses.Messages[:idx+1]
+			ses.Messages = trimMessages(ses.Messages)
+			s.aiDebugf("[ai] 流水号悬空（重建回放重复），复用该 user 继续 session=%s msgID=%s", sessionID, msgID)
+			return s.aiAgentChat(ctx, ses, action, onDelta, onTool)
+		}
+		// 未命中：尾部悬空 user（其他发起失败残留）原位替换，不留悬空
+		if n := len(ses.Messages); n > 0 {
+			if last := ses.Messages[n-1]; last != nil && last.Role == schema.User {
+				s.aiDebugf("[ai] 尾部悬空 user（不同流水号），原位替换 session=%s msgID=%s", sessionID, msgID)
+				ses.Messages[n-1] = userMsg
+				ses.Messages = trimMessages(ses.Messages)
+				return s.aiAgentChat(ctx, ses, action, onDelta, onTool)
+			}
+		}
+		ses.Messages = append(ses.Messages, userMsg)
+		ses.Messages = trimMessages(ses.Messages)
+		s.aiDebugf("[ai] 对话开始 session=%s action=%s task=%q msgID=%s msgs=%d", sessionID, action, truncLog(task, 200), msgID, len(ses.Messages))
+		return s.aiAgentChat(ctx, ses, action, onDelta, onTool)
+	}
+
+	// msgID 为空（CLI / 旧调用方）：退回内容比较兜底
+	if n := len(ses.Messages); n > 0 {
+		if last := ses.Messages[n-1]; last != nil && last.Role == schema.User {
+			if raw, _ := last.Extra["raw"].(string); raw == task {
+				s.aiDebugf("[ai] 检测到悬空 user 且与当前任务相同，跳过重复追加 session=%s task=%q", sessionID, truncLog(task, 200))
+				ses.Messages = trimMessages(ses.Messages)
+				return s.aiAgentChat(ctx, ses, action, onDelta, onTool)
+			}
+			s.aiDebugf("[ai] 检测到悬空 user（失败残留），原位替换为当前任务 session=%s", sessionID)
+			ses.Messages[n-1] = userMsg
+			ses.Messages = trimMessages(ses.Messages)
+			return s.aiAgentChat(ctx, ses, action, onDelta, onTool)
+		}
+	}
 	ses.Messages = append(ses.Messages, userMsg)
-	trimMessages(ses.Messages)
+	ses.Messages = trimMessages(ses.Messages)
 	s.aiDebugf("[ai] 对话开始 session=%s action=%s task=%q taskChars=%d msgs=%d", sessionID, action, truncLog(task, 200), len(task), len(ses.Messages))
 
 	// 统一走 React Agent：模型可调只读工具探索元数据后生成 SQL
-	return s.aiAgentChat(ctx, ses, action, onDelta, onTool)
+	r, err := s.aiAgentChat(ctx, ses, action, onDelta, onTool)
+	if err != nil {
+		// 失败回滚本轮 user 消息：失败轮次不残留，避免用户重试/重发后同一需求重复累积，
+		// 保持后端历史与前端截断重试的一致性
+		if n := len(ses.Messages); n > 0 && ses.Messages[n-1] == userMsg {
+			ses.Messages = ses.Messages[:n-1]
+			s.persistSession(ses)
+		}
+		return aiChatResult{}, err
+	}
+	return r, nil
 }
 
 // aiAgentChat 对话：React Agent 循环执行，工具事件经 ToolSink 透传，最终答案作为 assistant 消息持久化。
@@ -484,7 +570,7 @@ func (s *Service) aiAgentChat(ctx context.Context, ses *AISession, action string
 
 	// 持久化最终答案（工具调用的中间过程不落盘，下一轮由模型按需重新探索）
 	ses.Messages = append(ses.Messages, schema.AssistantMessage(content, nil))
-	trimMessages(ses.Messages)
+	ses.Messages = trimMessages(ses.Messages)
 	ses.Usage.Add(usage)
 	ses.LastAt = time.Now()
 	m := s.ai
@@ -690,7 +776,9 @@ func (s *Service) buildAgentTools(conn DBConnInfo, maxSchemaChars int, ses *AISe
 			}
 			// 成功拿到真实表结构后置位标记，供结果校验判断模型是否跳过工具探索
 			ses.schemaQueried.Store(true)
-			return llm.BuildSchemaText([]llm.TableInfo{ti}, 1, maxSchemaChars), nil
+			// 用完整版渲染（不过滤敏感列）：工具语义是返回真实表结构，
+			// 过滤会让模型误判字段不存在（如 email/mobile/password_*），导致臆造或报错
+			return llm.BuildSchemaTextFull([]llm.TableInfo{ti}, 1, maxSchemaChars), nil
 		})
 	if err != nil {
 		return nil, cyginWrapAI(fmt.Errorf("构建工具 get_schema 失败: %w", err))
@@ -829,7 +917,8 @@ func (s *Service) AIPurgeExcessSessions() int64 {
 //
 // 一组 = 一条 User 到下一个 User 之前的所有消息（agent 模式可含工具调用与结果）。
 // 保留索引 0 的 system 消息。
-func trimMessages(msgs []*schema.Message) {
+// 返回裁剪后的切片（必须由调用方回写，否则裁剪不生效且可能覆盖底层数组）。
+func trimMessages(msgs []*schema.Message) []*schema.Message {
 	// 第 1 级：字符预算裁剪（优先丢「无 SQL 的旧轮次」，保留含 SQL 的关键轮次）
 	for historyChars(msgs) > aiMaxHistoryChars && len(msgs) > 2 {
 		s, e := trimTarget(msgs)
@@ -846,6 +935,38 @@ func trimMessages(msgs []*schema.Message) {
 		}
 		msgs = append(msgs[:1], msgs[cut:]...)
 	}
+	return msgs
+}
+
+// dedupeConsecutiveUser 折叠历史中「连续相同内容」的 user 消息，只保留最后一条。
+// 背景：前端并发发送/失败重试会在历史中残留多条相同 user（中间无 assistant），
+// 模型看到连续重复的用户指令会困惑并复读旧回答。仅折叠相邻相同消息，不跨轮次去重。
+func dedupeConsecutiveUser(msgs []*schema.Message) []*schema.Message {
+	out := make([]*schema.Message, 0, len(msgs))
+	for _, m := range msgs {
+		if m == nil {
+			continue
+		}
+		if len(out) > 0 && m.Role == schema.User && out[len(out)-1] != nil && out[len(out)-1].Role == schema.User {
+			if sameUserText(m, out[len(out)-1]) {
+				out[len(out)-1] = m // 内容相同：替换为新的（保留最新字段）
+				continue
+			}
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// sameUserText 比较两条 user 消息是否为同一需求：优先用 extra.raw（原始输入），
+// 缺失时退回比较完整 content（回放历史可能不带 Extra）。
+func sameUserText(a, b *schema.Message) bool {
+	ar, _ := a.Extra["raw"].(string)
+	br, _ := b.Extra["raw"].(string)
+	if ar != "" && br != "" {
+		return ar == br
+	}
+	return a.Content == b.Content
 }
 
 // historyChars 累计所有消息的字符数（近似 token 预算，中文 1 字≈1 token，英文偏保守）。

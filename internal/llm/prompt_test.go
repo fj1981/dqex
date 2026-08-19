@@ -50,8 +50,8 @@ func TestFormatTableNoSchema(t *testing.T) {
 
 func TestSensitiveColumnFilter(t *testing.T) {
 	ti := TableInfo{
-		Schema:  "s",
-		Table:   "account",
+		Schema: "s",
+		Table:  "account",
 		Columns: []ColumnInfo{
 			mkCol("id", "int", false, ""),
 			mkCol("username", "varchar(32)", false, ""),
@@ -106,6 +106,37 @@ func TestColumnLimit(t *testing.T) {
 	n := strings.Count(out, "\n") - 2 // 去掉表头行与标注行
 	if n != maxSchemaColumnsPerTable {
 		t.Fatalf("列数应为 %d，实际 %d", maxSchemaColumnsPerTable, n)
+	}
+}
+
+func TestBuildSchemaTextFullKeepsSensitive(t *testing.T) {
+	ti := TableInfo{
+		Schema:  "rpa_cs",
+		Table:   "robotics_user",
+		Comment: "用户表",
+		Columns: []ColumnInfo{
+			mkCol("id", "bigint", false, "主键id"),
+			mkCol("login_name", "varchar(50)", false, "登录名"),
+			mkCol("password_salt", "varchar(64)", true, "盐"),
+			mkCol("password_hash", "varchar(128)", true, ""),
+			mkCol("email", "varchar(100)", true, "邮箱"),
+			mkCol("mobile", "varchar(20)", true, "手机"),
+			mkCol("password_reset", "int", true, ""),
+		},
+	}
+	// 完整版（get_schema 工具用）：敏感列必须保留
+	out := BuildSchemaTextFull([]TableInfo{ti}, 1, 0)
+	for _, name := range []string{"password_salt", "password_hash", "email", "mobile", "password_reset"} {
+		if !strings.Contains(out, "`"+name+"`") {
+			t.Fatalf("完整版应保留敏感列 %s:\n%s", name, out)
+		}
+	}
+	// 默认版：仍应过滤敏感列（兼容旧静态注入语义）
+	out2 := BuildSchemaText([]TableInfo{ti}, 1, 0)
+	for _, name := range []string{"password_salt", "password_hash", "email", "mobile", "password_reset"} {
+		if strings.Contains(out2, "`"+name+"`") {
+			t.Fatalf("默认版应过滤敏感列 %s:\n%s", name, out2)
+		}
 	}
 }
 

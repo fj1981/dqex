@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xuri/excelize/v2"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/ss"
-	"github.com/xuri/excelize/v2"
 )
 
 // MaxQueryLimit 单次查询返回行数上限（安全护栏，防止拖垮后端）
@@ -29,7 +29,8 @@ type SQLQueryResult struct {
 	SQL          string   `json:"sql"`
 	IsWrite      bool     `json:"isWrite"`
 	Warnings     []string `json:"warnings"`
-	Error        string   `json:"error,omitempty"` // 执行失败原因（非空时视为失败结果，正常返回给前端展示）
+	Error        string   `json:"error,omitempty"`   // 执行失败原因（非空时视为失败结果，正常返回给前端展示）
+	Skipped      bool     `json:"skipped,omitempty"` // 未执行：因前面语句失败而跳过的语句（仅占位，无结果）
 }
 
 // ClassifySQL 判断 SQL 是否为写操作（INSERT/UPDATE/DELETE 等）。
@@ -210,10 +211,10 @@ func RunSQLQuery(ctx context.Context, cli *cydb.DBCli, sql string, limit, offset
 
 	// 执行模式分支：raw 直传；transform 由底层库 EnsureLimit 解析重构 + 补 LIMIT
 	var (
-		execSQL     string
-		rows        [][]any
-		columns     []string
-		err         error
+		execSQL string
+		rows    [][]any
+		columns []string
+		err     error
 	)
 	if mode == "raw" {
 		execSQL = sql
@@ -557,11 +558,11 @@ func RunSQLExec(ctx context.Context, cli *cydb.DBCli, sql string) (*SQLQueryResu
 
 // UpdateCellParams 单元格更新参数：表名、目标列、主键列及值（用于 WHERE 等值定位）。
 type UpdateCellParams struct {
-	Table      string   // 表名（不含库前缀）
-	SetColumn  string   // 目标列名
-	SetValue   any      // 目标列新值（nil 表示 SET NULL）
-	PKColumns  []string // 主键列名（可复合主键）
-	PKValues   []any    // 主键值，与 PKColumns 顺序一致
+	Table     string   // 表名（不含库前缀）
+	SetColumn string   // 目标列名
+	SetValue  any      // 目标列新值（nil 表示 SET NULL）
+	PKColumns []string // 主键列名（可复合主键）
+	PKValues  []any    // 主键值，与 PKColumns 顺序一致
 }
 
 // RunParamUpdate 执行单元格 UPDATE（复用 cydb 语句构建器 + 命名参数绑定，彻底防注入）：
@@ -641,9 +642,9 @@ func RunParamDelete(ctx context.Context, cli *cydb.DBCli, p DeleteRowParams) (in
 // InsertRowParams 新增行参数：表名、目标列名与值（列值映射）。
 // 自增主键列通常不在 columns 中（由数据库生成），仅传用户显式填写的列。
 type InsertRowParams struct {
-	Table   string         // 表名（不含库前缀）
-	Columns []string       // 要写入的列名（与 Values 顺序一致）
-	Values  []any          // 对应列的值（nil 表示 NULL）
+	Table   string   // 表名（不含库前缀）
+	Columns []string // 要写入的列名（与 Values 顺序一致）
+	Values  []any    // 对应列的值（nil 表示 NULL）
 }
 
 // RunParamInsert 执行 INSERT（复用 cydb 语句构建器 + 命名参数绑定，彻底防注入）：
@@ -726,6 +727,11 @@ func GetCellValue(ctx context.Context, cli *cydb.DBCli, table, column string, pk
 // RunSQLScript 批量执行多语句 SQL（Navicat 式）：按分号分割，逐条判断读写，
 // 读语句走查询（含 LIMIT 护栏与方言重构），写语句走执行，返回结果集数组（顺序与语句一致）。
 //
+// 失败策略：语句级失败时停止后续执行（避免依赖后续语句错乱），但保留已成功的结果集，
+// 并在失败语句的对应位置插入错误占位结果（Error 非空），后续语句逐个插入「未执行」占位
+// （Skipped=true）——前端在多结果集 tab 上定位显示，而非整体失败丢弃全部结果。
+// 错误占位携带失败语句原文（SQL 字段），不依赖「第 N 条」序号。
+//
 // 语句分割复用底层库 cydb.SplitSQLStatements（正确处理字符串/引号/三种注释内的分号）。
 // 写操作的安全确认由调用方（Web handler / 前端）在进入本函数前完成；
 // 本函数仍会对每条语句做危险函数拦截（安全底线）。
@@ -740,23 +746,37 @@ func RunSQLScript(ctx context.Context, cli *cydb.DBCli, sql string, limit, offse
 		return nil, fmt.Errorf("未检测到可执行的 SQL 语句")
 	}
 	results := make([]*SQLQueryResult, 0, len(stmts))
-	for _, stmt := range stmts {
+	for i, stmt := range stmts {
 		if ClassifySQL(stmt) {
 			// 写操作：逐条执行（危险函数仍拦截）
 			r, err := RunSQLExec(ctx, cli, stmt)
 			if err != nil {
-				return nil, fmt.Errorf("第 %d 条语句执行失败: %w", len(results)+1, err)
+				results = append(results, &SQLQueryResult{SQL: stmt, IsWrite: true, Error: err.Error()})
+				appendSkipped(results, stmts[i+1:])
+				return results, nil
 			}
 			results = append(results, r)
 		} else {
 			r, err := RunSQLQuery(ctx, cli, stmt, limit, offset, mode)
 			if err != nil {
-				return nil, fmt.Errorf("第 %d 条语句执行失败: %w", len(results)+1, err)
+				results = append(results, &SQLQueryResult{SQL: stmt, Error: err.Error()})
+				appendSkipped(results, stmts[i+1:])
+				return results, nil
 			}
 			results = append(results, r)
 		}
 	}
 	return results, nil
+}
+
+// appendSkipped 将未执行的剩余语句逐个追加为「未执行」占位结果（Skipped=true）。
+// 后续语句可能依赖失败语句（如先建表后插数），继续执行只会产生连锁报错噪音，
+// 故统一跳过并在结果集数组中保留对应位置，前端可逐条标识未执行。
+func appendSkipped(results []*SQLQueryResult, rest []string) []*SQLQueryResult {
+	for _, s := range rest {
+		results = append(results, &SQLQueryResult{SQL: s, IsWrite: ClassifySQL(s), Skipped: true})
+	}
+	return results
 }
 
 // Ping 检测数据库连接可用性（SELECT 1），返回耗时（毫秒）。

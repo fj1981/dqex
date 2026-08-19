@@ -51,6 +51,9 @@ interface AiMessage {
   // action：本条 user 消息对应的动作类型（解释/优化/修复/生成），
   // 仅 user 消息携带，用于气泡上展示语义标签；assistant 消息无。
   action?: AiMode
+  // msgId：本条 user 消息的发起流水号（会话内递增），后端据此幂等去重；
+  // 仅 user 消息携带，重试时复用原发起号。
+  msgId?: string
   // schemaVerified：本轮对话是否调用过 get_schema（真实表结构已验证）。
   // 用于 SQL 代码块上展示可靠度图标（绿✓已验证 / 灰?未验证），不阻断。
   schemaVerified?: boolean
@@ -481,6 +484,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
   useEffect(() => {
     stopRef.current?.()
     setStreaming(false)
+    streamingRef.current = false
     setToolHint("")
     setSessionID("")
     setMessages([])
@@ -513,11 +517,20 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
             if (m.role === "user") {
               const raw = m.extra?.raw || m.content
               const action = (m.extra?.action || "generate") as AiMode
-              return { role: "user", content: raw, action }
+              return { role: "user", content: raw, action, msgId: m.extra?.msg_id }
             }
             return { role: "assistant", content: m.content }
           })
         if (restored.length === 0) return
+        // 从恢复历史推导下一个流水号：重开/刷新后继续递增，保证一次对话内唯一且有序
+        let maxSeq = 0
+        for (const m of restored) {
+          if (m.msgId) {
+            const n = Number.parseInt(m.msgId, 10)
+            if (!Number.isNaN(n) && n > maxSeq) maxSeq = n
+          }
+        }
+        seqRef.current = maxSeq
         setSessionID(latest.id)
         setMessages(restored)
         if (session.usage) setUsage(session.usage)
@@ -567,23 +580,33 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
     streamingRef.current = streaming
   }, [streaming])
 
+  // 发起流水号计数器：每次发送递增（1,2,3...），一次对话内唯一且有序；
+  // 恢复历史时从 msg_id 推导继续递增，前端重开/后端重启重建后仍不重复
+  const seqRef = useRef(0)
+
   // 核心发送逻辑：text 为任务文本，action 为本次对话动作（generate/explain/fix/optimize）。
   // 与输入框状态解耦：既可被「发送」按钮调用，也可被外部一键修复触发。
   const doSend = useCallback(
-    async (text: string, action: AiMode) => {
+    async (text: string, action: AiMode, overrideMsgId?: string) => {
       const task = text.trim()
       if (!task || streamingRef.current) return
+      // 发起流水号：重试复用原发起号（同一发起重试，后端幂等去重），新发起则递增生成
+      const msgId = overrideMsgId || String(++seqRef.current)
+      // 同步置位防抖：立即生效，避免 React state 异步更新窗口内连点导致重复发送
+      // （同一 user 消息重复落盘是历史被污染的主因之一）
+      streamingRef.current = true
+      // 在追加当前轮 user 之前捕获历史快照：后端透明重建回放时 history 不含当前轮，
+      // 避免重建后 aiChat 再 append 当前 user 导致重复；user 消息携带 msgId 供幂等检测
+      const history = messagesRef.current
+        .filter((x) => x.content && !x.error)
+        .map((x) => ({ role: x.role, content: x.content, msgId: x.role === "user" ? x.msgId : undefined }))
       setInput("")
-      setMessages((m) => [...m, { role: "user", content: task, action }])
+      setMessages((m) => [...m, { role: "user", content: task, action, msgId }])
       setStreaming(true)
       setToolHint("")
       try {
         const sid = await ensureSession()
         setMessages((m) => [...m, { role: "assistant", content: "" }])
-        // 会话失效时后端透明重建：带上 connId/db 和当前历史（不含刚追加的 user/空 assistant 占位）
-        const history = messagesRef.current
-          .filter((x) => x.content && !x.error)
-          .map((x) => ({ role: x.role, content: x.content }))
         const stop = api.aiChatStream(
           sid,
           task,
@@ -618,6 +641,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
               })
               setUsage(u)
               setStreaming(false)
+              streamingRef.current = false
               setToolHint("")
               stopRef.current = null
               refreshProcUsage()
@@ -626,12 +650,14 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
               appendError(msg)
               toast.error(msg)
               setStreaming(false)
+              streamingRef.current = false
               setToolHint("")
               stopRef.current = null
             },
           },
           { connId, db, tabId, history },
           action,
+          msgId,
         )
         stopRef.current = stop
       } catch (e) {
@@ -639,6 +665,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
         appendError(msg)
         toast.error(msg)
         setStreaming(false)
+        streamingRef.current = false
         setToolHint("")
       }
     },
@@ -647,7 +674,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
 
   // 错误气泡「重试」：回溯到错误前最后一条 user 消息，截断其后的失败对话并重新发送
   const retrySend = useCallback(
-    (errIndex: number) => {
+    async (errIndex: number) => {
       if (streamingRef.current) return
       const msgs = messagesRef.current
       let userIdx = -1
@@ -663,9 +690,18 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
       // 同步刷新 ref，避免 doSend 读取到含失败轮次的过期历史
       messagesRef.current = msgs.slice(0, userIdx)
       setMessages((m) => m.slice(0, userIdx))
-      void doSend(content, action ?? "generate")
+      // 删除后端会话：后端已落盘的失败轮次（user 消息）会与重试内容重复/乱序，
+      // 删除后重试请求走「透明重建」——后端用截断后的 history 回放，sessionID 保持不变
+      if (sessionID) {
+        try {
+          await api.deleteAISession(sessionID)
+        } catch {
+          // 删除失败不阻塞重试：后端悬空 user 兜底逻辑会去重/替换，不会重复累积
+        }
+      }
+      void doSend(content, action ?? "generate", msgs[userIdx].msgId)
     },
-    [doSend],
+    [doSend, sessionID],
   )
 
   // 「发送」按钮：读取输入框文本 + 当前 action；解释/修复/优化自动带上当前编辑器 SQL
@@ -679,8 +715,8 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
   // 外部快捷触发（解释/优化/修复）：收到请求立即发送，无需输入框
   useEffect(() => {
     if (!quickRequest || !quickRequest.text.trim()) return
-    // 流式中忽略外部请求，避免打断当前对话（父组件已清空，安全）
-    if (streaming) return
+    // 流式中忽略外部请求，避免打断当前对话（用 ref 同步判断，防连点竞态）
+    if (streamingRef.current) return
     onQuickConsumed?.()
     void doSend(quickRequest.text, quickRequest.action)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -690,6 +726,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
     stopRef.current?.()
     stopRef.current = null
     setStreaming(false)
+    streamingRef.current = false
     setToolHint("")
     // 模型尚未输出任何内容就停止时，移除空占位，避免留下空白 AI 卡片
     setMessages((m) => {
@@ -706,6 +743,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
   const reset = async () => {
     stopRef.current?.()
     setStreaming(false)
+    streamingRef.current = false
     if (sessionID) {
       try {
         await api.resetAISession(sessionID)

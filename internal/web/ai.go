@@ -42,17 +42,41 @@ func handleAIProcessUsage(svc *service.Service) gin.HandlerFunc {
 	})
 }
 
+// HistoryItem 重建回放的历史消息条目：role/content 之外，user 消息携带 msgId 流水号
+// （前端按会话递增生成），供重建后幂等检测去重。
+type HistoryItem struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+	MsgID   string `json:"msgId"`
+}
+
+// buildHistory 将请求中的历史消息组装为 schema.Message 列表，user 消息的 msg_id
+// 写入 Extra（幂等检测依据）；前端重开还原/后端重启重建时流水号不丢失。
+func buildHistory(items []HistoryItem) []*schema.Message {
+	history := make([]*schema.Message, 0, len(items))
+	for _, h := range items {
+		switch h.Role {
+		case "user":
+			m := schema.UserMessage(h.Content)
+			if h.MsgID != "" {
+				m.Extra = map[string]any{"msg_id": h.MsgID}
+			}
+			history = append(history, m)
+		case "assistant":
+			history = append(history, schema.AssistantMessage(h.Content, nil))
+		}
+	}
+	return history
+}
+
 // AISessionReq 创建 AI 会话请求。
 type AISessionReq struct {
 	ConnID string `json:"connId" binding:"required"`
 	DB     string `json:"db"`
 	// TabID 可选：所属 query tab（按 tab 隔离对话；空 = 不隔离）。
 	TabID string `json:"tabId"`
-	// History 可选：会话重建时回放的历史消息（role/content），保留多轮上下文。
-	History []struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	} `json:"history"`
+	// History 可选：会话重建时回放的历史消息（role/content/msgId），保留多轮上下文。
+	History []HistoryItem `json:"history"`
 }
 
 // handleAICreateSession 创建 AI 会话（绑定连接+库+tab，预载表结构上下文）。
@@ -62,15 +86,7 @@ func handleAICreateSession(svc *service.Service) gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 		defer cancel()
 		// 组装历史消息（会话重建场景）
-		history := make([]*schema.Message, 0, len(req.History))
-		for _, h := range req.History {
-			switch h.Role {
-			case "user":
-				history = append(history, schema.UserMessage(h.Content))
-			case "assistant":
-				history = append(history, schema.AssistantMessage(h.Content, nil))
-			}
-		}
+		history := buildHistory(req.History)
 		ses, err := svc.AINewSession(ctx, req.ConnID, req.DB, req.TabID, history, "")
 		if err != nil {
 			cylog.Debugf("[ai] 创建会话失败 conn=%s db=%s tab=%s err=%v", req.ConnID, req.DB, req.TabID, err)
@@ -156,15 +172,15 @@ type AIChatReq struct {
 	Text      string `json:"text" binding:"required"`
 	// Action 任务类型：generate（默认）/ explain / fix / optimize / continue
 	Action string `json:"action"`
+	// MsgID 本次发起的唯一流水号（前端按会话递增），后端据此幂等去重：
+	// 同一流水号已处理时重放结果、悬空时复用继续，杜绝重复消息污染上下文。
+	MsgID string `json:"msgId"`
 	// ConnID / DB / TabID：会话失效时后端据此透明重建（保留多轮上下文，按 tab 隔离）。
 	ConnID string `json:"connId"`
 	DB     string `json:"db"`
 	TabID  string `json:"tabId"`
 	// History 可选：当前对话历史（会话重建时回放，保留多轮上下文）。
-	History []struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	} `json:"history"`
+	History []HistoryItem `json:"history"`
 }
 
 // handleAIChat 非流式对话（供降级使用；Web 主链路走 SSE）。
@@ -174,7 +190,7 @@ func handleAIChat(svc *service.Service) gin.HandlerFunc {
 		if action == "" {
 			action = "generate"
 		}
-		content, usage, schemaVerified, err := svc.AIChat(c.Request.Context(), req.SessionID, action, req.Text)
+		content, usage, schemaVerified, err := svc.AIChat(c.Request.Context(), req.SessionID, action, req.Text, req.MsgID)
 		if err != nil {
 			return nil, err
 		}
@@ -318,17 +334,9 @@ func handleAIChatStream(c *gin.Context, svc *service.Service) {
 	}()
 
 	// 组装历史消息（会话失效透明重建时回放，保留多轮上下文）
-	history := make([]*schema.Message, 0, len(req.History))
-	for _, h := range req.History {
-		switch h.Role {
-		case "user":
-			history = append(history, schema.UserMessage(h.Content))
-		case "assistant":
-			history = append(history, schema.AssistantMessage(h.Content, nil))
-		}
-	}
+	history := buildHistory(req.History)
 
-	usage, schemaVerified, err := svc.AIChatStreamWithFallback(ctx, req.SessionID, action, req.Text, req.ConnID, req.DB, req.TabID, history, func(delta string) {
+	usage, schemaVerified, err := svc.AIChatStreamWithFallback(ctx, req.SessionID, action, req.Text, req.MsgID, req.ConnID, req.DB, req.TabID, history, func(delta string) {
 		if firstDelta {
 			firstDelta = false
 			cylog.Debugf("[ai] SSE 首字节 耗时=%s deltaChars=%d", time.Since(start).Round(time.Millisecond), len(delta))

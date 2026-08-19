@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels"
-import { AlertCircle, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, FunctionSquare, List, Loader2, Plus, Sparkles, Star, Table2, View, X } from "lucide-react"
+import { AlertCircle, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, FunctionSquare, List, Loader2, Plus, SkipForward, Sparkles, Star, Table2, View, X } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -824,7 +824,7 @@ export default function WorkspaceLayout() {
               <Panel id="result" defaultSize="50" minSize="15" className="min-h-0">
                 <div className="h-full p-2 pt-1">
                   {queryActive.error ? (
-                    <div className="flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+                    <div className="flex max-h-full items-start gap-3 overflow-auto rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
                       <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
                       <div className="min-w-0 flex-1">
                         <div className="font-medium text-destructive">执行失败</div>
@@ -868,7 +868,15 @@ export default function WorkspaceLayout() {
                               )}
                             >
                               结果 {i + 1}
-                              {r.isWrite ? " (写)" : r.error ? " (错)" : ""}
+                              {r.error ? (
+                                <span className="font-semibold text-destructive"> (错)</span>
+                              ) : r.skipped ? (
+                                <span className="text-muted-foreground"> (未执行)</span>
+                              ) : r.isWrite ? (
+                                " (写)"
+                              ) : (
+                                ""
+                              )}
                             </button>
                           ))}
                         </div>
@@ -889,10 +897,56 @@ export default function WorkspaceLayout() {
                                 {r.sql}
                               </button>
                             </div>
-                            {r.isWrite || !r.rows ? (
+                            {r.error ? (
+                              // 语句级执行失败：对应结果 tab 展示错误卡（语句原文 + 报错信息），
+                              // 一键修复上下文 = 出错语句原文 + 报错（不再用「第 N 条」序号，大模型直接定位出错 SQL）
+                              // 外层 overflow-auto + 卡片 m-auto：空间充足时居中；内容超高时整卡可滚动，不被结果区截断
+                              <div className="flex min-h-0 flex-1 overflow-auto p-2">
+                                <div className="m-auto flex w-full max-w-2xl items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+                                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="font-medium text-destructive">语句执行失败</div>
+                                    <div className="mt-1 max-h-40 overflow-auto break-words whitespace-pre-wrap rounded bg-muted/50 p-2 font-mono text-[12px] text-foreground/80">
+                                      {r.sql}
+                                    </div>
+                                    <div className="mt-1.5 break-words text-foreground/80">{r.error}</div>
+                                  </div>
+                                  {aiStatus?.enabled && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 shrink-0 gap-1 text-xs"
+                                      onClick={() => {
+                                        setAiOpen(true)
+                                        setQuickRequest({
+                                          action: "fix",
+                                          text: `以下 SQL 执行报错：\n\n${r.sql}\n\n报错信息：\n${r.error}\n\n请修复`,
+                                        })
+                                      }}
+                                    >
+                                      <Sparkles className="h-3.5 w-3.5 text-violet-500" />
+                                      AI 修复
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            ) : r.skipped ? (
+                              // 未执行：前面语句执行失败被跳过（无结果，仅占位提示）
+                              <div className="flex min-h-0 flex-1 overflow-auto p-2">
+                                <div className="m-auto flex items-center gap-5 rounded-lg border bg-muted/30 px-6 py-4">
+                                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted">
+                                    <SkipForward className="h-5 w-5 text-muted-foreground" />
+                                  </div>
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="text-sm font-medium text-muted-foreground">未执行</span>
+                                    <span className="text-xs text-muted-foreground/70">前面语句执行失败，本语句已跳过</span>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : r.isWrite || !r.rows ? (
                               // 写语句无结果集：不渲染 ResultGrid，展示成功状态卡片（影响行数 + 耗时）
-                              <div className="flex min-h-0 flex-1 items-center justify-center">
-                                <div className="flex items-center gap-5 rounded-lg border bg-muted/30 px-6 py-4">
+                              <div className="flex min-h-0 flex-1 overflow-auto p-2">
+                                <div className="m-auto flex items-center gap-5 rounded-lg border bg-muted/30 px-6 py-4">
                                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500/15">
                                     <Check className="h-5 w-5 text-emerald-500" />
                                   </div>

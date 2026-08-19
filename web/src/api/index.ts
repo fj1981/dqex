@@ -245,6 +245,7 @@ export const aiChat = (sessionID: string, text: string) =>
 
 // SSE 流式对话：fetch + ReadableStream 解析（打字机效果），返回终止函数。
 // 事件：delta {delta} / tool {name,args} / done {usage} / error {message}
+// msgId：本次发起的唯一流水号（会话内递增），后端据此幂等去重，杜绝重复消息污染上下文。
 export function aiChatStream(
   sessionID: string,
   text: string,
@@ -255,8 +256,9 @@ export function aiChatStream(
     onTool?: (name: string, args: string) => void
   },
   // 会话失效时后端透明重建所需的上下文
-  rebuildCtx?: { connId?: string; db?: string; tabId?: string; history?: { role: string; content: string }[] },
+  rebuildCtx?: { connId?: string; db?: string; tabId?: string; history?: { role: string; content: string; msgId?: string }[] },
   action?: string,
+  msgId?: string,
 ): () => void {
   const ctrl = new AbortController()
   // 总超时保险丝：后端也有 ai.timeout_sec 兜底，这里多一层保护，
@@ -284,6 +286,7 @@ export function aiChatStream(
           sessionID,
           text,
           action,
+          msgId,
           connId: rebuildCtx?.connId,
           db: rebuildCtx?.db,
           tabId: rebuildCtx?.tabId,
