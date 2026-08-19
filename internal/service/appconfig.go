@@ -35,22 +35,22 @@ type WebConfig struct {
 
 // AI schema 注入的默认上限（可在 ai.max_schema_tables / ai.max_schema_chars 中覆盖）
 const (
-	defaultMaxSchemaTables = 30   // 单次注入的最大表数量
+	defaultMaxSchemaTables = 30    // 单次注入的最大表数量
 	defaultMaxSchemaChars  = 20000 // 注入表结构文本的字符上限（约 5K tokens）
 )
 
 // AIConfig AI 辅助 SQL 配置（OpenAI 兼容协议，可对接 OpenAI / 国产模型等）。
 // 前端编辑后通过 SaveConfig 保存；APIKey 保存后以掩码形式回显。
 type AIConfig struct {
-	BaseURL         string  `yaml:"base_url" json:"baseUrl"`                                 // OpenAI 兼容端点，如 https://api.openai.com/v1 或国内中转
-	APIKey          string  `yaml:"api_key,omitempty" json:"apiKey"`                         // API Key（保存后不回显明文）
-	Model           string  `yaml:"model" json:"model"`                                      // 模型名，如 gpt-4o-mini / deepseek-chat
-	Temperature     float32 `yaml:"temperature,omitempty" json:"temperature"`                // 温度 0-2，默认 0.2
-	MaxTokens       int     `yaml:"max_tokens,omitempty" json:"maxTokens"`                   // 单次回复最大 token，默认 2048
-	TimeoutSec      int     `yaml:"timeout_sec,omitempty" json:"timeoutSec"`                 // 请求超时（秒），默认 60
-	MaxSchemaTables int     `yaml:"max_schema_tables,omitempty" json:"maxSchemaTables"`      // 注入上下文的表结构数量上限，默认 30
-	MaxSchemaChars  int     `yaml:"max_schema_chars,omitempty" json:"maxSchemaChars"`        // 注入表结构文本的字符上限，默认 20000
-	SystemPrompt    string  `yaml:"system_prompt,omitempty" json:"systemPrompt"`             // 自定义 system prompt 模板（支持 {dialect}/{schema} 占位符），留空用内置默认
+	BaseURL         string  `yaml:"base_url" json:"baseUrl"`                            // OpenAI 兼容端点，如 https://api.openai.com/v1 或国内中转
+	APIKey          string  `yaml:"api_key,omitempty" json:"apiKey"`                    // API Key（保存后不回显明文）
+	Model           string  `yaml:"model" json:"model"`                                 // 模型名，如 gpt-4o-mini / deepseek-chat
+	Temperature     float32 `yaml:"temperature,omitempty" json:"temperature"`           // 温度 0-2，默认 0.2
+	MaxTokens       int     `yaml:"max_tokens,omitempty" json:"maxTokens"`              // 单次回复最大 token，默认 2048
+	TimeoutSec      int     `yaml:"timeout_sec,omitempty" json:"timeoutSec"`            // 请求超时（秒），默认 60
+	MaxSchemaTables int     `yaml:"max_schema_tables,omitempty" json:"maxSchemaTables"` // 注入上下文的表结构数量上限，默认 30
+	MaxSchemaChars  int     `yaml:"max_schema_chars,omitempty" json:"maxSchemaChars"`   // 注入表结构文本的字符上限，默认 20000
+	SystemPrompt    string  `yaml:"system_prompt,omitempty" json:"systemPrompt"`        // 自定义 system prompt 模板（支持 {dialect}/{schema} 占位符），留空用内置默认
 }
 
 // CLIConfig CLI 交互终端配置（dbx sql）

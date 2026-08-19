@@ -22,11 +22,11 @@ type session struct {
 	currentDB string
 	dbType    string
 
-	tableCache []string
-	lastSQL    string
-	lastErr    string   // 最近一次执行报错（供 \ai fix 自动携带）
-	displayMode string // 结果展示模式："" / "auto"=超宽自动降级；"table"=强制表格；"vertical"=强制垂直
-	ai         *aiState // AI 会话状态（懒加载；切换数据库时重置）
+	tableCache  []string
+	lastSQL     string
+	lastErr     string   // 最近一次执行报错（供 \ai fix 自动携带）
+	displayMode string   // 结果展示模式："" / "auto"=超宽自动降级；"table"=强制表格；"vertical"=强制垂直
+	ai          *aiState // AI 会话状态（懒加载；切换数据库时重置）
 }
 
 func newSession(info *engine.DBConnInfo) (*session, error) {

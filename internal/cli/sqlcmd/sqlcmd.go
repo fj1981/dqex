@@ -432,7 +432,7 @@ func outputNDJSON(r *queryResult) error {
 	}
 	// summary
 	enc.Encode(map[string]any{
-		"type":    "summary",
+		"type":     "summary",
 		"rowCount": r.RowCount,
 		"elapsed":  r.Elapsed.String(),
 	})

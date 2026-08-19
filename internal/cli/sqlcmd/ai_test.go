@@ -37,9 +37,9 @@ type mockSvc struct {
 	status service.AIStatus
 }
 
-func (m *mockSvc) Config() *service.AppConfig  { return &m.cfg }
-func (m *mockSvc) AIEnabled() bool              { return true }
-func (m *mockSvc) AIStatus() service.AIStatus   { return m.status }
+func (m *mockSvc) Config() *service.AppConfig { return &m.cfg }
+func (m *mockSvc) AIEnabled() bool            { return true }
+func (m *mockSvc) AIStatus() service.AIStatus { return m.status }
 
 // newTestSession 构造一个带 mock AI 状态的 session，绕过真实 service/engine/llm。
 func newTestSession(reply string) (*session, *mockChat) {
