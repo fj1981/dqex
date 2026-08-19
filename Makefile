@@ -4,6 +4,8 @@ AIR ?= air
 PLATFORMS := darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64
 # 版本号：优先 git tag（含落后提交数），无 tag 时用短哈希，非 git 环境回退 dev-日期；可 make release VERSION=v1.2.3 覆盖
 VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev-$(shell date +%Y%m%d))
+# 短 commit id：package 汇总包命名用（git rev-parse 取短哈希，如 d59e502）
+SHORT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILDTIME = $(shell date '+%y%m%d%H%M')
 LDFLAGS_REL := -s -w -X dbimpex/internal/cli.Version=$(VERSION) -X 'dbimpex/internal/cli.BuildTime=$(BUILDTIME)'
 
@@ -12,7 +14,7 @@ HAS_AIR := $(shell command -v $(AIR) 2>/dev/null)
 # dev 模式 air 配置：DEBUG=1 时使用 .air-debug.toml（后端加 --debug，输出全局 debug 日志）
 AIR_CFG := $(if $(DEBUG),.air-debug.toml,.air.toml)
 
-.PHONY: all build install uninstall web web-deps web-dist web-stub dev dev-debug stop release clean air-install
+.PHONY: all build install uninstall web web-deps web-dist web-stub dev dev-debug stop release package clean air-install
 
 all: build
 
@@ -134,6 +136,18 @@ release: web-dist
 	done
 	@echo ">> 打包完成:"
 	@ls -lh release/
+
+# 汇总打包：将 release 下各平台 zip（make release 产物，dbx-$(VERSION)-{os}-{arch}.zip）统一压缩为
+# release/dbx-$(SHORT_COMMIT).zip，便于一次分发全部平台；只匹配平台包，避免嵌套历史汇总包；
+# release 目录无匹配产物时提示先执行 make release
+package:
+	@if [ -z "$$(ls release/dbx-$(VERSION)-*.zip 2>/dev/null)" ]; then \
+		echo ">> release 目录没有 $(VERSION) 平台 zip 产物，请先执行 make release"; \
+		exit 1; \
+	fi
+	@cd release && rm -f dbx-$(SHORT_COMMIT).zip && zip -q dbx-$(SHORT_COMMIT).zip dbx-$(VERSION)-*.zip
+	@echo ">> 汇总完成: release/dbx-$(SHORT_COMMIT).zip"
+	@ls -lh release/dbx-$(SHORT_COMMIT).zip
 
 clean:
 	rm -f dbx dbimpex
