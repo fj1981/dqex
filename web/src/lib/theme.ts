@@ -1,15 +1,6 @@
 import { useMemo } from "react"
 import { useTheme } from "next-themes"
 
-/**
- * 读取 CSS 变量的 HSL 三元组并拼成可用的颜色字符串。
- * 数据网格单元格的内联背景色无法使用 Tailwind 类,需经此函数读取主题变量。
- */
-function readGridColor(varName: string): string {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim()
-  return raw ? `hsl(${raw})` : "transparent"
-}
-
 export interface GridColors {
   /** 单元格默认底色 */
   base: string
@@ -21,17 +12,17 @@ export interface GridColors {
 
 /**
  * 响应式获取数据网格的三套底色。
- * 依赖 useTheme().resolvedTheme:主题切换时重新计算,无需监听 DOM。
+ * 直接使用 CSS 变量字符串，由浏览器根据 <html class="dark"> 自动解析，
+ * 避免 next-themes 初始水合时 resolvedTheme 尚未确定导致读到错误颜色。
  */
 export function useGridColors(): GridColors {
-  const { resolvedTheme } = useTheme()
   return useMemo(
     () => ({
-      base: readGridColor("--grid-row-base"),
-      zebra: readGridColor("--grid-row-zebra"),
-      selected: readGridColor("--grid-row-selected"),
+      base: "hsl(var(--grid-row-base))",
+      zebra: "hsl(var(--grid-row-zebra))",
+      selected: "hsl(var(--grid-row-selected))",
     }),
-    [resolvedTheme],
+    [],
   )
 }
 

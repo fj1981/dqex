@@ -64,7 +64,8 @@ type AppConfig struct {
 	// CompatCollation 全局默认：将 MySQL 8.0 特有排序规则（如 utf8mb4_0900_ai_ci）
 	// 替换为 MySQL 5.7 兼容的 utf8mb4_unicode_ci，使 DDL 可在低版本 MySQL 上执行。
 	// 可在单个迁移/导入任务中覆盖此全局默认值。
-	CompatCollation bool `yaml:"compat_collation,omitempty" json:"compatCollation"`
+	// 不带 omitempty：false 需显式持久化，避免重新加载后被默认值 true 覆盖。
+	CompatCollation bool `yaml:"compat_collation" json:"compatCollation"`
 }
 
 // ResolvedDirs 解析后的最终目录
@@ -94,11 +95,14 @@ func FindConfigFile(explicit string) string {
 	return ""
 }
 
-// LoadAppConfig 加载全局配置；path 为空返回空配置，文件不存在或解析失败报错。
+// LoadAppConfig 加载全局配置；path 为空返回默认配置（首次初始化：兼容排序规则默认开启），
+// 文件不存在或解析失败报错。
 // 加载完成后会对 AI 数字字段填充默认值（0 视为未设置），保证运行时与展示均使用有效值。
 func LoadAppConfig(path string) (*AppConfig, error) {
 	cfg := &AppConfig{}
 	if strings.TrimSpace(path) == "" {
+		// 首次初始化：无配置文件，兼容排序规则默认开启
+		cfg.CompatCollation = true
 		cfg.AI.normalize()
 		return cfg, nil
 	}

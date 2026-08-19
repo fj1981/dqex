@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import { Camera, CheckCircle2, ChevronDown, ChevronUp, Database, Loader2, Play, Plus, RotateCcw, ScrollText, Trash2 } from "lucide-react"
@@ -36,6 +36,7 @@ export default function SnapshotView() {
   const [report, setReport] = useState<CompareResult | null>(null)
   const [logs, setLogs] = useState<string[]>([])
   const [showLogs, setShowLogs] = useState(false)
+  const logRef = useRef<HTMLDivElement>(null)
   const busy = runningTaskID != null && !report // 对比进行中或未出报告时禁用；对比完成后可重新对比
 
   // 对比目标选择
@@ -149,6 +150,11 @@ export default function SnapshotView() {
       .then(({ databases }) => setTargetDBOptions(databases.map((d) => d.name)))
       .catch(() => setTargetDBOptions([]))
   }, [targetConn])
+
+  // 日志输出时实时滚动到底部
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [logs, showLogs])
 
   // 快照包含的库（多库分组，回退单库字段）
   const snapshotDatabases = useMemo(() => {
@@ -483,7 +489,7 @@ export default function SnapshotView() {
                     </div>
                   </div>
                   {showLogs && logs.length > 0 && (
-                    <div className="scrollbar-thin max-h-56 overflow-y-auto rounded-md bg-slate-950 p-3 text-slate-200">
+                    <div ref={logRef} className="scrollbar-thin max-h-56 shrink-0 overflow-y-auto rounded-md bg-slate-950 p-3 text-slate-200">
                       <div className="space-y-0.5 text-xs leading-relaxed">
                         {logs.map((l, i) => (
                           <div key={i} className="whitespace-pre-wrap break-all">{l}</div>
@@ -491,7 +497,7 @@ export default function SnapshotView() {
                       </div>
                     </div>
                   )}
-                  <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
+                  <div className="flex min-h-0 flex-1 flex-col">
                     <CompareReport result={report} />
                   </div>
                 </>

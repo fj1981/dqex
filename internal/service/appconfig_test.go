@@ -42,11 +42,14 @@ func TestResolveDirs(t *testing.T) {
 	}
 }
 
-// TestLoadAppConfig 验证空路径返回空配置、显式路径缺失报错
+// TestLoadAppConfig 验证空路径返回默认配置（兼容排序规则默认开启）、显式路径缺失报错
 func TestLoadAppConfig(t *testing.T) {
 	cfg, err := LoadAppConfig("")
 	if err != nil || cfg == nil {
-		t.Fatalf("空路径应返回空配置: %v", err)
+		t.Fatalf("空路径应返回默认配置: %v", err)
+	}
+	if !cfg.CompatCollation {
+		t.Fatal("首次初始化（无配置文件）时 CompatCollation 应默认为 true")
 	}
 	if _, err := LoadAppConfig("/no/such/config.yaml"); err == nil {
 		t.Fatal("显式路径缺失应报错")

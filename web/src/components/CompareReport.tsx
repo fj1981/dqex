@@ -167,6 +167,71 @@ function statusBadgeOf(t: CompareTableResult) {
   return <Badge variant="secondary" className="bg-red-500/10 text-red-700 dark:text-red-400">有差异</Badge>
 }
 
+// 单侧独有列块：差异多时默认折叠（仅展示前几项 + 计数），点击展开全部
+// 默认折叠阈值：列数超过 10 折叠；阈内直接全部展示，避免少列也要点一下
+const COL_ONLY_COLLAPSE_THRESHOLD = 10
+
+function ColumnOnlyBlock({
+  label,
+  count,
+  color,
+  columns,
+}: {
+  label: string
+  count: number
+  color: "amber" | "blue"
+  columns: CompareColumnItem[]
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const collapsed = !expanded && count > COL_ONLY_COLLAPSE_THRESHOLD
+  const items = collapsed ? columns.slice(0, COL_ONLY_COLLAPSE_THRESHOLD) : columns
+  const colorCls =
+    color === "amber"
+      ? {
+          border: "border-amber-500/30",
+          bg: "bg-amber-500/10",
+          title: "text-amber-800 dark:text-amber-300",
+          name: "text-amber-900 dark:text-amber-200",
+          desc: "text-amber-700/70 dark:text-amber-400/70",
+        }
+      : {
+          border: "border-blue-500/30",
+          bg: "bg-blue-500/10",
+          title: "text-blue-800 dark:text-blue-300",
+          name: "text-blue-900 dark:text-blue-200",
+          desc: "text-blue-700/70 dark:text-blue-400/70",
+        }
+  return (
+    <div className={cn("rounded-md border px-3 py-2 text-xs", colorCls.border, colorCls.bg)}>
+      <button
+        type="button"
+        className="mb-1.5 flex w-full items-center gap-1.5 text-left"
+        onClick={() => count > COL_ONLY_COLLAPSE_THRESHOLD && setExpanded((v) => !v)}
+      >
+        <span className={cn("font-medium", colorCls.title)}>
+          {label}（{count} 列）
+        </span>
+        {count > COL_ONLY_COLLAPSE_THRESHOLD && (
+          <span className="text-muted-foreground">
+            {collapsed ? "展开全部" : "收起"}
+          </span>
+        )}
+      </button>
+      <div className="flex flex-wrap gap-x-3 gap-y-1">
+        {items.map((c) => (
+          <span key={c.name} className={cn("font-mono", colorCls.name)}>
+            {c.name}
+            <span className={cn("ml-1", colorCls.desc)}>({colDesc(c)})</span>
+          </span>
+        ))}
+        {collapsed && (
+          <span className="font-mono text-muted-foreground">… 共 {count} 列</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // 表差异明细：弹窗内容，列级差异 + 缺失/多出采样行，内部滚动
 function TableDiffDetail({ t }: { t: CompareTableResult }) {
   // 采样表分列：仅当两侧都有数据时才双列，否则单表占满弹窗宽度
@@ -190,58 +255,67 @@ function TableDiffDetail({ t }: { t: CompareTableResult }) {
         </div>
       )}
       {t.columns && !t.columns.matched && (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {t.columns.sourceOnly.length > 0 && (
-            <div className="text-xs">
-              <span className="font-medium text-amber-700">源有目标无：</span>
-              {t.columns.sourceOnly.map((c) => (
-                <span key={c.name} className="ml-2 font-mono">{c.name} <span className="text-muted-foreground">({colDesc(c)})</span></span>
-              ))}
-            </div>
+            <ColumnOnlyBlock
+              label="源有目标无"
+              count={t.columns.sourceOnly.length}
+              color="amber"
+              columns={t.columns.sourceOnly}
+            />
           )}
           {t.columns.targetOnly.length > 0 && (
-            <div className="text-xs">
-              <span className="font-medium text-blue-700">目标多出：</span>
-              {t.columns.targetOnly.map((c) => (
-                <span key={c.name} className="ml-2 font-mono">{c.name} <span className="text-muted-foreground">({colDesc(c)})</span></span>
-              ))}
-            </div>
+            <ColumnOnlyBlock
+              label="目标多出"
+              count={t.columns.targetOnly.length}
+              color="blue"
+              columns={t.columns.targetOnly}
+            />
           )}
           {t.columns.different.length > 0 && (
-            <div className="scrollbar-thin overflow-auto rounded-md border">
+            <div className="scrollbar-thin max-h-80 overflow-auto rounded-md border">
               <table className="w-full text-xs">
-                <thead className="bg-muted">
+                <thead className="sticky top-0 z-10 bg-muted">
                   <tr>
-                    <th className="px-2 py-1 text-left font-medium">列名</th>
-                    <th className="px-2 py-1 text-left font-medium">类型</th>
-                    <th className="px-2 py-1 text-left font-medium">可空</th>
-                    <th className="px-2 py-1 text-left font-medium">主键</th>
+                    <th className="sticky left-0 z-10 bg-muted px-2 py-1.5 text-left font-medium">列名</th>
+                    <th colSpan={2} className="border-l px-2 py-1.5 text-left font-medium">类型</th>
+                    <th colSpan={2} className="border-l px-2 py-1.5 text-left font-medium">可空</th>
+                    <th colSpan={2} className="border-l px-2 py-1.5 text-left font-medium">主键</th>
+                  </tr>
+                  <tr className="bg-muted/60 text-[11px] text-muted-foreground">
+                    <th className="sticky left-0 z-10 bg-muted/60 px-2 py-1 text-left font-normal"></th>
+                    <th className="border-l px-2 py-1 text-left font-normal">源</th>
+                    <th className="px-2 py-1 text-left font-normal">目标</th>
+                    <th className="border-l px-2 py-1 text-left font-normal">源</th>
+                    <th className="px-2 py-1 text-left font-normal">目标</th>
+                    <th className="border-l px-2 py-1 text-left font-normal">源</th>
+                    <th className="px-2 py-1 text-left font-normal">目标</th>
                   </tr>
                 </thead>
                 <tbody>
                   {t.columns.different.map((d) => {
                     const s = colDims(d.source)
                     const tg = colDims(d.target)
-                    // 不一致维度红色高亮，一致维度灰化，一眼定位差异点
-                    const td = (src: string, tgt: string, cls: string) => (
-                      <td className="px-2 py-1 align-top">
-                        <div className={cn("font-mono", src !== tgt ? "text-red-600 font-medium" : "text-muted-foreground", cls)}>{src}</div>
-                        <div className={cn("font-mono text-[11px]", src !== tgt ? "text-red-600 font-medium" : "text-muted-foreground", cls)}>{tgt}</div>
-                      </td>
+                    // 不一致维度红色高亮，一致维度灰化；左右两列横向对比更紧凑易读
+                    const cell = (src: string, tgt: string) => (
+                      <>
+                        <td className={cn("border-l px-2 py-1.5 align-top font-mono", src !== tgt ? "text-red-600 font-medium" : "text-muted-foreground")}>{src}</td>
+                        <td className={cn("px-2 py-1.5 align-top font-mono", src !== tgt ? "text-red-600 font-medium" : "text-muted-foreground")}>{tgt}</td>
+                      </>
                     )
                     return (
                       <tr key={d.name} className="border-t">
-                        <td className="px-2 py-1 font-mono align-top">{d.name}</td>
-                        {td(s.type, tg.type, "")}
-                        {td(s.nullable, tg.nullable, "")}
-                        {td(s.pk, tg.pk, "")}
+                        <td className="sticky left-0 z-10 bg-background px-2 py-1.5 font-mono align-top font-medium">{d.name}</td>
+                        {cell(s.type, tg.type)}
+                        {cell(s.nullable, tg.nullable)}
+                        {cell(s.pk, tg.pk)}
                       </tr>
                     )
                   })}
                 </tbody>
               </table>
-              <div className="border-t px-2 py-1 text-[11px] text-muted-foreground">
-                每格上行为源、下行为目标；<span className="text-red-600">红色</span>为不一致维度
+              <div className="border-t px-2 py-1.5 text-[11px] text-muted-foreground">
+                每维度左右两列分别为源 / 目标；<span className="text-red-600">红色</span>为不一致维度
               </div>
             </div>
           )}
@@ -312,8 +386,8 @@ export function CompareReport({ result, onSaveTask, onRestart }: { result: Compa
   })
 
   return (
-    <Card className="space-y-3 p-4">
-      <div className="flex flex-wrap items-center gap-2">
+    <Card className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
         <div className="text-sm font-medium">对比报告</div>
         <span className="text-xs text-muted-foreground">
           {result.source} ↔ {result.target}
@@ -349,7 +423,7 @@ export function CompareReport({ result, onSaveTask, onRestart }: { result: Compa
       </div>
 
       {/* 汇总统计卡片：与进度页 StatBlock 风格对齐，点击切换过滤；零计数灰化 */}
-      <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
+      <div className="grid shrink-0 grid-cols-3 gap-2 md:grid-cols-6">
         {FILTERS.map(({ key, label, cls }) => (
           <button
             key={key}
@@ -370,7 +444,7 @@ export function CompareReport({ result, onSaveTask, onRestart }: { result: Compa
       </div>
 
       {/* 一致项显示开关：默认只看差异，表多时列表更短 */}
-      <div className="flex items-center justify-between">
+      <div className="flex shrink-0 items-center justify-between">
         <span className="text-xs text-muted-foreground">
           {filter === "" && !showMatched
             ? `仅显示有差异的表（${visibleTables.length}）；一致 ${s.matched} 项已隐藏`
@@ -382,8 +456,8 @@ export function CompareReport({ result, onSaveTask, onRestart }: { result: Compa
         </label>
       </div>
 
-      {/* 表列表限高内滚，避免页面被撑长；多库对比按库分组折叠 */}
-      <div className="scrollbar-thin max-h-[520px] space-y-3 overflow-y-auto pr-1">
+      {/* 表列表内部滚动：上方统计/过滤固定不动；多库对比按库分组折叠 */}
+      <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
         {visibleTables.length === 0 && (
           <div className="py-6 text-center text-xs text-muted-foreground">无符合条件的表</div>
         )}

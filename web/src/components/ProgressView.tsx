@@ -263,7 +263,7 @@ export default function ProgressView({ taskID, taskType, onSaveTask, onBack, onD
             ref={logRef}
             className={cn(
               "scrollbar-thin overflow-y-auto rounded-md bg-slate-950 p-3 text-slate-200",
-              compactLog ? "max-h-44" : "min-h-[180px] flex-1",
+              compactLog ? "max-h-44" : "min-h-[120px] max-h-[40vh] flex-1",
             )}
           >
             <div className="space-y-0.5 text-xs leading-relaxed">

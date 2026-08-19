@@ -47,7 +47,7 @@ function LeafNode({ node, depth, dbName, onOpenObject }: {
       type="button"
       className={cn(
         "flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left text-[12px] transition-colors",
-        active ? "bg-primary/10 text-primary" : "text-foreground/80 hover:bg-accent",
+        active ? "bg-primary/10 text-primary" : "text-foreground/85 hover:bg-accent",
       )}
       style={{ paddingLeft: depth * 14 + 6 }}
       title={meta.label}
@@ -173,7 +173,7 @@ export default function ObjectTree({ onOpenObject }: Props) {
   }
 
   return (
-    <div className="scrollbar-thin flex-1 overflow-y-auto p-2">
+    <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-2">
       {nodes.map((n) => (
         <DbNode key={n.type + ":" + n.name} node={n} onOpenObject={onOpenObject} />
       ))}

@@ -12,7 +12,7 @@ interface Props {
 // 保证不同页面/文案长度下圆点位置一致，且首尾无多余线条
 export default function StepWizard({ steps, current, onStepClick }: Props) {
   return (
-    <div className="flex items-start rounded-lg border bg-background px-6 py-4">
+    <div className="flex shrink-0 items-start rounded-lg border bg-background px-6 py-4">
       {steps.map((label, i) => {
         const done = i < current
         const active = i === current

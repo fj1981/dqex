@@ -167,7 +167,7 @@ export default function ConnectionDrawer() {
 
   return (
     <Dialog open={drawerOpen} onOpenChange={(o) => !o && closeDrawer()}>
-      <DialogContent className="sm:max-w-[720px] md:max-w-[780px]">
+      <DialogContent className="flex max-h-[85vh] min-h-[560px] flex-col overflow-hidden sm:max-w-[720px] md:max-w-[780px]">
         <DialogHeader>
           <div className="flex items-center gap-2">
             <DialogTitle>连接管理</DialogTitle>
@@ -176,7 +176,7 @@ export default function ConnectionDrawer() {
         </DialogHeader>
 
         {/* 左右分栏（Navicat 式）：左侧列表 + 右侧表单 */}
-        <div className="-mx-1 grid grid-cols-[200px_1fr] items-stretch gap-4">
+        <div className="-mx-1 grid min-h-0 flex-1 grid-cols-[200px_1fr] items-stretch gap-4">
           <div className="flex flex-col overflow-hidden rounded-md border bg-muted/20">
             <div className="border-b bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground">已保存连接</div>
             <ScrollArea className="scrollbar-thin min-h-0 flex-1">

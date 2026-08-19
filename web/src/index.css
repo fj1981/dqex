@@ -31,26 +31,30 @@
     --grid-row-zebra: 210 40% 98%;
     --grid-row-selected: 214 95% 93%;
     --grid-row-hover: 214 32% 94%;
+    /* 数据网格单元格文字色：浅色下保持正常前景色 */
+    --grid-cell-foreground: hsl(var(--foreground));
   }
 
   .dark {
     /* 背景用柔和深蓝灰而非近纯黑，与浅色「柔和深灰」设计语言保持一致 */
     --background: 224 30% 8%;
-    --foreground: 210 40% 98%;
+    /* 前景统一用柔和浅灰而非近纯白，降低大面积文字对比度，避免暗色下抢焦点。
+       各组件 text-foreground / text-card-foreground / text-popover-foreground 等均继承此色。 */
+    --foreground: 215 16% 88%;
     --card: 224 30% 8%;
-    --card-foreground: 210 40% 98%;
+    --card-foreground: 215 16% 88%;
     --popover: 224 30% 8%;
-    --popover-foreground: 210 40% 98%;
+    --popover-foreground: 215 16% 88%;
     --primary: 217.2 91.2% 59.8%;
     --primary-foreground: 222.2 47.4% 11.2%;
     --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary-foreground: 215 16% 88%;
     --muted: 217.2 32.6% 17.5%;
     --muted-foreground: 215 20.2% 65.1%;
     --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --accent-foreground: 215 16% 88%;
     --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive-foreground: 215 16% 88%;
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 224.3 76.3% 48%;
@@ -60,6 +64,8 @@
     --grid-row-zebra: 224 25% 11%;
     --grid-row-selected: 217 60% 26%;
     --grid-row-hover: 217 33% 17%;
+    /* 暗色下数据密集区进一步降低对比，使用更柔和的辅助前景色 */
+    --grid-cell-foreground: hsl(var(--muted-foreground) / 0.85);
   }
 }
 
@@ -273,10 +279,21 @@
    - 统计行 td：上边框 + 右边框（分隔数据行）
    边框来源单一，不会出现"两条横线" */
 
-/* 数据行普通单元格：右下边框 */
-.data-grid-table tbody td:not(.frozen-col) {
+/* 数据行普通单元格：右下边框，文字色跟随主题（暗色下降低对比） */
+.data-grid-table tbody td {
   border-right: 1px solid hsl(var(--border));
   border-bottom: 1px solid hsl(var(--border));
+  color: var(--grid-cell-foreground);
+}
+
+/* 冻结列（行号）保持更淡的辅助色，避免被单元格通用颜色覆盖 */
+.data-grid-table tbody td.frozen-col .row-index {
+  color: hsl(var(--muted-foreground) / 0.45);
+}
+
+/* 表头文字在暗色下也使用更柔和的辅助色 */
+.data-grid-table thead th {
+  color: hsl(var(--muted-foreground) / 0.78);
 }
 /* 冻结列（数据行/表头/统计行通用）：右边框 + 下边框，与同行其他列对齐 */
 .data-grid-table .frozen-col {
@@ -393,4 +410,41 @@
 }
 .monaco-editor .ai-diff-removed-gutter {
   background: rgba(239, 68, 68, 0.35);
+}
+
+/* ---- Monaco 编辑器背景统一 ---- */
+/* 编辑器使用内置 vs/vs-dark 主题（语法高亮对比度稳定），仅用 CSS 把壳层背景覆盖为
+   shadcn 的 --background，避免 vs-dark 的 #1e1e1e 与页面脱节。
+   注意：不要再走 monaco.editor.defineTheme 自定义主题——Monaco 的 token 颜色解析
+   只接受 hex/命名色，直接喂 shadcn 的 HSL 变量会在 defineTheme/setTheme 时崩溃。 */
+/* Monaco 编辑器背景与页面统一：外壳 + 行号栏 + 代码行区域全部使用 --background。
+   语法高亮是文字颜色，不受背景影响；当前行高亮 / 选中背景在下面单独保留。 */
+.monaco-editor,
+.monaco-editor .monaco-editor-background,
+.monaco-editor .margin,
+.monaco-editor .glyph-margin,
+.monaco-editor .overflow-guard,
+.monaco-editor .editor-scrollable,
+.monaco-editor .lines-content,
+.monaco-editor .view-lines,
+.monaco-editor .view-line {
+  background-color: hsl(var(--background)) !important;
+}
+/* 保留 Monaco 当前行高亮和文本选中背景，使用主题 accent/muted 色 */
+.monaco-editor .current-line,
+.monaco-editor .focused-line,
+.monaco-editor .selected-text,
+.monaco-editor .cslr.selected-text {
+  background-color: hsl(var(--accent)) !important;
+}
+.monaco-editor .selected-text,
+.monaco-editor .cslr.selected-text {
+  background-color: hsl(var(--muted)) !important;
+}
+/* 建议补全框 / 参数提示浮层：与页面背景一致（vs-dark 默认 #1e1e1e / #252526） */
+.monaco-editor .suggest-widget,
+.monaco-editor .suggest-details,
+.monaco-editor .parameter-hints-widget {
+  background-color: hsl(var(--background)) !important;
+  border-color: hsl(var(--border)) !important;
 }

@@ -411,7 +411,7 @@ export default function ResultGrid({ result }: Props) {
                     <ContextMenuTrigger asChild>
                       <th
                         className={cn(
-                          "sticky top-0 z-20 cursor-pointer select-none bg-muted px-2 py-1.5 font-medium text-muted-foreground hover:bg-muted/60",
+                          "sticky top-0 z-20 cursor-pointer select-none bg-muted px-2 py-1.5 font-medium text-muted-foreground/75 hover:bg-muted/60",
                           frozenLeft !== undefined && "sticky left-0 top-0 z-30 bg-muted frozen-col",
                         )}
                         style={{ width: `${colWidths[i]}px`, ...(frozenLeft !== undefined ? { left: frozenLeft } : {}) }}

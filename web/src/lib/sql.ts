@@ -33,3 +33,21 @@ export function previewSQL(sql: string, max = 120): string {
   const s = sql.trim().replace(/\s+/g, " ")
   return s.length > max ? s.slice(0, max) + "…" : s
 }
+
+/**
+ * 收藏默认标题：取 SQL 去注释后首行前 40 字符（与后端 defaultFavoriteTitle 对齐）。
+ * 用于收藏弹窗预填，用户可在保存前修改。
+ */
+export function defaultFavoriteTitle(sql: string): string {
+  let first = ""
+  for (const line of sql.split("\n")) {
+    const t = line.trim()
+    if (t === "" || t.startsWith("--") || t.startsWith("#") || t.startsWith("/*")) continue
+    first = t
+    break
+  }
+  if (!first) first = sql.trim()
+  first = first.replace(/;$/, "")
+  const runes = Array.from(first)
+  return runes.length > 40 ? runes.slice(0, 40).join("") + "…" : first
+}

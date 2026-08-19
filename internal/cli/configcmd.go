@@ -70,4 +70,5 @@ web:
   #   - 192.168.1.0/24
   #   - 10.20.16.170
   #   - dbx.example.com
+compat_collation: true  # 兼容排序规则：MySQL 8.0 特有排序规则替换为 5.7 兼容版本（默认开启）
 `

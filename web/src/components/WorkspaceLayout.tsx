@@ -27,6 +27,8 @@ import {
 import { cn } from "@/lib/utils"
 import { setSqlEditor } from "@/lib/editorRef"
 import { useClickOutside } from "@/lib/useClickOutside"
+import { defaultFavoriteTitle } from "@/lib/sql"
+import { prompt } from "@/components/ui/alert-dialog"
 import { useQueryStore, type WorkspaceTab } from "@/stores/queryStore"
 import { useObjectTreeStore } from "@/stores/objectTreeStore"
 import { useFavoriteStore } from "@/stores/favoriteStore"
@@ -291,7 +293,6 @@ export default function WorkspaceLayout() {
       <>
         <Code2 className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="max-w-32 truncate">{t.title}</span>
-        {t.running && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
       </>
     )
   }
@@ -422,7 +423,7 @@ export default function WorkspaceLayout() {
                         "group flex shrink-0 cursor-pointer items-center gap-1 rounded-t-md border border-b-0 px-2.5 py-1.5 text-xs transition-colors",
                         t.id === activeId
                           ? "border-border bg-background font-medium text-foreground"
-                          : "border-transparent text-muted-foreground hover:bg-accent",
+                          : "border-transparent text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground/80",
                       )}
                       onClick={() => setActiveTab(t.id)}
                       // 中键点击关闭（浏览器 tab 行为）
@@ -692,9 +693,19 @@ export default function WorkspaceLayout() {
                               toast.info("编辑器中没有可用的 SQL")
                               return
                             }
+                            // 弹窗预填默认标题，用户可修改后回车快速保存
+                            const title = await prompt({
+                              title: "收藏 SQL",
+                              description: "为这条 SQL 起个名字，方便日后查找回填",
+                              defaultValue: defaultFavoriteTitle(sql),
+                              placeholder: "如：每日活跃用户统计",
+                              confirmText: "收藏",
+                              required: "标题不能为空",
+                            })
+                            if (title == null) return
                             try {
-                              await addFavorite(connId, sql, queryActive.db, queryActive.mode)
-                              toast.success("已收藏当前 SQL")
+                              await addFavorite(connId, sql, queryActive.db, queryActive.mode, title)
+                              toast.success("已收藏")
                             } catch (e) {
                               toast.error(`收藏失败: ${(e as Error).message}`)
                             }
@@ -762,7 +773,10 @@ export default function WorkspaceLayout() {
                       }}
                       disabled={running}
                     >
-                      {running ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+                      {/* 固定宽度图标位：执行中显示 spinner，空闲时空占，保证文字不左右跳动 */}
+                      <span className="flex w-4 shrink-0 items-center justify-center">
+                        {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                      </span>
                       执行 (⌘⏎)
                     </Button>
                   </div>

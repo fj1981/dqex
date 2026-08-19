@@ -59,16 +59,15 @@ export default function ExportView() {
 
   const set = (patch: Partial<ExportOptions>) => setOpts((o) => ({ ...o, ...patch }))
 
-  // 任务级未显式配置 compatCollation 时，采用设置页的全局默认（设置保存后即时生效）
+  // 新任务（无缓存配置）时，compatCollation 默认采用设置页的全局值；已加载任务配置不覆盖
   useEffect(() => {
+    if (cachedTask?.exportOpts) return
     api.getConfig()
       .then((d) => {
-        if (d.config.compatCollation) {
-          setOpts((o) => (o.compatCollation ? o : { ...o, compatCollation: true }))
-        }
+        setOpts((o) => ({ ...o, compatCollation: !!d.config.compatCollation }))
       })
       .catch(() => {})
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadSavedTasks = useCallback(async () => {
     try {
@@ -143,7 +142,7 @@ export default function ExportView() {
             savedTasks={savedTasks}
             taskConfigId={taskConfigId}
             onApply={applyTask}
-            onClear={() => { setOpts(defaultOptions()); setTaskConfigId(undefined); clearLastTask("export") }}
+            onClear={() => { setOpts(defaultOptions()); setTaskConfigId(undefined); clearLastTask("export"); api.getConfig().then((d) => setOpts((o) => ({ ...o, compatCollation: !!d.config.compatCollation }))).catch(() => {}) }}
             onSave={() => setSaveOpen(true)}
           />
         }

@@ -32,7 +32,7 @@ import {
 import * as api from "@/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { confirm } from "@/components/ui/alert-dialog"
+import { confirm, prompt } from "@/components/ui/alert-dialog"
 import { Separator } from "@/components/ui/separator"
 import { Toaster } from "@/components/ui/sonner"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -68,6 +68,7 @@ import {
   type SQLHistoryItem,
 } from "@/types"
 import { cn, formatTime, shortPaths } from "@/lib/utils"
+import { defaultFavoriteTitle } from "@/lib/sql"
 
 const NAV = [
   { path: "/query", label: "工作台", desc: "SQL · 对象 · 表数据", icon: Terminal },
@@ -276,7 +277,24 @@ function RightPanel() {
           favorites={favorites}
           onClear={clearSQLHistory}
           onRefill={(sql, db, mode, action) => applySQLByAction(sql, db, mode, action)}
-          onAddFavorite={(sql, db, mode) => addFavorite(queryConnId, sql, db, mode)}
+          onAddFavorite={async (sql, db, mode) => {
+            // 弹窗预填默认标题，用户可修改后回车快速保存
+            const title = await prompt({
+              title: "收藏 SQL",
+              description: "为这条 SQL 起个名字，方便日后查找回填",
+              defaultValue: defaultFavoriteTitle(sql),
+              placeholder: "如：每日活跃用户统计",
+              confirmText: "收藏",
+              required: "标题不能为空",
+            })
+            if (title == null) return
+            try {
+              await addFavorite(queryConnId, sql, db, mode, title)
+              toast.success("已收藏")
+            } catch (e) {
+              toast.error(`收藏失败: ${(e as Error).message}`)
+            }
+          }}
           onDeleteFavorite={(id) => removeFavorite(id)}
           onRenameFavorite={(id, title) => renameFavorite(id, title)}
         />
@@ -562,27 +580,27 @@ function HistoryOrFavoriteCard({
               {onFavorite && (
                 <button
                   type="button"
-                  className="flex h-4 w-4 items-center justify-center rounded text-muted-foreground hover:bg-amber-100 hover:text-amber-600"
+                  className="flex h-5 w-5 items-center justify-center rounded text-amber-500 hover:bg-amber-100 hover:text-amber-600 dark:hover:bg-amber-500/15"
                   title="收藏"
                   onClick={(e) => {
                     e.stopPropagation()
                     onFavorite()
                   }}
                 >
-                  <Star className="h-3 w-3" />
+                  <Star className="h-3.5 w-3.5" />
                 </button>
               )}
               {onDelete && (
                 <button
                   type="button"
-                  className="flex h-4 w-4 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   title="删除"
                   onClick={(e) => {
                     e.stopPropagation()
                     onDelete()
                   }}
                 >
-                  <Trash2 className="h-3 w-3" />
+                  <Trash2 className="h-3.5 w-3.5" />
                 </button>
               )}
             </span>
@@ -590,7 +608,7 @@ function HistoryOrFavoriteCard({
           {title && <span className="max-w-[6rem] truncate whitespace-nowrap tabular-nums text-muted-foreground">{title}</span>}
         </span>
       </div>
-      <div className="mt-0.5 line-clamp-2 break-all font-mono text-[11px] leading-4 text-foreground/80">{sql}</div>
+      <div className="mt-0.5 line-clamp-2 break-all font-mono text-[11px] leading-4 text-muted-foreground">{sql}</div>
       {menuOpen && (
         <div className="mt-1.5 flex flex-nowrap gap-1 overflow-x-auto border-t border-border/60 pt-1.5">
           {REFILL_ACTIONS.map((a) => (
@@ -818,7 +836,7 @@ function AuditList({ connId, items }: { connId: string; items: SQLAuditEntry[] }
 
                 {/* 单元格编辑：结构化展示真实参数 */}
                 {a.source === "cell" && a.table ? (
-                  <div className="mt-1 space-y-0.5 font-mono text-[11px] leading-4 text-foreground/80">
+                  <div className="mt-1 space-y-0.5 font-mono text-[11px] leading-4 text-muted-foreground">
                     <div>
                       <span className="text-muted-foreground">表 </span>
                       {a.table}
@@ -842,7 +860,7 @@ function AuditList({ connId, items }: { connId: string; items: SQLAuditEntry[] }
                     )}
                   </div>
                 ) : (
-                  <div className="mt-0.5 line-clamp-2 break-all font-mono text-[11px] leading-4 text-foreground/80">
+                  <div className="mt-0.5 line-clamp-2 break-all font-mono text-[11px] leading-4 text-muted-foreground">
                     {a.sql}
                   </div>
                 )}

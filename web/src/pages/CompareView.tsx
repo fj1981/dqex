@@ -90,6 +90,7 @@ export default function CompareView() {
   const [aliasOnlyConfigured, setAliasOnlyConfigured] = useState(false)
   const [logs, setLogs] = useState<string[]>([])
   const [showLogs, setShowLogs] = useState(false)
+  const logRef = useRef<HTMLDivElement>(null)
   const connections = useAppStore((s) => s.connections)
 
   const set = (patch: Partial<CompareOptions>) => setOpts((o) => ({ ...o, ...patch }))
@@ -256,6 +257,11 @@ export default function CompareView() {
     if (taskState !== "done" || !runningTaskID || report) return
     api.getCompareResult(runningTaskID).then(setReport).catch(() => {})
   }, [taskState, runningTaskID, report])
+
+  // 日志输出时实时滚动到底部
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [logs, showLogs])
 
   // 表级配置更新：同一源表只保留一条（目标表名 + 忽略列），两者皆空则删除条目
   const upsertAlias = (source: string, patch: { target?: string; ignoreColumns?: string[] }) => {
@@ -459,7 +465,8 @@ export default function CompareView() {
         }
       />
 
-      <Card className="flex flex-1 flex-col gap-5 bg-gradient-to-br from-muted/50 via-muted/15 to-muted/85 p-5 dark:from-muted/30 dark:via-muted/10 dark:to-muted/55">
+      {/* min-h-0：允许 Card 在 h-full 视口内收缩，报告列表在 Card 内部滚动，避免整页滚动 */}
+      <Card className="flex min-h-0 flex-1 flex-col gap-5 bg-gradient-to-br from-muted/50 via-muted/15 to-muted/85 p-5 dark:from-muted/30 dark:via-muted/10 dark:to-muted/55">
         <StepWizard steps={STEPS} current={step} onStepClick={(i) => !runningTaskID && setStep(i)} />
 
         {/* 数据源卡片布局共用 ConnectionPair，各任务页卡片尺寸统一 */}
@@ -856,7 +863,7 @@ export default function CompareView() {
             />
           )}
           {showLogs && logs.length > 0 && (
-            <div className="scrollbar-thin max-h-56 overflow-y-auto rounded-md bg-slate-950 p-3 text-slate-200">
+            <div ref={logRef} className="scrollbar-thin max-h-56 shrink-0 overflow-y-auto rounded-md bg-slate-950 p-3 text-slate-200">
               <div className="space-y-0.5 text-xs leading-relaxed">
                 {logs.map((l, i) => (
                   <div key={i} className="whitespace-pre-wrap break-all">{l}</div>
