@@ -19,6 +19,12 @@ func runInteractive(info *engine.DBConnInfo) error {
 	}
 	defer sess.close()
 
+	// 读取全局配置中的默认显示模式（config.yaml cli.display_mode），
+	// 未配置时为 ""（等价 auto：表格超宽自动降级）
+	if svc, err := newAIService("", ""); err == nil {
+		sess.displayMode = strings.TrimSpace(svc.Config().CLI.DisplayMode)
+	}
+
 	// 检查是否为终端环境
 	if !isTerminal() {
 		return fmt.Errorf("交互模式需要终端环境，请使用 -e 执行 SQL 或 --json 输出")
@@ -76,8 +82,14 @@ func runInteractive(info *engine.DBConnInfo) error {
 			continue
 		}
 
-		if strings.HasPrefix(input, "\\") {
-			handled, shouldQuit := sess.handleMeta(input)
+		if strings.HasPrefix(input, "\\") || strings.HasPrefix(input, "/") {
+			// 兼容 / 前缀习惯（如 /ai、/dt）：转换为 \ 前缀尝试元命令；
+			// 未知命令（如 /* 注释开头）不处理，按原输入落入 SQL 缓冲区
+			meta := input
+			if strings.HasPrefix(input, "/") {
+				meta = "\\" + input[1:]
+			}
+			handled, shouldQuit := sess.handleMeta(meta)
 			if shouldQuit {
 				return nil
 			}
@@ -143,7 +155,9 @@ func (s *session) executeSQL(line *liner.State, sql string, useVertical bool) {
 	result, err := s.execute(ctx, sql)
 
 	if err != nil {
+		s.lastErr = err.Error()
 		fmt.Fprintf(os.Stderr, "%s\n", red(fmt.Sprintf("错误: %v", err)))
+		fmt.Fprintln(os.Stderr, dim("提示: 输入 \\ai fix 可让 AI 根据该报错自动修复 SQL"))
 		return
 	}
 
@@ -160,9 +174,9 @@ func (s *session) executeSQL(line *liner.State, sql string, useVertical bool) {
 	}
 
 	if useVertical {
-		outputVertical(result)
+		s.renderResult(result, true)
 	} else {
-		maybePage(result)
+		s.renderResult(result, false)
 	}
 
 	if isWrite {

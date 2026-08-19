@@ -244,6 +244,7 @@ func executeOnce(info *engine.DBConnInfo, sql string, opts *options) error {
 		AffectedRows: affected,
 		Elapsed:      time.Since(start),
 		SQL:          sql,
+		IsWrite:      true,
 	}
 	return outputResult(result, opts)
 }
@@ -297,6 +298,7 @@ type queryResult struct {
 	Elapsed      time.Duration
 	SQL          string
 	Error        string
+	IsWrite      bool // 写操作标记：空结果时区分「Query OK」（写）与「Empty set」（读）
 }
 
 // ---- SQL 分类 ----

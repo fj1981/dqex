@@ -24,6 +24,8 @@ type session struct {
 
 	tableCache []string
 	lastSQL    string
+	lastErr    string   // 最近一次执行报错（供 \ai fix 自动携带）
+	displayMode string // 结果展示模式："" / "auto"=超宽自动降级；"table"=强制表格；"vertical"=强制垂直
 	ai         *aiState // AI 会话状态（懒加载；切换数据库时重置）
 }
 
@@ -101,6 +103,10 @@ func (s *session) execute(ctx context.Context, sql string) (*queryResult, error)
 				return nil, err
 			}
 		}
+		// 0 行结果时 cydb 可能不返回列信息：兜底为空切片，避免渲染/JSON 输出歧义
+		if columns == nil {
+			columns = []string{}
+		}
 		return &queryResult{
 			Columns:  columns,
 			Rows:     rows,
@@ -125,6 +131,7 @@ func (s *session) execute(ctx context.Context, sql string) (*queryResult, error)
 		AffectedRows: affected,
 		Elapsed:      time.Since(start),
 		SQL:          sql,
+		IsWrite:      true,
 	}, nil
 }
 
@@ -169,19 +176,33 @@ func (s *session) handleMeta(cmd string) (bool, bool) {
 		return true, false
 	case "\\timing":
 		return true, false
-	case "\\g":
-		if s.lastSQL != "" {
-			ctx := context.Background()
-			result, err := s.execute(ctx, s.lastSQL)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s\n", red(err.Error()))
+	case "\\x":
+		// psql 风格扩展显示开关：\x [on|off|auto]，无参数时 toggle；切换后写回 config.yaml
+		mode := ""
+		if len(args) > 0 {
+			mode = strings.ToLower(args[0])
+		}
+		switch mode {
+		case "on":
+			s.displayMode = "vertical"
+		case "off":
+			s.displayMode = "table"
+		case "auto":
+			s.displayMode = "auto"
+		default:
+			// 无参数：toggle（auto 视为扩展中 → 关闭，与 psql 行为一致）
+			if s.displayMode == "vertical" {
+				s.displayMode = "table"
 			} else {
-				outputTable(result)
+				s.displayMode = "vertical"
 			}
 		}
+		s.saveDisplayMode()
+		fmt.Println(dim(fmt.Sprintf("扩展显示: %s（已写入 config.yaml 作为默认）", displayModeLabel(s.displayMode))))
 		return true, false
-	case "\\G":
-		return false, false
+	case "\\g", "\\G":
+		s.runLastSQL(name == "\\G")
+		return true, false
 	case "\\p", "\\print":
 		fmt.Println(s.lastSQL)
 		return true, false
@@ -216,6 +237,61 @@ func (s *session) handleMeta(cmd string) (bool, bool) {
 		return true, false
 	}
 	return false, false
+}
+
+// runLastSQL 重新执行上一条 SQL（缓冲区）；vertical 为 true 时垂直显示（\G）。
+func (s *session) runLastSQL(vertical bool) {
+	if s.lastSQL == "" {
+		return
+	}
+	ctx := context.Background()
+	result, err := s.execute(ctx, s.lastSQL)
+	if err != nil {
+		s.lastErr = err.Error()
+		fmt.Fprintf(os.Stderr, "%s\n", red(err.Error()))
+		fmt.Fprintln(os.Stderr, dim("提示: 输入 \\ai fix 可让 AI 根据该报错自动修复 SQL"))
+		return
+	}
+	s.renderResult(result, vertical)
+}
+
+// renderResult 按显示模式渲染查询结果；forceVertical 为 \G / SQL 后缀 \G 的单次垂直。
+func (s *session) renderResult(r *queryResult, forceVertical bool) {
+	if forceVertical || s.displayMode == "vertical" {
+		outputVertical(r)
+		return
+	}
+	if s.displayMode == "table" {
+		outputTable(r)
+		return
+	}
+	maybePage(r) // auto：表格超宽时自动降级为垂直显示
+}
+
+// saveDisplayMode 将当前显示模式写回 config.yaml（cli.display_mode），下次启动作为默认生效。
+func (s *session) saveDisplayMode() {
+	svc, err := newAIService("", "")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, dim("(提示：显示模式未能写入 config.yaml: "+err.Error()+")"))
+		return
+	}
+	cfg := *svc.Config()
+	cfg.CLI.DisplayMode = s.displayMode
+	if err := svc.SaveConfig(cfg); err != nil {
+		fmt.Fprintln(os.Stderr, dim("(提示：显示模式未能写入 config.yaml: "+err.Error()+")"))
+	}
+}
+
+// displayModeLabel 显示模式的友好描述。
+func displayModeLabel(mode string) string {
+	switch mode {
+	case "vertical":
+		return "开（垂直显示）"
+	case "table":
+		return "关（表格显示）"
+	default:
+		return "auto（表格超宽时自动垂直）"
+	}
 }
 
 func (s *session) showConnInfo() {
@@ -495,7 +571,7 @@ func completeMeta(word string) []string {
 	cmds := []string{
 		"\\q", "\\quit", "\\dt", "\\tables", "\\d", "\\desc", "\\d+",
 		"\\l", "\\list", "\\databases", "\\c", "\\use", "\\connect",
-		"\\timing", "\\g", "\\G", "\\p", "\\print", "\\r", "\\reset",
+		"\\timing", "\\g", "\\G", "\\x", "\\p", "\\print", "\\r", "\\reset",
 		"\\h", "\\help", "\\copy", "\\w", "\\write", "\\i", "\\include",
 		"\\ai",
 	}
@@ -664,8 +740,9 @@ func printHelp() {
   \c, \use  <库名>     切换数据库
   \c                   查看当前连接信息
   \timing              切换耗时显示
-  \g                   再次执行上一条 SQL
-  \G                   垂直显示（每行一个字段）
+  \g                   再次执行上一条 SQL（表格）
+  \G                   执行上一条 SQL 并垂直显示（每行一个字段）
+  \x [on|off|auto]     扩展显示：on=垂直 off=表格 auto=超宽自动（写入 config.yaml）
   \p, \print           打印当前缓冲区
   \r, \reset           清空缓冲区
   \ai <需求>            AI 生成 SQL 到缓冲区（\ai help 查看子命令）

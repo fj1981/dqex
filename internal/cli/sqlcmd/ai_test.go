@@ -2,6 +2,7 @@ package sqlcmd
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -59,7 +60,7 @@ func newTestSession(reply string) (*session, *mockChat) {
 		ai: &aiState{
 			svc:    svc,
 			client: mc,
-			schema: "# 预置 schema（绕过数据库访问）\n`sys_user`\n",
+			sys:    "# 预置 system prompt（绕过数据库访问）\n`sys_user`\n",
 		},
 	}
 	return s, mc
@@ -68,12 +69,11 @@ func newTestSession(reply string) (*session, *mockChat) {
 // 重置包级注入变量（测试隔离），在每个用例开头调用。
 func resetAIDeps() {
 	newAIService = service.NewServiceWith
-	newLLMClient = llm.NewClient
 	getTableTree = engine.GetTableTree
 	getTableMeta = engine.GetTableMeta
 }
 
-// 把 getTableTree 换成返回固定树，供 aiSchema 相关测试。
+// 把 getTableTree 换成返回固定树，供 aiTargetTables 相关测试。
 func stubTableTree() {
 	getTableTree = func(conn engine.DBConnInfo) ([]engine.DBTables, error) {
 		return []engine.DBTables{
@@ -145,12 +145,7 @@ func TestAIFixCarriesSQLAndError(t *testing.T) {
 	if len(mc.calls) != 1 {
 		t.Fatalf("应调用 1 次 Chat，实际 %d", len(mc.calls))
 	}
-	// 最后一条消息（用户消息）应同时包含原始 SQL 与报错信息
-	msgs := mc.calls[0]
-	last := msgs[len(msgs)-1]
-	if last.Role != schema.User {
-		t.Fatalf("最后一条应为 user 消息，实际 %s", last.Role)
-	}
+	last := mc.calls[0][len(mc.calls[0])-1]
 	if !strings.Contains(last.Content, "SELECT * FROM bad_table;") {
 		t.Fatalf("修复请求应携带原始 SQL，实际: %q", last.Content)
 	}
@@ -215,11 +210,9 @@ func TestAIResetClearsContext(t *testing.T) {
 		t.Fatal("generate 后应有上下文消息")
 	}
 	s.ai.usage = llm.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}
-
 	s.aiReset()
-
 	if len(s.ai.msgs) != 0 {
-		t.Fatalf("reset 后 msgs 应清空，实际 %d 条", len(s.ai.msgs))
+		t.Fatalf("reset 后消息应清空，实际 %d", len(s.ai.msgs))
 	}
 	if s.ai.usage.TotalTokens != 0 {
 		t.Fatalf("reset 后 usage 应清零，实际 %d", s.ai.usage.TotalTokens)
@@ -227,28 +220,24 @@ func TestAIResetClearsContext(t *testing.T) {
 	_ = mc
 }
 
-// aiEnsure 首次调用时注入含 schema 的 system prompt。
+// aiEnsure 首次调用时注入预置 system prompt。
 func TestAIEnsureInjectsSystemPrompt(t *testing.T) {
 	resetAIDeps()
 	stubTableTree()
 	s, _ := newTestSession("")
-	s.ai.schema = "" // 清空缓存，强制走 aiSchema 构建真实 schema
 
 	if err := s.aiEnsure(); err != nil {
 		t.Fatalf("aiEnsure 失败: %v", err)
 	}
 	if len(s.ai.msgs) != 1 {
-		t.Fatalf("应只有 1 条 system 消息，实际 %d", len(s.ai.msgs))
+		t.Fatalf("应恰好 1 条 system 消息，实际 %d", len(s.ai.msgs))
 	}
 	sys := s.ai.msgs[0]
 	if sys.Role != schema.System {
-		t.Fatalf("首条应为 system 消息，实际 %s", sys.Role)
+		t.Fatalf("首条消息应为 system，实际 role=%s", sys.Role)
 	}
 	if !strings.Contains(sys.Content, "sys_user") {
-		t.Fatalf("system prompt 应包含表名，实际: %q", sys.Content)
-	}
-	if !strings.Contains(sys.Content, "`id`") {
-		t.Fatalf("system prompt 应包含列结构，实际: %q", sys.Content)
+		t.Fatalf("system prompt 应包含预置表名，实际: %q", sys.Content)
 	}
 }
 
@@ -257,7 +246,6 @@ func TestAIEnsureIdempotent(t *testing.T) {
 	resetAIDeps()
 	stubTableTree()
 	s, _ := newTestSession("")
-	s.ai.schema = "" // 清空缓存，强制走 aiSchema 构建真实 schema
 
 	if err := s.aiEnsure(); err != nil {
 		t.Fatalf("首次 aiEnsure 失败: %v", err)
@@ -270,40 +258,76 @@ func TestAIEnsureIdempotent(t *testing.T) {
 	}
 }
 
-// aiSchema 目标库降级：当前库不存在时退化为第一个库。
-func TestAISchemaFallsBackToFirstDB(t *testing.T) {
+// aiTargetTables 目标库降级：当前库不存在时退化为第一个库。
+func TestAITargetTablesFallsBackToFirstDB(t *testing.T) {
 	resetAIDeps()
 	stubTableTree()
 	s, _ := newTestSession("")
-	s.ai.schema = ""   // 清空缓存，强制走 aiSchema 构建真实 schema
 	s.currentDB = "nonexistent" // 当前库在树中不存在
 
-	schemaText, err := s.aiSchema()
+	target, tables, err := s.aiTargetTables()
 	if err != nil {
-		t.Fatalf("aiSchema 失败: %v", err)
+		t.Fatalf("aiTargetTables 失败: %v", err)
 	}
-	// 应退化到第一个库 testdb，注入其表结构
-	if !strings.Contains(schemaText, "sys_user") {
-		t.Fatalf("schema 应包含第一个库的表，实际: %q", schemaText)
+	// 应退化到第一个库 testdb
+	if target != "testdb" {
+		t.Fatalf("应退化到 testdb，实际: %q", target)
+	}
+	if !slices.Contains(tables, "sys_user") {
+		t.Fatalf("表名录应包含 sys_user，实际: %v", tables)
 	}
 }
 
-// aiSchema 目标库精确匹配：优先当前库，不混入其他库的表。
-func TestAISchemaMatchesCurrentDB(t *testing.T) {
+// aiTargetTables 目标库精确匹配：优先当前库，不混入其他库的表。
+func TestAITargetTablesMatchesCurrentDB(t *testing.T) {
 	resetAIDeps()
 	stubTableTree()
 	s, _ := newTestSession("")
-	s.ai.schema = "" // 清空缓存，强制走 aiSchema 构建真实 schema
 	s.currentDB = "otherdb"
 
-	schemaText, err := s.aiSchema()
+	target, tables, err := s.aiTargetTables()
 	if err != nil {
-		t.Fatalf("aiSchema 失败: %v", err)
+		t.Fatalf("aiTargetTables 失败: %v", err)
 	}
-	if !strings.Contains(schemaText, "logs") {
-		t.Fatalf("schema 应包含当前库的表，实际: %q", schemaText)
+	if target != "otherdb" {
+		t.Fatalf("应匹配 otherdb，实际: %q", target)
 	}
-	if strings.Contains(schemaText, "sys_user") {
-		t.Fatalf("schema 不应混入其他库的表，实际: %q", schemaText)
+	if !slices.Contains(tables, "logs") {
+		t.Fatalf("表名录应包含 logs，实际: %v", tables)
+	}
+	if slices.Contains(tables, "sys_user") {
+		t.Fatalf("不应混入其他库的表，实际: %v", tables)
+	}
+}
+
+// cliAgentSystemPrompt 默认模板：包含表名录与「必须先查表结构」约束。
+func TestCLIAgentSystemPrompt(t *testing.T) {
+	resetAIDeps()
+	sys := cliAgentSystemPrompt(service.AIConfig{}, "mysql", "testdb", []string{"sys_user", "orders"})
+
+	if !strings.Contains(sys, "mysql") {
+		t.Fatalf("system prompt 应包含方言，实际: %q", sys)
+	}
+	if !strings.Contains(sys, "testdb") {
+		t.Fatalf("system prompt 应包含目标库，实际: %q", sys)
+	}
+	if !strings.Contains(sys, "sys_user, orders") {
+		t.Fatalf("system prompt 应包含表名录，实际: %q", sys)
+	}
+	if !strings.Contains(sys, "get_schema") {
+		t.Fatalf("system prompt 应包含工具使用约束，实际: %q", sys)
+	}
+}
+
+// cliAgentSystemPrompt 自定义模板：替换 {dialect} 占位符，工具约束仍保留。
+func TestCLIAgentSystemPromptCustom(t *testing.T) {
+	resetAIDeps()
+	sys := cliAgentSystemPrompt(service.AIConfig{SystemPrompt: "你是 {dialect} 专家"}, "tidb", "testdb", nil)
+
+	if !strings.Contains(sys, "你是 tidb 专家") {
+		t.Fatalf("应替换 {dialect} 占位符，实际: %q", sys)
+	}
+	if !strings.Contains(sys, "get_schema") {
+		t.Fatalf("自定义模板下工具约束仍应保留，实际: %q", sys)
 	}
 }

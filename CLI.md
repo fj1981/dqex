@@ -193,6 +193,24 @@ dbx sql -c conn_a1b2c3      # 连接 ID
 - **大数据量保护**：默认 `max-rows=1000` 行上限；非 TTY 自动降级为纯文本表格（便于管道 / grep）。
 - **智能体模式**：`--json` 输出 NDJSON，供脚本 / Agent 消费。
 
+**常用元命令：**
+
+| 命令 | 说明 |
+|---|---|
+| `\q` / `\quit` | 退出终端 |
+| `\dt` / `\tables [pat]` | 列出表（支持通配符 * ?） |
+| `\d` / `\d+ <表名>` | 查看表结构（`\d+` 含索引/约束） |
+| `\l` / `\c <库名>` | 列出数据库 / 切换数据库 |
+| `\g` / `\G` | 再次执行上一条 SQL：表格 / 垂直显示（每行一个字段，字段多时推荐） |
+| `\x [on\|off\|auto]` | 扩展显示开关（psql 风格）：on=垂直 off=表格 auto=表格超宽自动垂直（默认）；切换后写入 config.yaml `cli.display_mode` 持久化 |
+| `\p` / `\r` | 打印缓冲区 / 清空缓冲区 |
+| `\e` / `\edit` | 用外部编辑器编辑上一条 SQL |
+| `\copy <文件>` | 导出上一条查询结果到文件（CSV） |
+| `\i <文件>` | 执行文件中的 SQL |
+| `\h` | 显示帮助 |
+
+> **结果展示**：`auto`（默认）模式下，表格宽度超过终端时会自动切换垂直显示（行数 ≤ 30），行数较多时提示改用 `\G`；`\x off` 可强制表格，`\x on` 强制垂直。
+
 ### 单次执行与管道
 
 ```bash
@@ -246,7 +264,7 @@ dbx snapshot compare -c 生产库 --a 早盘 --b 午盘   # 对比两个快照�
 **配置齐全（BaseURL/Model/Key 等四项非空）才启用；未配置时入口完全隐藏，不影响任何既有功能。**
 
 - **生成 ≠ 执行**：AI 只产出 SQL 文本，永远复用 `dbx sql` 的安全链路（写操作确认、危险函数拦截、审计）才落地。
-- **只读探索**：React Agent 仅拥有「列结构 / 样例数据 / 执行只读查询」等只读工具，无 SQL 写执行能力。
+- **只读探索**：`\ai` 为 React Agent 工具调用模式，生成前自动调用 `list_databases` / `list_tables` / `get_schema` 查询真实库表结构（控制台会打印 `⟳` 进度），无 SQL 写执行能力。
 - **密钥不出本机**：API Key 存本地；状态接口仅返回掩码后的端点与模型名，不回显明文。
 - **注入防护**：AI 生成 SQL 先剥离注释再经 `CheckDangerous` 校验，阻断间接 Prompt 注入。
 
@@ -262,7 +280,7 @@ dbx (mysql @ ...)> \ai 帮我统计昨日新增用户数
 |---|---|
 | `\ai <需求>` | 生成 SQL 到缓冲区，可 `\e` 编辑、`\g` 执行 |
 | `\ai explain [SQL]` | 解释 SQL，缺省用缓冲区中的 SQL |
-| `\ai fix [报错信息]` | 修复缓冲区中的 SQL，可附带报错信息 |
+| `\ai fix [报错信息]` | 修复缓冲区中的 SQL；缺省自动附带最近一次执行报错（`\g` 执行失败后可直接 `\ai fix`） |
 | `\ai continue <补充>` | 基于上文继续补充生成 |
 | `\ai copy` | 复制缓冲区 SQL 到系统剪贴板 |
 | `\ai status` | 查看配置状态、上下文消息数与 token 统计 |
@@ -271,11 +289,16 @@ dbx (mysql @ ...)> \ai 帮我统计昨日新增用户数
 | `\ai help` | 显示以上帮助 |
 
 ```bash
-# 示例：生成 → 修复 → 执行
+# 示例：生成 → 修复 → 执行（执行报错后可直接 \ai fix，自动携带报错信息）
 dbx (mysql @ ...)> \ai 统计每个部门的人数
-dbx (mysql @ ...)> \ai fix 报错: 字段 dept 不存在
+dbx (mysql @ ...)> \g
+[query] error=> Error 1054 ... Unknown column 'dept' ...
+提示: 输入 \ai fix 可让 AI 根据该报错自动修复 SQL
+dbx (mysql @ ...)> \ai fix
 dbx (mysql @ ...)> \g
 ```
+
+> 提示：需求中写明表名（如 `\ai 查询 robotics_user 表的必要字段`）可提高模型先调用 `get_schema` 确认真实字段的概率，避免凭想象生成字段。
 
 > 依赖 `cloudwego/eino`（`go.mod` 中为 indirect 且固定版本，功能可选，升级不影响核心链路）。
 
@@ -464,6 +487,8 @@ dirs:
   tmp: ""         # 默认 <data>/tmp
   uploads: ""     # 默认 <data>/uploads
   exports: ""     # 默认 <data>/exports
+cli:
+  display_mode: ""   # SQL 终端结果默认显示：空/auto=表格超宽自动垂直 | table=强制表格 | vertical=强制垂直（\x 命令切换并写回）
 ```
 
 配置文件查找顺序：`--config-file` > 环境变量 `DBIMPEX_CONFIG` > `~/.dbimpex/config.yaml`

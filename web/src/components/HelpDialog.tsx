@@ -57,8 +57,9 @@ const META_COMMANDS = [
   { cmd: "\\d+ <表名>", desc: "查看表结构（含索引 / 约束）" },
   { cmd: "\\l / \\list", desc: "列出数据库" },
   { cmd: "\\c / \\use <库名>", desc: "切换数据库" },
-  { cmd: "\\g", desc: "再次执行上一条 SQL" },
-  { cmd: "\\G", desc: "垂直显示（每行一个字段）" },
+  { cmd: "\\g", desc: "再次执行上一条 SQL（表格）" },
+  { cmd: "\\G", desc: "执行上一条 SQL 并垂直显示（每行一个字段）" },
+  { cmd: "\\x [on|off|auto]", desc: "扩展显示：on=垂直 off=表格 auto=超宽自动（默认，写入 config.yaml）" },
   { cmd: "\\timing", desc: "切换耗时显示" },
   { cmd: "\\e / \\edit", desc: "用外部编辑器编辑上一条 SQL" },
   { cmd: "\\copy / \\w <文件>", desc: "导出上一条查询结果到文件（CSV）" },
@@ -69,7 +70,7 @@ const META_COMMANDS = [
 const AI_COMMANDS = [
   { cmd: "\\ai <需求>", desc: "生成 SQL 到缓冲区，可 \\e 编辑、\\g 执行" },
   { cmd: "\\ai explain [SQL]", desc: "解释 SQL（缺省用缓冲区）" },
-  { cmd: "\\ai fix [报错信息]", desc: "修复缓冲区 SQL" },
+  { cmd: "\\ai fix [报错信息]", desc: "修复缓冲区 SQL（缺省自动附带上次执行报错）" },
   { cmd: "\\ai continue <补充>", desc: "基于上文继续补充生成" },
   { cmd: "\\ai copy", desc: "复制缓冲区 SQL 到系统剪贴板" },
   { cmd: "\\ai status", desc: "查看配置状态与 token 统计" },
@@ -272,7 +273,7 @@ export default function HelpDialog({ open, onOpenChange }: { open: boolean; onOp
                 AI 辅助写 SQL（可选模块）
               </h3>
               <p className="text-xs text-muted-foreground">
-                在 SQL 终端内用自然语言生成 SQL；配置齐全（BaseURL / Model / Key）才启用，未配置时无入口。生成结果仅写入缓冲区，需 <code className="font-mono">\e</code> 编辑、<code className="font-mono">\g</code> 执行，复用安全链路。
+                在 SQL 终端内用自然语言生成 SQL；配置齐全（BaseURL / Model / Key）才启用，未配置时无入口。生成结果仅写入缓冲区，需 <code className="font-mono">\e</code> 编辑、<code className="font-mono">\g</code> 执行，复用安全链路。生成时自动调用 list_databases / list_tables / get_schema 查询真实表结构；执行报错后直接 <code className="font-mono">\ai fix</code> 即可自动携带报错修复。
               </p>
               <div className="overflow-x-auto rounded-md border">
                 <table className="w-full text-left text-sm">

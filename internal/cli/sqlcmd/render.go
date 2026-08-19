@@ -21,6 +21,12 @@ func outputTable(r *queryResult) {
 		return
 	}
 	if len(r.Columns) == 0 {
+		// 写语句：Query OK；读语句空结果（cydb 可能不返回列信息）：Empty set
+		if !r.IsWrite {
+			fmt.Println(dim("Empty set"))
+			fmt.Printf("%s\n", dim(fmt.Sprintf("(%s)", formatDuration(r.Elapsed))))
+			return
+		}
 		if r.AffectedRows > 0 {
 			fmt.Printf("Query OK, %d rows affected (%s)\n", r.AffectedRows, formatDuration(r.Elapsed))
 		} else {
@@ -182,7 +188,7 @@ func outputVertical(r *queryResult) {
 		for j, col := range r.Columns {
 			val := ""
 			if j < len(row) {
-				val = fmt.Sprintf("%v", row[j])
+				val = formatCell(row[j])
 			}
 			fmt.Printf("%20s: %s\n", col, val)
 		}
@@ -190,16 +196,59 @@ func outputVertical(r *queryResult) {
 	fmt.Printf("%d rows in set (%s)\n", r.RowCount, formatDuration(r.Elapsed))
 }
 
-// ---- 分页器 ----
+// ---- 宽度检测与垂直降级 ----
 
-func maybePage(r *queryResult) {
-	termH := 40
-	if _, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil && h > 0 {
-		termH = h
+// verticalAutoMaxRows 表格超宽时自动切垂直显示的最大行数（再大则只提示用 \G）。
+const verticalAutoMaxRows = 30
+
+// stripANSI 剥离 ANSI 转义序列（CSI 模式），用于表格宽度估算。
+func stripANSI(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			for i < len(s) && !(s[i] >= 0x40 && s[i] <= 0x7e) {
+				i++
+			}
+			continue
+		}
+		b.WriteByte(s[i])
 	}
-	if r.RowCount <= termH-5 {
-		outputTable(r)
-		return
+	return b.String()
+}
+
+// estimateTableWidth 估算 tablewriter 渲染后的表格宽度（含列间距）。
+func estimateTableWidth(r *queryResult) int {
+	total := 1
+	for i, col := range r.Columns {
+		w := len(stripANSI(col))
+		for _, row := range r.Rows {
+			if i < len(row) {
+				if l := len(stripANSI(formatCell(row[i]))); l > w {
+					w = l
+				}
+			}
+		}
+		total += w + 3
+	}
+	return total
+}
+
+// maybePage 渲染查询结果：表格宽度超过终端时，
+// 行数不多自动切换垂直显示（\G 样式），行数多则提示改用 \G。
+func maybePage(r *queryResult) {
+	termW := 0
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		termW = w
+	}
+	if termW > 0 && len(r.Columns) > 1 && estimateTableWidth(r) > termW {
+		if r.RowCount <= verticalAutoMaxRows {
+			fmt.Fprintln(os.Stderr, dim("⚠ 表格宽度超过终端，已自动切换为垂直显示（每行一个字段）"))
+			outputVertical(r)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "%s\n", yellow(fmt.Sprintf("⚠ 表格宽度超过终端（%d 列），建议用 \\G 垂直显示", len(r.Columns))))
 	}
 	outputTable(r)
 }

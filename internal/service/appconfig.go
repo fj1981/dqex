@@ -53,11 +53,18 @@ type AIConfig struct {
 	SystemPrompt    string  `yaml:"system_prompt,omitempty" json:"systemPrompt"`             // 自定义 system prompt 模板（支持 {dialect}/{schema} 占位符），留空用内置默认
 }
 
+// CLIConfig CLI 交互终端配置（dbx sql）
+type CLIConfig struct {
+	// DisplayMode 查询结果默认显示模式：auto=表格超宽自动降级（默认）；table=强制表格；vertical=强制垂直
+	DisplayMode string `yaml:"display_mode,omitempty" json:"displayMode"`
+}
+
 // AppConfig 全局独立配置（config.yaml）
 type AppConfig struct {
 	Dirs DirConfig `yaml:"dirs" json:"dirs"`
 	Web  WebConfig `yaml:"web" json:"web"`
 	AI   AIConfig  `yaml:"ai" json:"ai"`
+	CLI  CLIConfig `yaml:"cli" json:"cli"`
 	// Debug 全局 debug 日志开关：开启后输出 debug 及以上级别日志（含 AI 链路）。
 	// 等效于命令行 --debug；修改后重启服务生效。
 	Debug bool `yaml:"debug,omitempty" json:"debug"`

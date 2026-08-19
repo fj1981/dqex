@@ -190,7 +190,7 @@ ai:
 | `\ai <自然语言>` | 携带当前连接+库表结构上下文调 LLM，整块输出 SQL 并写入缓冲区（可编辑后 `\g` 执行）；写操作仍需确认 |
 | `\ai continue <追问>` / `\ai c` | 基于上一轮会话继续，结果追加进缓冲区 |
 | `\ai explain [SQL]` | 解释当前缓冲区/`lastSQL` 或指定 SQL 的意图/风险 |
-| `\ai fix <报错>` | 带上失败 SQL + 报错让模型修复，结果进缓冲区 |
+| `\ai fix [报错]` | 带上失败 SQL + 报错让模型修复，结果进缓冲区；缺省自动附带最近一次执行报错（`lastErr`，`\g` 失败后可直接 `\ai fix`） |
 | `\ai copy` | 复制缓冲区 SQL 到剪贴板 |
 | `\ai clear` / `\ai status` | 清空会话 / 查看配置模型、可用状态、**进程累计 tokens** |
 | `\ai config` | 引导式设置 base_url / api_key / model，写入 config.yaml |
@@ -198,6 +198,15 @@ ai:
 
 > 命令精简说明（参考 GitHub Copilot CLI / OpenAI Codex / Claude Code 的命令集）：
 > 移除 `\ai run`（与 `\ai` + `\g` 执行链路冗余）、`\ai again`（直接重输需求即可）、`\ai optimize`（低频，可用 `\ai continue 请优化这段 SQL` 覆盖），并收敛别名（`\ai clear`、`\ai c`）。
+
+### 已落地：React Agent 工具调用模式
+
+CLI `\ai` 已从「单轮静态对话（schema 预注入）」升级为与 Web 端一致的 **React Agent 工具循环**（`llm.NewReactAgent` + `agentChat` 适配器包装为 `chatClient`，测试 mock 无需改动）：
+
+- **三个只读工具**：`list_databases` / `list_tables` / `get_schema`，逻辑与 Web 端 `service.buildAgentTools` 对齐——库名/表名拼错时返回可用列表让模型纠正重试；`get_schema` 返回字段摘要（表注释 + 字段名/类型/可空/注释），按 `max_schema_chars` 裁剪
+- **system prompt 只含库/表名录**（`cliAgentSystemPrompt`），不预注入字段结构；模型必须经 `get_schema` 按需查询真实字段，禁止凭想象生成 SQL
+- **工具调用进度**：每次调用在控制台打印 `⟳ 正在查询表结构 (库.表)...`
+- **结果展示**：`\g` 表格 / `\G` 垂直（每行一个字段）；`\x [on|off|auto]` 扩展显示开关（psql 风格，auto=表格超宽自动垂直），切换写回 config.yaml `cli.display_mode` 持久化，启动时读取
 
 实现要点：复用 `handleMeta` 分派 + `sess.tableCache`；缓冲区复用现有写操作确认的编辑链路；生成结果必须过 `classifySQL` + `checkDangerous` + 写操作确认，不绕过安全链路。
 
