@@ -5,6 +5,14 @@ import { Bot, FolderCog, FolderOpen, Globe, KeyRound, Languages, Loader2, Monito
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -14,13 +22,14 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
 import * as api from "@/api"
 import PageHeader from "@/components/PageHeader"
 import { Section } from "@/components/Section"
 import DirectoryPicker from "@/components/DirectoryPicker"
 import { changeUILang, tKey } from "@/lib/i18n"
 import { SUPPORTED_LANGS } from "@/locales"
-import type { AIConfig, AppConfig, ConfigInfo, DirConfig } from "@/types"
+import type { AIConfig, AIProvider, AppConfig, ConfigInfo, DirConfig } from "@/types"
 
 // 六类目录的 i18n key（渲染时 t() 翻译）
 const DIR_FIELDS: { key: keyof DirConfig; label: string; desc: string }[] = [
@@ -41,6 +50,23 @@ const TABS: { key: SettingsTab; label: string; desc: string; icon: typeof Folder
   { key: "compat", label: "settings.compat", desc: "settings.compatDesc", icon: Globe },
 ]
 
+// 根据 baseUrl 反推厂商 ID（从 API 返回的 providers 列表匹配，未匹配返回 "custom"）
+function getProviderIdFromBaseUrl(baseUrl: string, providers: AIProvider[]): string {
+  const trimmed = baseUrl.trim().replace(/\/$/, "")
+  for (const p of providers) {
+    if (p.id !== "custom" && p.baseUrl && p.baseUrl.replace(/\/$/, "") === trimmed) {
+      return p.id
+    }
+  }
+  return trimmed ? "custom" : ""
+}
+
+// 根据厂商 ID 获取对应的 BaseURL（从 API 返回的 providers 列表查找）
+function getBaseUrlFromProviderId(id: string, providers: AIProvider[]): string {
+  const p = providers.find((p) => p.id === id)
+  return p?.baseUrl ?? ""
+}
+
 export default function SettingsView() {
   const { t, i18n } = useTranslation()
   // 主题：浅色 / 深色 / 跟随系统（与 Header 按钮同源，next-themes 持久化）
@@ -55,11 +81,34 @@ export default function SettingsView() {
   const [pickerDir, setPickerDir] = useState<keyof DirConfig | null>(null)
   // 白名单新增输入框
   const [newAllow, setNewAllow] = useState("")
+  // AI 厂商预设
+  const [aiProviders, setAiProviders] = useState<AIProvider[]>([])
+  // 显示管理厂商对话框
+  const [showManageProviders, setShowManageProviders] = useState(false)
+  // 管理对话框状态
+  const [mgrList, setMgrList] = useState<AIProvider[]>([])
+  const [mgrSelectedId, setMgrSelectedId] = useState<string>("")
+  const [mgrForm, setMgrForm] = useState({ id: "", name: "", baseUrl: "", models: "" })
+
+  // 根据 baseUrl 反推当前选中的厂商 ID（未匹配返回 "custom"）
+  const detectProvider = useCallback((baseUrl: string): string => {
+    const trimmed = baseUrl.trim().replace(/\/$/, "")
+    for (const p of aiProviders) {
+      if (p.id !== "custom" && p.id === getProviderIdFromBaseUrl(trimmed, aiProviders)) {
+        return p.id
+      }
+    }
+    return trimmed ? "custom" : ""
+  }, [aiProviders])
 
   const load = useCallback(async () => {
     try {
-      const data = await api.getConfig()
+      const [data, providers] = await Promise.all([
+        api.getConfig(),
+        api.getAIProviders(),
+      ])
       setInfo(data)
+      setAiProviders(providers)
       const c: AppConfig = JSON.parse(JSON.stringify(data.config))
       // 补齐 AI 默认值：字段缺失时用默认值，用户显式填 0 仍保留
       c.ai = {
@@ -69,7 +118,6 @@ export default function SettingsView() {
         temperature: c.ai?.temperature ?? 0.2,
         maxTokens: c.ai?.maxTokens ?? 2048,
         timeoutSec: c.ai?.timeoutSec ?? 60,
-        maxSchemaTables: c.ai?.maxSchemaTables ?? 30,
         maxSchemaChars: c.ai?.maxSchemaChars ?? 20000,
         systemPrompt: c.ai?.systemPrompt ?? "",
       }
@@ -136,6 +184,80 @@ export default function SettingsView() {
   const saveSecurity = () => save(t("settings.whitelistSaved"))
   const saveAI = () => save(t("settings.aiSaved"))
   const saveCompat = () => save(t("settings.compatSaved"))
+
+  // ---- 厂商管理对话框 ----
+  const mgrModelsToStr = (models: AIProvider["models"]) =>
+    (models ?? []).map((m) => (m.maxTokens ? `${m.name}:${m.maxTokens}` : m.name)).join(", ")
+  const mgrStrToModels = (s: string) =>
+    s.split(",").map((n) => n.trim()).filter(Boolean).map((raw) => {
+      const parts = raw.split(":")
+      const name = parts[0].trim()
+      const maxTokens = parts[1] ? parseInt(parts[1], 10) || 0 : 0
+      return { name, context: 0, maxTokens }
+    })
+
+  const openMgrDialog = () => {
+    setMgrList(aiProviders.map((p) => ({ ...p })))
+    const first = aiProviders[0]
+    if (first) {
+      setMgrSelectedId(first.id)
+      setMgrForm({ id: first.id, name: first.name, baseUrl: first.baseUrl, models: mgrModelsToStr(first.models) })
+    } else {
+      setMgrSelectedId("")
+      setMgrForm({ id: "", name: "", baseUrl: "", models: "" })
+    }
+    setShowManageProviders(true)
+  }
+
+  const mgrSelectProvider = (id: string) => {
+    setMgrSelectedId(id)
+    const p = mgrList.find((x) => x.id === id)
+    if (p) setMgrForm({ id: p.id, name: p.name, baseUrl: p.baseUrl, models: mgrModelsToStr(p.models) })
+  }
+
+  const mgrApplyForm = () => {
+    setMgrList((list) => list.map((p) => (p.id === mgrSelectedId ? { ...p, name: mgrForm.name, baseUrl: mgrForm.baseUrl, models: mgrStrToModels(mgrForm.models) } : p)))
+  }
+
+  const mgrAddProvider = () => {
+    const id = mgrForm.id.trim()
+    if (!id) return
+    if (mgrList.some((p) => p.id === id)) {
+      toast.error(t("settings.aiProviderIdExists"))
+      return
+    }
+    const newP: AIProvider = { id, name: mgrForm.name || id, baseUrl: mgrForm.baseUrl, models: mgrStrToModels(mgrForm.models) }
+    setMgrList((list) => [...list, newP])
+    setMgrSelectedId(id)
+  }
+
+  const mgrDeleteProvider = (id: string) => {
+    const newList = mgrList.filter((p) => p.id !== id)
+    setMgrList(newList)
+    if (mgrSelectedId === id) {
+      const first = newList[0]
+      if (first) {
+        setMgrSelectedId(first.id)
+        setMgrForm({ id: first.id, name: first.name, baseUrl: first.baseUrl, models: mgrModelsToStr(first.models) })
+      } else {
+        setMgrSelectedId("")
+        setMgrForm({ id: "", name: "", baseUrl: "", models: "" })
+      }
+    }
+  }
+
+  const mgrSaveAll = async () => {
+    try {
+      const items = mgrList.map(({ id, name, baseUrl, models }) => ({ id, name, baseUrl, models: models.map((m) => m.name) }))
+      await api.saveAIProviders(items as any)
+      toast.success(t("settings.aiProvidersSaved"))
+      const refreshed = await api.getAIProviders()
+      setAiProviders(refreshed)
+      setShowManageProviders(false)
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
 
   const TAB_ACTIONS: Record<SettingsTab, { save: () => void }> = {
     general: { save: saveGeneral },
@@ -363,7 +485,43 @@ export default function SettingsView() {
                   </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1 sm:col-span-2">
+                  {/* 厂商选择 */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium">{t("settings.aiProvider")}</label>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-xs"
+                        onClick={openMgrDialog}
+                      >
+                        {t("settings.aiManageProviders")}
+                      </Button>
+                    </div>
+                    <Select
+                      value={detectProvider(config.ai.baseUrl)}
+                      onValueChange={(providerId) => {
+                        const baseUrl = getBaseUrlFromProviderId(providerId, aiProviders)
+                        const provider = aiProviders.find((p) => p.id === providerId)
+                        const firstModel = provider?.models?.[0]?.name ?? ""
+                        updateAI({ baseUrl, model: firstModel })
+                      }}
+                    >
+                      <SelectTrigger className="text-xs">
+                        <SelectValue placeholder={t("settings.aiProviderPlaceholder")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {aiProviders.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <div className="text-xs text-muted-foreground">{t("settings.aiProviderHint")}</div>
+                  </div>
+                  {/* BaseURL（自定义厂商或回退时显示） */}
+                  <div className="space-y-1">
                     <label className="text-sm font-medium">{t("settings.aiBaseUrl")}</label>
                     <Input
                       value={config.ai.baseUrl}
@@ -375,6 +533,7 @@ export default function SettingsView() {
                       {t("settings.aiBaseUrlHint")}
                     </div>
                   </div>
+                  {/* API Key */}
                   <div className="space-y-1">
                     <label className="flex items-center gap-1 text-sm font-medium">
                       <KeyRound className="h-3.5 w-3.5" /> {t("settings.aiApiKey")}
@@ -388,14 +547,52 @@ export default function SettingsView() {
                     />
                     <div className="text-xs text-muted-foreground">{t("settings.aiApiKeyHint")}</div>
                   </div>
+                  {/* 模型选择 */}
                   <div className="space-y-1">
                     <label className="text-sm font-medium">{t("settings.aiModel")}</label>
-                    <Input
-                      value={config.ai.model}
-                      onChange={(e) => updateAI({ model: e.target.value })}
-                      placeholder="gpt-4o-mini / deepseek-chat"
-                      className="font-mono text-xs"
-                    />
+                    {(() => {
+                      const currentProviderId = detectProvider(config.ai.baseUrl)
+                      const currentProvider = aiProviders.find((p) => p.id === currentProviderId)
+                      const models = currentProvider?.models ?? []
+                      if (models.length > 0) {
+                        return (
+                          <>
+                            <Select
+                              value={config.ai.model}
+                              onValueChange={(model) => {
+                                const m = models.find((x) => x.name === model)
+                                const patch: Partial<AIConfig> = { model }
+                                if (m?.maxTokens) patch.maxTokens = m.maxTokens * 1024
+                                updateAI(patch)
+                              }}
+                            >
+                              <SelectTrigger className="font-mono text-xs">
+                                <SelectValue placeholder={t("settings.aiModelPlaceholder")} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {models.map((m) => (
+                                  <SelectItem key={m.name} value={m.name}>
+                                    {m.name}{m.context ? ` (${m.context}K)` : ""}{m.maxTokens ? ` / ${m.maxTokens}K` : ""}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <div className="text-xs text-muted-foreground">{t("settings.aiModelHint")}</div>
+                          </>
+                        )
+                      }
+                      return (
+                        <>
+                          <Input
+                            value={config.ai.model}
+                            onChange={(e) => updateAI({ model: e.target.value })}
+                            placeholder="gpt-4o-mini / deepseek-chat"
+                            className="font-mono text-xs"
+                          />
+                          <div className="text-xs text-muted-foreground">{t("settings.aiModelHint")}</div>
+                        </>
+                      )
+                    })()}
                   </div>
                   <div className="space-y-1">
                     <label className="text-sm font-medium">{t("settings.aiTemperature")}</label>
@@ -421,6 +618,20 @@ export default function SettingsView() {
                       placeholder={t("settings.placeholderDefault", { n: "2048" })}
                       className="text-xs"
                     />
+                    {(() => {
+                      const currentProviderId = detectProvider(config.ai.baseUrl)
+                      const currentProvider = aiProviders.find((p) => p.id === currentProviderId)
+                      const selectedModel = currentProvider?.models?.find((m) => m.name === config.ai.model)
+                      const modelInfo: string[] = []
+                      if (selectedModel?.context) modelInfo.push(`上下文窗口 ${selectedModel.context}K（输入 + 输出共享）`)
+                      if (selectedModel?.maxTokens) modelInfo.push(`单次回复上限 ${selectedModel.maxTokens}K`)
+                      return (
+                        <div className="text-xs text-muted-foreground">
+                          {t("settings.aiMaxTokensHint")}
+                          {modelInfo.length > 0 && <span className="ml-1">· {modelInfo.join(" · ")}</span>}
+                        </div>
+                      )
+                    })()}
                   </div>
                   <div className="space-y-1">
                     <label className="text-sm font-medium">{t("settings.aiTimeout")}</label>
@@ -432,20 +643,6 @@ export default function SettingsView() {
                       placeholder={t("settings.placeholderDefault", { n: "60" })}
                       className="text-xs"
                     />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">{t("settings.aiMaxSchemaTables")}</label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={config.ai.maxSchemaTables}
-                      onChange={(e) => updateAI({ maxSchemaTables: Number(e.target.value) })}
-                      placeholder={t("settings.placeholderDefault", { n: "30" })}
-                      className="text-xs"
-                    />
-                    <div className="text-xs text-muted-foreground">
-                      {t("settings.aiMaxSchemaTablesHint")}
-                    </div>
                   </div>
                   <div className="space-y-1">
                     <label className="text-sm font-medium">{t("settings.aiMaxSchemaChars")}</label>
@@ -502,6 +699,133 @@ export default function SettingsView() {
           )}
         </div>
       </div>
+
+      {/* 管理厂商对话框 */}
+      <Dialog open={showManageProviders} onOpenChange={setShowManageProviders}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{t("settings.aiManageProviders")}</DialogTitle>
+            <DialogDescription>{t("settings.aiManageProvidersDesc")}</DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-4 py-2" style={{ minHeight: 360 }}>
+            {/* 左侧：厂商列表 */}
+            <div className="w-48 shrink-0 space-y-1 overflow-y-auto border-r pr-2" style={{ maxHeight: 400 }}>
+              {mgrList.map((p) => (
+                <div
+                  key={p.id}
+                  className={`flex cursor-pointer items-center justify-between rounded-md px-2.5 py-2 text-sm transition-colors ${
+                    mgrSelectedId === p.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"
+                  }`}
+                  onClick={() => mgrSelectProvider(p.id)}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium">{p.name}</div>
+                    <div className={`truncate text-xs ${mgrSelectedId === p.id ? "text-primary-foreground/70" : "text-muted-foreground"}`}>{p.id}</div>
+                  </div>
+                  {!p.builtin && (
+                    <button
+                      className={`ml-1 shrink-0 rounded p-0.5 transition-colors ${
+                        mgrSelectedId === p.id ? "hover:bg-primary-foreground/20" : "hover:bg-destructive/10 hover:text-destructive"
+                      }`}
+                      onClick={(e) => { e.stopPropagation(); mgrDeleteProvider(p.id) }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              {/* 新增入口 */}
+              <div className={`rounded-md border px-2.5 py-2 text-sm transition-colors ${
+                mgrSelectedId === "__new__" ? "border-primary bg-primary/5" : "border-dashed"
+              }`}>
+                <button
+                  className="flex w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => { setMgrSelectedId("__new__"); setMgrForm({ id: "", name: "", baseUrl: "", models: "" }) }}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {t("settings.aiProviderAdd")}
+                </button>
+              </div>
+            </div>
+            {/* 右侧：编辑表单 */}
+            <div className="flex-1 space-y-3 overflow-y-auto" style={{ maxHeight: 400 }}>
+              {mgrSelectedId && mgrSelectedId !== "__new__" && (() => {
+                const sel = mgrList.find((p) => p.id === mgrSelectedId)
+                return (
+                  <>
+                    {sel?.builtin && (
+                      <div className="rounded-md bg-blue-50 px-3 py-1.5 text-xs text-blue-600 dark:bg-blue-950/30 dark:text-blue-400">
+                        {t("settings.aiProviderBuiltin")}
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">{t("settings.aiProviderName")}</label>
+                      <Input value={mgrForm.name} onChange={(e) => setMgrForm((f) => ({ ...f, name: e.target.value }))} className="text-xs" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">{t("settings.aiBaseUrl")}</label>
+                      <Input value={mgrForm.baseUrl} onChange={(e) => setMgrForm((f) => ({ ...f, baseUrl: e.target.value }))} placeholder="https://api.example.com/v1" className="font-mono text-xs" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">{t("settings.aiProviderModels")}</label>
+                      <Textarea
+                        value={mgrForm.models}
+                        onChange={(e) => setMgrForm((f) => ({ ...f, models: e.target.value }))}
+                        placeholder="model-a, model-b:8, model-c:16"
+                        className="min-h-[72px] font-mono text-xs"
+                        rows={3}
+                      />
+                      <div className="text-xs text-muted-foreground">{t("settings.aiProviderModelsHint")}</div>
+                    </div>
+                    <Button variant="outline" size="sm" className="mt-1" onClick={mgrApplyForm}>{t("settings.aiProviderApply")}</Button>
+                  </>
+                )
+              })()}
+              {mgrSelectedId === "__new__" && (
+                <>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium">{t("settings.aiProviderId")}</label>
+                    <Input value={mgrForm.id} onChange={(e) => setMgrForm((f) => ({ ...f, id: e.target.value }))} placeholder="my-provider" className="font-mono text-xs" />
+                    <div className="text-xs text-muted-foreground">{t("settings.aiProviderIdHint")}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium">{t("settings.aiProviderName")}</label>
+                    <Input value={mgrForm.name} onChange={(e) => setMgrForm((f) => ({ ...f, name: e.target.value }))} className="text-xs" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium">{t("settings.aiBaseUrl")}</label>
+                    <Input value={mgrForm.baseUrl} onChange={(e) => setMgrForm((f) => ({ ...f, baseUrl: e.target.value }))} placeholder="https://api.example.com/v1" className="font-mono text-xs" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium">{t("settings.aiProviderModels")}</label>
+                    <Textarea
+                      value={mgrForm.models}
+                      onChange={(e) => setMgrForm((f) => ({ ...f, models: e.target.value }))}
+                      placeholder="model-a, model-b:8, model-c:16"
+                      className="min-h-[72px] font-mono text-xs"
+                      rows={3}
+                    />
+                    <div className="text-xs text-muted-foreground">{t("settings.aiProviderModelsHint")}</div>
+                  </div>
+                  <Button size="sm" className="mt-1" onClick={mgrAddProvider} disabled={!mgrForm.id.trim()}>
+                    <Plus className="mr-1 h-3.5 w-3.5" />
+                    {t("settings.aiProviderAdd")}
+                  </Button>
+                </>
+              )}
+              {!mgrSelectedId && (
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  {t("settings.aiProviderSelectHint")}
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowManageProviders(false)}>{t("common.cancel")}</Button>
+            <Button onClick={mgrSaveAll}><Save className="mr-1.5 h-3.5 w-3.5" />{t("settings.aiProvidersSave")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

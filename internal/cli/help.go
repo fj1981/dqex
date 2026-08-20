@@ -126,7 +126,7 @@ func zhHelpTexts() cliHelpTexts {
 			long: `dbx - 数据库导入/导出/迁移/对比工具
 
 不带子命令时启动 Web 服务（默认端口 8181）。
-CLI 子命令与 Web 功能对齐：export / import / migrate / compare / conn / task / history`,
+CLI 子命令与 Web 功能对齐：export / import / migrate / compare / dictionary / snapshot / conn / task / history`,
 			flags: map[string]string{
 				"host":        "Web 服务监听地址（默认仅本机回环；对外暴露用 0.0.0.0，此时强制启用令牌认证）",
 				"port":        "Web 服务端口",
@@ -135,7 +135,7 @@ CLI 子命令与 Web 功能对齐：export / import / migrate / compare / conn /
 				"no-browser":  "启动时不自动打开浏览器",
 				"data-dir":    "数据根目录（默认取全局配置，否则 ~/.dbimpex）",
 				"config-file": "全局配置文件（默认 环境变量 DBIMPEX_CONFIG 或 ~/.dbimpex/config.yaml）",
-				"debug":       "输出 debug 及以上级别的日志（含 AI 链路；等效 config 顶层 debug: true）",
+				"debug":       "输出 debug 及以上级别的日志（含 AI 调用；等效配置文件顶层 debug: true）",
 				"lang":        "CLI 输出语言（zh/en；环境变量 DBX_LANG，默认 zh）",
 			},
 		},
@@ -178,7 +178,7 @@ CLI 子命令与 Web 功能对齐：export / import / migrate / compare / conn /
 			short: "输出 Web 访问链接（带 token）",
 			long: `输出当前数据目录下的 Web 访问链接（带 token），可直接在浏览器打开或用于 API 调试。
 令牌每次启动自动重新生成（不读盘复用），有效期 24 小时；重启即刷新。
-删除数据目录下的存储库 dbimpex.db 不影响启动（下次启动重新生成并写入）。
+删除数据目录下的数据文件不影响启动（下次启动自动重建）。
 
 示例：
   dbx url                                    # 完整访问链接
@@ -303,14 +303,14 @@ dbx cmp show -i <记录ID> t_config       # 单表差异明细（位置参数或
 				"name":               "任务名（用于生成文件名）",
 				"databases":          "指定库，逗号分隔",
 				"tables":             "指定表，逗号分隔",
-				"objects":            "指定对象，逗号分隔，格式 _views/名称",
+				"objects":            "指定对象，逗号分隔，格式 类别/名称（类别：_views/_functions/_procedures）",
 				"table-cond":         "表过滤条件，格式 表名:完整SELECT（可重复，兼容旧格式 表名:WHERE片段）",
 				"schema-only":        "仅导出结构",
 				"data-only":          "仅导出数据",
 				"no-data":            "不导出数据，仅导出结构（同 --schema-only，mysqldump 风格）",
 				"no-create-info":     "不导出建表语句，仅导出数据（同 --data-only，mysqldump 风格）",
 				"compress":           "打包为 zip",
-				"gzip":               "SQL 文件 gzip 压缩为 .sql.gz（与 --compress 可同时开启；导入侧透明解压）",
+				"gzip":               "SQL 文件 gzip 压缩为 .sql.gz（与 --compress 可同时开启；导入时自动解压）",
 				"single-transaction": "一致性快照导出（等同 mysqldump --single-transaction，仅 MySQL/PostgreSQL 生效）",
 				"batch-size":         "批量大小",
 				"help":               "查看 export 命令帮助",
@@ -358,7 +358,7 @@ dbx cmp show -i <记录ID> t_config       # 单表差异明细（位置参数或
 				"source-conn": "使用已保存源连接（ID 或名称）",
 				"target-conn": "使用已保存目标连接（ID 或名称）",
 				"tables":      "指定表，逗号分隔",
-				"objects":     "指定对象，逗号分隔，格式 _views/名称（仅同类型迁移生效）",
+				"objects":     "指定对象，逗号分隔，格式 类别/名称（类别：_views/_functions/_procedures；仅同类型迁移生效）",
 				"table-cond":  "表过滤条件，格式 表名:完整SELECT（可重复，兼容旧格式 表名:WHERE片段）",
 				"schema-only": "仅迁移结构",
 				"data-only":   "仅迁移数据",
@@ -370,7 +370,7 @@ dbx cmp show -i <记录ID> t_config       # 单表差异明细（位置参数或
 		"dictionary": {
 			short: "生成数据库表/字段数据字典为 Excel（.xlsx，含注释）",
 			long: `生成数据库表/字段数据字典为 Excel（.xlsx，含表/列注释），可压缩为 zip。
-产物为单个交付级工作簿：总览 sheet（全实例表清单，超链接跳转）+ 每库一个字段明细 sheet。
+产物为单个 Excel 工作簿：总览页（全实例表清单，超链接跳转）+ 每库一个字段明细页。
 
 独立闭环用法：
   dbx dictionary --gen-config > dictionary.yaml   # 生成配置模板
@@ -432,7 +432,7 @@ func enHelpTexts() cliHelpTexts {
 			long: `dbx - Database import/export/migrate/compare tool
 
 Starts the Web service (default port 8181) when invoked without a subcommand.
-CLI subcommands align with Web features: export / import / migrate / compare / conn / task / history`,
+CLI subcommands align with Web features: export / import / migrate / compare / dictionary / snapshot / conn / task / history`,
 			flags: map[string]string{
 				"host":        "Web listen address (loopback only by default; use 0.0.0.0 to expose, which forces token auth)",
 				"port":        "Web service port",
@@ -441,7 +441,7 @@ CLI subcommands align with Web features: export / import / migrate / compare / c
 				"no-browser":  "Do not auto-open the browser on startup",
 				"data-dir":    "Data root directory (default from global config, else ~/.dbimpex)",
 				"config-file": "Global config file (default env DBIMPEX_CONFIG or ~/.dbimpex/config.yaml)",
-				"debug":       "Output debug-level or higher logs (incl. AI chain; equivalent to config top-level debug: true)",
+				"debug":       "Output debug-level or higher logs (incl. AI calls; equivalent to config top-level debug: true)",
 				"lang":        "CLI output language (zh/en; env DBX_LANG, default zh)",
 			},
 		},
@@ -484,7 +484,7 @@ Use dbx config --gen to print the config template.`,
 			short: "Print the Web access URL (with token)",
 			long: `Print the Web access URL (with token) for the current data dir; open it in a browser or use for API debugging.
 The token is regenerated on every startup (not read from disk), valid for 24 hours; restarts refresh it.
-Deleting the dbimpex.db store under the data dir does not affect startup (it is recreated on next start).
+Deleting the data files under the data dir does not affect startup (recreated on next start).
 
 Examples:
   dbx url                                    # full access URL
@@ -609,14 +609,14 @@ Connection and common flags provide mysqldump-style aliases:
 				"name":               "Task name (used for generated file name)",
 				"databases":          "Databases, comma-separated",
 				"tables":             "Tables, comma-separated",
-				"objects":            "Objects, comma-separated, format _views/name",
+				"objects":            "Objects, comma-separated, format category/name (categories: _views/_functions/_procedures)",
 				"table-cond":         "Table filter conditions, format table:full SELECT (repeatable; legacy format table:WHERE fragment also accepted)",
 				"schema-only":        "Export structure only",
 				"data-only":          "Export data only",
 				"no-data":            "Do not export data, structure only (same as --schema-only, mysqldump style)",
 				"no-create-info":     "Do not export CREATE statements, data only (same as --data-only, mysqldump style)",
 				"compress":           "Package as zip",
-				"gzip":               "Compress SQL files as .sql.gz (can combine with --compress; import side decompresses transparently)",
+				"gzip":               "Compress SQL files as .sql.gz (can combine with --compress; auto-decompressed on import)",
 				"single-transaction": "Consistent snapshot export (same as mysqldump --single-transaction; MySQL/PostgreSQL only)",
 				"batch-size":         "Batch size",
 				"help":               "Show help for the export command",
@@ -664,7 +664,7 @@ Conn flags provide mysqldump-style aliases: --source-user/--source-password/--so
 				"source-conn": "Use saved source connection (ID or name)",
 				"target-conn": "Use saved target connection (ID or name)",
 				"tables":      "Tables, comma-separated",
-				"objects":     "Objects, comma-separated, format _views/name (same-type migration only)",
+				"objects":     "Objects, comma-separated, format category/name (categories: _views/_functions/_procedures; same-type migration only)",
 				"table-cond":  "Table filter conditions, format table:full SELECT (repeatable; legacy format table:WHERE fragment also accepted)",
 				"schema-only": "Migrate structure only",
 				"data-only":   "Migrate data only",
@@ -676,7 +676,7 @@ Conn flags provide mysqldump-style aliases: --source-user/--source-password/--so
 		"dictionary": {
 			short: "Generate a database table/field data dictionary as Excel (.xlsx, with comments)",
 			long: `Generate a database table/field data dictionary as Excel (.xlsx, with table/column comments), compressible as zip.
-Output is a single deliverable workbook: an overview sheet (all instance tables with hyperlinks) + one detail sheet per database.
+Output is a single Excel workbook: an overview sheet (all instance tables with hyperlinks) + one detail sheet per database.
 
 Standalone usage:
   dbx dictionary --gen-config > dictionary.yaml   # generate config template

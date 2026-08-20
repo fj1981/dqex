@@ -26,15 +26,14 @@ import (
 
 // AIStatus AI 能力状态视图。
 type AIStatus struct {
-	Enabled         bool    `json:"enabled"`         // 配置齐全（四项必填非空）
-	BaseURL         string  `json:"baseUrl"`         // 掩码后端点
-	Model           string  `json:"model"`           // 模型名
-	Temperature     float32 `json:"temperature"`     // 温度
-	MaxTokens       int     `json:"maxTokens"`       // 单次回复上限
-	TimeoutSec      int     `json:"timeoutSec"`      // 请求超时（秒）
-	MaxSchemaTables int     `json:"maxSchemaTables"` // 注入表结构数量上限
-	MaxSchemaChars  int     `json:"maxSchemaChars"`  // 注入表结构文本字符上限
-	HasPrompt       bool    `json:"hasPrompt"`       // 是否使用自定义 system prompt
+	Enabled        bool    `json:"enabled"`        // 配置齐全（BaseURL / API Key / Model 三项非空）
+	BaseURL        string  `json:"baseUrl"`        // 掩码后端点
+	Model          string  `json:"model"`          // 模型名
+	Temperature    float32 `json:"temperature"`    // 温度
+	MaxTokens      int     `json:"maxTokens"`      // 单次回复上限
+	TimeoutSec     int     `json:"timeoutSec"`     // 请求超时（秒）
+	MaxSchemaChars int     `json:"maxSchemaChars"` // 表结构文本字符上限
+	HasPrompt      bool    `json:"hasPrompt"`      // 是否使用自定义 system prompt
 }
 
 // AIEnabled 判断 AI 功能是否可用。
@@ -45,15 +44,14 @@ func (s *Service) AIStatus() AIStatus {
 	ai := s.cfg.AI
 	ai.normalize()
 	return AIStatus{
-		Enabled:         ai.configured(),
-		BaseURL:         maskSecret(ai.BaseURL),
-		Model:           ai.Model,
-		Temperature:     ai.Temperature,
-		MaxTokens:       ai.MaxTokens,
-		TimeoutSec:      ai.TimeoutSec,
-		MaxSchemaTables: ai.MaxSchemaTables,
-		MaxSchemaChars:  ai.MaxSchemaChars,
-		HasPrompt:       strings.TrimSpace(ai.SystemPrompt) != "",
+		Enabled:        ai.configured(),
+		BaseURL:        maskSecret(ai.BaseURL),
+		Model:          ai.Model,
+		Temperature:    ai.Temperature,
+		MaxTokens:      ai.MaxTokens,
+		TimeoutSec:     ai.TimeoutSec,
+		MaxSchemaChars: ai.MaxSchemaChars,
+		HasPrompt:      strings.TrimSpace(ai.SystemPrompt) != "",
 	}
 }
 

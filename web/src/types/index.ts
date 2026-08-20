@@ -517,8 +517,7 @@ export interface AIConfig {
   temperature: number // 温度 0-2，默认 0.2
   maxTokens: number // 单次回复最大 token，默认 2048
   timeoutSec: number // 请求超时（秒），默认 60
-  maxSchemaTables: number // 注入上下文的最大表数量，默认 30
-  maxSchemaChars: number // 注入表结构文本字符上限，默认 20000
+  maxSchemaChars: number // 表结构文本字符上限，默认 20000
   systemPrompt: string // 自定义 system prompt 模板（支持 {dialect}/{schema} 占位符），留空用内置默认
 }
 
@@ -540,9 +539,24 @@ export interface AIStatus {
   temperature: number
   maxTokens: number
   timeoutSec: number
-  maxSchemaTables: number
   maxSchemaChars: number
   hasPrompt: boolean
+}
+
+// AI 模型信息（名称 + 上下文窗口 + 单次回复上限）
+export interface AIModelInfo {
+  name: string // 模型名称
+  context: number // 上下文窗口大小（K tokens）
+  maxTokens: number // 单次回复最大 token（0 表示未设置）
+}
+
+// AI 厂商预设（供前端下拉选择，简化配置）
+export interface AIProvider {
+  id: string // 厂商标识（如 openai / deepseek / custom）
+  name: string // 显示名称
+  baseUrl: string // OpenAI 兼容端点
+  models: AIModelInfo[] // 该厂商可用模型（含上下文窗口）
+  builtin?: boolean // 是否内置厂商（仅展示用）
 }
 
 // AI token 消耗（与后端 llm.Usage 对齐）

@@ -365,7 +365,7 @@ func (s *session) aiStatus() {
 	printf(txt.aiEndpoint+"\n", st.BaseURL)
 	printf(txt.aiModel+"\n", st.Model)
 	printf(txt.aiTuning+"\n", st.Temperature, st.MaxTokens, st.TimeoutSec)
-	printf(txt.aiSchemaLimit+"\n", st.MaxSchemaTables, st.MaxSchemaChars)
+	printf(txt.aiSchemaLimit+"\n", st.MaxSchemaChars)
 	printf(txt.aiDebugLog+"\n", map[bool]string{true: green(txt.aiDebugOn), false: dim(txt.aiDebugOff)}[ast.svc.Config().Debug])
 	if s.ai != nil && len(s.ai.msgs) > 0 {
 		printf(txt.aiContext+"\n", len(s.ai.msgs))
@@ -451,14 +451,6 @@ func (s *session) aiConfig() {
 	} else if v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			next.TimeoutSec = n
-		}
-	}
-	if v := ask(txt.aiCfgMaxSchemaTables, strconv.Itoa(cur.MaxSchemaTables)); v == "." {
-		fmt.Println(dim(txt.cancelled))
-		return
-	} else if v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			next.MaxSchemaTables = n
 		}
 	}
 	if v := ask(txt.aiCfgMaxSchemaChars, strconv.Itoa(cur.MaxSchemaChars)); v == "." {

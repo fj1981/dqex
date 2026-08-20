@@ -1,6 +1,7 @@
 import { toast } from "sonner"
 import i18n from "@/lib/i18n"
 import type {
+  AIProvider,
   AIStatus,
   AIUsage,
   AISession,
@@ -214,6 +215,11 @@ export const browseDirs = (path?: string) =>
 // ---- AI 辅助 SQL ----
 
 export const getAIStatus = () => request<AIStatus>("/api/ai/status")
+
+export const getAIProviders = () => request<AIProvider[]>("/api/ai/providers")
+
+export const saveAIProviders = (providers: AIProvider[]) =>
+  post<{ ok: boolean }>("/api/ai/providers/save", { providers })
 
 export const createAISession = (connId: string, db?: string, history?: { role: string; content: string }[], tabId?: string) =>
   post<AISession>("/api/ai/sessions", { connId, db, history, tabId })

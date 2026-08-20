@@ -117,7 +117,7 @@ export default function WorkspaceLayout() {
         if (alive) setAiStatus(st)
       })
       .catch(() => {
-        if (alive) setAiStatus({ enabled: false, baseUrl: "", model: "", temperature: 0, maxTokens: 0, timeoutSec: 0, maxSchemaTables: 0, maxSchemaChars: 0, hasPrompt: false })
+        if (alive) setAiStatus({ enabled: false, baseUrl: "", model: "", temperature: 0, maxTokens: 0, timeoutSec: 0, maxSchemaChars: 0, hasPrompt: false })
       })
     return () => {
       alive = false

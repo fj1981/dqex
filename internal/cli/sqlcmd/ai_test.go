@@ -47,8 +47,7 @@ func newTestSession(reply string) (*session, *mockChat) {
 	svc := &mockSvc{
 		cfg: service.AppConfig{
 			AI: service.AIConfig{
-				MaxSchemaTables: 30,
-				MaxSchemaChars:  20000,
+				MaxSchemaChars: 20000,
 			},
 		},
 		status: service.AIStatus{Enabled: true},

@@ -47,6 +47,8 @@ func NewServiceWith(ctx context.Context, dataDirFlag, configFile string) (*Servi
 	if err != nil {
 		return nil, err
 	}
+	// 设置厂商配置的数据目录（用于加载本地 ai_providers.yaml）
+	SetProvidersDataDir(persist.BaseDir())
 	return &Service{
 		persist:     persist,
 		runner:      newTaskRunner(),

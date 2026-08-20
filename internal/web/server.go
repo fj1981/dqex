@@ -261,6 +261,8 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 		// AI 辅助 SQL
 		eb.GROUP("/ai", []cygin.APIHandler{
 			eb.GET("/status", handleAIStatus(svc)),
+			eb.GET("/providers", handleAIProviders(svc)),
+			eb.POST("/providers/save", handleAISaveProviders(svc)),
 			eb.GET("/usage", handleAIProcessUsage(svc)),
 			eb.POST("/sessions", handleAICreateSession(svc)),
 			eb.GET("/sessions", handleAIListSessions(svc)),

@@ -35,6 +35,25 @@ func handleAIStatus(svc *service.Service) gin.HandlerFunc {
 	})
 }
 
+// handleAIProviders AI 厂商预设列表（前端下拉选择用，标记 builtin 供管理界面展示）。
+func handleAIProviders(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, _ struct{}) ([]service.AIProvider, error) {
+		return service.AIProviders(), nil
+	})
+}
+
+// handleAISaveProviders 保存自定义厂商配置（前端管理界面提交）。
+func handleAISaveProviders(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req struct {
+		Providers []service.AIProviderItem `json:"providers" binding:"required"`
+	}) (any, error) {
+		if err := service.SaveAIProviders(req.Providers); err != nil {
+			return nil, err
+		}
+		return gin.H{"ok": true}, nil
+	})
+}
+
 // handleAIProcessUsage 查询进程级累计 token（服务启动以来所有会话总消耗）。
 func handleAIProcessUsage(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, _ struct{}) (any, error) {
