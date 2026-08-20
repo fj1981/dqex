@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"fmt"
 	"strings"
 
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
@@ -99,7 +98,7 @@ func GetObjectDDL(cli *cydb.DBCli, objType ObjectDDLType, name string) (string, 
 	case ObjectDDLProcedure:
 		return ddlContent(cli, dialect.FuncNameGetCreateProcedureSql, name)
 	default:
-		return "", fmt.Errorf("不支持的对象类型: %s", objType)
+		return "", NewMsgErr(errObjType, objType)
 	}
 }
 
@@ -113,7 +112,7 @@ func objectDDL(cli *cydb.DBCli, kind objectKind, name string) (string, error) {
 	case objectProcedure:
 		return ddlContent(cli, dialect.FuncNameGetCreateProcedureSql, name)
 	default:
-		return "", fmt.Errorf("不支持的对象类型: %s", kind)
+		return "", NewMsgErr(errObjType, kind)
 	}
 }
 
@@ -123,7 +122,7 @@ func ddlContent(cli *cydb.DBCli, funcName dialect.DDLSqlFuncName, name string) (
 		return "", err
 	}
 	if content == nil || strings.TrimSpace(content.Content) == "" {
-		return "", fmt.Errorf("未获取到 %s 的创建语句", name)
+		return "", NewMsgErr(errObjDDL, name)
 	}
 	return content.Content, nil
 }

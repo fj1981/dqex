@@ -128,7 +128,7 @@ type legacyConfigFile struct {
 func readConfigFile(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, cygin.WrapError(err, cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("读取配置文件失败: %s", path))
+		return nil, cygin.WrapError(err, cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errCfgRead, path))
 	}
 	return data, nil
 }
@@ -136,7 +136,7 @@ func readConfigFile(path string) ([]byte, error) {
 func parseYAML[T any](data []byte, path string, zero T) (*T, error) {
 	cfg := zero
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, cygin.WrapError(err, cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("解析配置文件失败: %s", path))
+		return nil, cygin.WrapError(err, cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errCfgParse, path))
 	}
 	return &cfg, nil
 }
@@ -177,7 +177,7 @@ func loadCompareConfig(path string) (*compareConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("配置文件中未找到对比配置（需包含 source/target 段）: %s", path))
+	return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errCfgNoCmp, path))
 }
 
 func loadExportConfig(path string) (*exportConfig, error) {
@@ -200,7 +200,7 @@ func loadExportConfig(path string) (*exportConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("配置文件中未找到导出配置（需包含 source 段）: %s", path))
+	return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errCfgNoExp, path))
 }
 
 func loadDictionaryConfig(path string) (*dictionaryConfig, error) {
@@ -215,7 +215,7 @@ func loadDictionaryConfig(path string) (*dictionaryConfig, error) {
 	if cfg.Source != nil || cfg.SourceRef != "" {
 		return cfg, nil
 	}
-	return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("配置文件中未找到数据字典配置（需包含 source 段）: %s", path))
+	return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errCfgNoDict, path))
 }
 
 func loadImportConfig(path string) (*importConfig, error) {
@@ -238,7 +238,7 @@ func loadImportConfig(path string) (*importConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("配置文件中未找到导入配置（需包含 target 段）: %s", path))
+	return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errCfgNoImp, path))
 }
 
 func loadMigrateConfig(path string) (*migrateConfig, error) {
@@ -261,7 +261,7 @@ func loadMigrateConfig(path string) (*migrateConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("配置文件中未找到迁移配置（需包含 source/target 段）: %s", path))
+	return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errCfgNoMig, path))
 }
 
 // ---- 旧格式转换（仅读取兼容） ----
@@ -469,7 +469,7 @@ func validResetMode(v string) (ResetMode, error) {
 	case "drop":
 		return ResetDrop, nil
 	}
-	return ResetNone, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("无效的重置模式: %s（可选 truncate/drop）", v))
+	return ResetNone, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errResetMode, v))
 }
 
 // compareOptsFromConfig 配置转引擎选项；requireConns=true 时校验连接必须存在（task save 用），
@@ -492,10 +492,10 @@ func compareOptsFromConfig(cfg *compareConfig, requireConns bool) (CompareOption
 		opts.Target.DBName = cfg.TargetDB
 	}
 	if requireConns && opts.Source == nil && opts.SourceConn == "" {
-		return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少源连接：配置 source/source_ref 段或 --source-*/--source-conn"))
+		return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoSrcConn))
 	}
 	if requireConns && opts.Target == nil && opts.TargetConn == "" {
-		return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少目标连接：配置 target/target_ref 段或 --target-*/--target-conn"))
+		return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoTgtConn))
 	}
 	opts.Tables = cfg.Tables
 	opts.IgnoreColumns = cfg.IgnoreColumns
@@ -524,10 +524,10 @@ func compareOptsFromConfig(cfg *compareConfig, requireConns bool) (CompareOption
 	case "data":
 		opts.DataOnly = true
 	default:
-		return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("无效的对比范围: %s（可选 both/structure/data）", scope))
+		return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errCmpScope, scope))
 	}
 	if cfg.Threshold < 0 {
-		return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("threshold 不能为负数"))
+		return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errThresholdNeg))
 	}
 	opts.Threshold = cfg.Threshold
 	return opts, cfg.Output, nil
@@ -552,7 +552,7 @@ func exportOptsFromConfig(cfg *exportConfig) (ExportOptions, error) {
 	}
 	opts.SourceConn = cfg.SourceRef
 	if opts.Source == nil && opts.SourceConn == "" {
-		return opts, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少源连接：配置 source/source_ref 段或 --source-*/--source-conn"))
+		return opts, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoSrcConn))
 	}
 	opts.OutputDir, _ = splitOutput(cfg.Output)
 	opts.TaskName = cfg.Name
@@ -579,7 +579,7 @@ func dictionaryOptsFromConfig(cfg *dictionaryConfig) (DictionaryOptions, error) 
 	}
 	opts.SourceConn = cfg.SourceRef
 	if opts.Source == nil && opts.SourceConn == "" {
-		return opts, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少源连接：配置 source/source_ref 段或 --source-*/--source-conn"))
+		return opts, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoSrcConn))
 	}
 	opts.OutputDir, _ = splitOutput(cfg.Output)
 	opts.TaskName = cfg.Name
@@ -598,7 +598,7 @@ func importOptsFromConfig(cfg *importConfig) (ImportOptions, error) {
 	}
 	opts.TargetConn = cfg.TargetRef
 	if opts.Target == nil && opts.TargetConn == "" {
-		return opts, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少目标连接：配置 target/target_ref 段或 --target-*/--target-conn"))
+		return opts, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoTgtConn))
 	}
 	opts.InputPath = cfg.Input
 	reset, err := validResetMode(cfg.Reset)
@@ -631,10 +631,10 @@ func migrateOptsFromConfig(cfg *migrateConfig) (MigrateOptions, error) {
 		opts.Target.DBName = cfg.TargetDB
 	}
 	if opts.Source == nil && opts.SourceConn == "" {
-		return opts, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少源连接：配置 source/source_ref 段或 --source-*/--source-conn"))
+		return opts, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoSrcConn))
 	}
 	if opts.Target == nil && opts.TargetConn == "" {
-		return opts, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少目标连接：配置 target/target_ref 段或 --target-*/--target-conn"))
+		return opts, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoTgtConn))
 	}
 	opts.Tables = cfg.Tables
 	opts.Conditions = parseTableConds(cfg.Conditions)
@@ -659,11 +659,11 @@ func detectConfigKind(data []byte, hint string) (string, error) {
 	case "export", "import", "migrate", "compare", "dictionary":
 		return strings.ToLower(strings.TrimSpace(hint)), nil
 	default:
-		return "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("无效的任务类型: %s（可选 export/import/migrate/compare/dictionary）", hint))
+		return "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(sprintf(cliTextsFor(cliLang()).errTaskHint, hint)))
 	}
 	m := map[string]any{}
 	if err := yaml.Unmarshal(data, &m); err != nil {
-		return "", cygin.WrapError(err, cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("解析配置文件失败"))
+		return "", cygin.WrapError(err, cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errCfgParseOnly))
 	}
 	has := func(keys ...string) bool {
 		for _, k := range keys {
@@ -691,5 +691,5 @@ func detectConfigKind(data []byte, hint string) (string, error) {
 	case has("target"):
 		return "import", nil
 	}
-	return "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("无法识别配置文件类型，可用 --type 指定（export/import/migrate/compare）"))
+	return "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errCfgTypeUnknown))
 }

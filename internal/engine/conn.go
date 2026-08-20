@@ -29,7 +29,7 @@ func Connect(info DBConnInfo) (*cydb.DBCli, error) {
 	}
 	cli, err := cydb.TryConnect(&conn)
 	if err != nil {
-		return nil, fmt.Errorf("连接数据库失败(%s@%s:%d): %w", conn.Un, conn.Host, conn.Port, err)
+		return nil, NewMsgErrf(errConnFail, err, conn.Un, conn.Host, conn.Port)
 	}
 	return cli, nil
 }
@@ -49,7 +49,7 @@ func ConnectPooled(info DBConnInfo, dbName string) (*cydb.DBCli, error) {
 	conn.DBName = dbName
 	cli, err := cliPool.GetOrCreateCli(conn)
 	if err != nil {
-		return nil, fmt.Errorf("连接数据库失败(%s@%s:%d/%s): %w", conn.Un, conn.Host, conn.Port, dbName, err)
+		return nil, NewMsgErrf(errConnFailDB, err, conn.Un, conn.Host, conn.Port, dbName)
 	}
 	return cli, nil
 }

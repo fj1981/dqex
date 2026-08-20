@@ -22,22 +22,22 @@ type MigrateResult struct {
 // 触发器/视图/函数/存储过程为源库方言对象，不迁移
 func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*MigrateResult, error) {
 	if opts.Source == nil || opts.Target == nil {
-		return nil, fmt.Errorf("未提供源或目标数据库连接")
+		return nil, NewMsgErr(errMigNoConn)
 	}
 	t := newTracker(cb, opts.Lang)
 
 	sourceCli, err := Connect(*opts.Source)
 	if err != nil {
-		return nil, fmt.Errorf("源库连接失败: %w", err)
+		return nil, NewMsgErrf(errMigSrcConn, err)
 	}
 	defer sourceCli.Close()
 	// 迁移前确保目标库存在（不存在则自动创建），否则后续连接会直接失败
 	if err := EnsureDBExists(*opts.Target, opts.Target.DBName); err != nil {
-		return nil, fmt.Errorf("确保目标库 %s 存在失败: %w", opts.Target.DBName, err)
+		return nil, NewMsgErrf(errMigEnsureDB, err, opts.Target.DBName)
 	}
 	targetCli, err := Connect(*opts.Target)
 	if err != nil {
-		return nil, fmt.Errorf("目标库连接失败: %w", err)
+		return nil, NewMsgErrf(errMigTgtConn, err)
 	}
 	defer targetCli.Close()
 
@@ -45,17 +45,17 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 	crossType := !strings.EqualFold(sourceCli.DBType(), targetCli.DBType())
 	all, err := sourceCli.GetTables(opts.Source.DBName, nil, nil)
 	if err != nil {
-		return nil, fmt.Errorf("获取源库表列表失败: %w", err)
+		return nil, NewMsgErrf(errMigListTables, err)
 	}
 	// 视图走对象迁移通道 _views，不当作表迁移（视图无数据且无法按表建表）
 	all = excludeViews(sourceCli, opts.Source.DBName, opts.Source.Schema, all)
 	tables := filterTables(all, opts.Tables, opts.Source.DBName)
 	if len(tables) == 0 {
 		if crossType {
-			return nil, fmt.Errorf("没有可迁移的表（跨类型迁移不支持仅迁移对象）")
+			return nil, NewMsgErr(errMigNoTablesObj)
 		}
 		if opts.Objects != nil && len(opts.Objects) == 0 {
-			return nil, fmt.Errorf("没有选择任何表或对象")
+			return nil, NewMsgErr(errMigNoSel)
 		}
 	}
 
@@ -77,7 +77,7 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 	backedUp := []string{}
 	for _, table := range tables {
 		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("任务已取消")
+			return nil, NewMsgErr(errCancelled)
 		}
 		t.p.CurrentTable = table
 		t.emit(true)
@@ -100,10 +100,10 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 			if !exist {
 				ddl, err := buildCreateTableDDL(sourceCli, targetCli, table, crossType, opts.CompatCollation)
 				if err != nil {
-					return nil, fmt.Errorf("生成表 %s 建表语句失败: %w", table, err)
+					return nil, NewMsgErrf(errMigDDL, err, table)
 				}
 				if _, err := targetCli.DirectExecute(ddl); err != nil {
-					return nil, fmt.Errorf("创建目标表 %s 失败: %w", table, err)
+					return nil, NewMsgErrf(errMigCreateTable, err, table)
 				}
 				t.log(engineTextsFor(t.lang).migCreate, table)
 			}
@@ -116,7 +116,7 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 		}
 		rows, err := migrateTableData(ctx, sourceCli, targetCli, table, opts, batchSize, t)
 		if err != nil {
-			return nil, fmt.Errorf("迁移表 %s 数据失败: %w", table, err)
+			return nil, NewMsgErrf(errMigData, err, table)
 		}
 		totalRows += rows
 		t.p.DoneUnits++
@@ -150,7 +150,7 @@ func buildCreateTableDDL(sourceCli, targetCli *cydb.DBCli, table string, crossTy
 			return "", err
 		}
 		if content == nil || strings.TrimSpace(content.Content) == "" {
-			return "", fmt.Errorf("未获取到建表语句")
+			return "", NewMsgErr(errMigNoDDL)
 		}
 		ddl := strings.TrimRight(strings.TrimSpace(content.Content), ";")
 		// MySQL 同类型迁移：将 8.0 特有排序规则替换为 5.7 兼容版本
@@ -165,7 +165,7 @@ func buildCreateTableDDL(sourceCli, targetCli *cydb.DBCli, table string, crossTy
 	}
 	md, ok := dialect.GetMigrationDialect(targetCli.DBType(), targetCli.DBSubType())
 	if !ok {
-		return "", fmt.Errorf("目标库类型 %s 不支持结构迁移", targetCli.DBType())
+		return "", NewMsgErr(errMigTypeUnsupported, targetCli.DBType())
 	}
 	return md.GenerateCreateTableSQL(tableInfo), nil
 }
@@ -259,7 +259,7 @@ func migrateTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, tab
 			_, err = targetCli.BatchInsertContext(ctx, table, batch)
 		}
 		if err != nil {
-			return fmt.Errorf("批量写入失败: %w", err)
+			return NewMsgErrf(errMigBatchWrite, err)
 		}
 		batch = batch[:0]
 		return nil
@@ -267,7 +267,7 @@ func migrateTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, tab
 
 	err := sourceCli.ForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("任务已取消")
+			return NewMsgErr(errCancelled)
 		}
 		obj, err := rd.AsObject()
 		if err != nil {

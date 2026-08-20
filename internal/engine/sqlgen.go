@@ -50,7 +50,7 @@ type GenSQLParams struct {
 // GenerateSQL 按参数生成方言正确的 SQL 文本（多条语句以 ;\n 拼接，统一结尾分号）。
 func GenerateSQL(_ context.Context, cli *cydb.DBCli, p GenSQLParams) (string, error) {
 	if cli == nil {
-		return "", fmt.Errorf("数据库连接为空")
+		return "", NewMsgErr(errGenNoConn)
 	}
 	// 列名白名单：元数据可用时校验列真实存在（防篡改列名），失败降级为结构化转义
 	// （cydb 渲染时按方言引用标识符，与 QueryTablePage 的降级策略一致）。
@@ -67,18 +67,18 @@ func GenerateSQL(_ context.Context, cli *cydb.DBCli, p GenSQLParams) (string, er
 // validCols 为列名白名单（空 = 跳过白名单校验，仅结构化转义）。
 func genSQLText(dbType string, p GenSQLParams, validCols map[string]bool) (string, error) {
 	if p.Table == "" {
-		return "", fmt.Errorf("表名不能为空")
+		return "", NewMsgErr(errGenNoTable)
 	}
 	if !validGenSQLKinds[p.Kind] {
-		return "", fmt.Errorf("未知的生成类型: %s", p.Kind)
+		return "", NewMsgErr(errGenKind, p.Kind)
 	}
 	if len(p.Rows) > maxGenSQLRows {
-		return "", fmt.Errorf("一次最多生成 %d 行（当前 %d 行）", maxGenSQLRows, len(p.Rows))
+		return "", NewMsgErr(errGenRowsLimit, maxGenSQLRows, len(p.Rows))
 	}
 
 	checkCol := func(col string) error {
 		if len(validCols) > 0 && !validCols[strings.ToLower(col)] {
-			return fmt.Errorf("列「%s」不存在于表 %s", col, p.Table)
+			return NewMsgErr(errGenColNotExist, col, p.Table)
 		}
 		return nil
 	}
@@ -91,7 +91,7 @@ func genSQLText(dbType string, p GenSQLParams, validCols map[string]bool) (strin
 			return "", err
 		}
 		if len(args) != 0 {
-			return "", fmt.Errorf("字面量未内联（期望无参数绑定）")
+			return "", NewMsgErr(errGenNoInline)
 		}
 		return sql, nil
 	}
@@ -99,10 +99,10 @@ func genSQLText(dbType string, p GenSQLParams, validCols map[string]bool) (strin
 	// 主键值提取：按 PKColumns 顺序返回某行的主键值（校验行/列一致性，供 EQ/IN/TupleIN 共用）
 	pkVals := func(row []any) ([]any, error) {
 		if len(p.PKColumns) == 0 {
-			return nil, fmt.Errorf("表「%s」无主键，无法按行定位", p.Table)
+			return nil, NewMsgErr(errGenNoPK, p.Table)
 		}
 		if len(row) != len(p.Columns) {
-			return nil, fmt.Errorf("行数据与列清单数量不一致")
+			return nil, NewMsgErr(errGenRowMismatch)
 		}
 		colIdx := make(map[string]int, len(p.Columns))
 		for i, c := range p.Columns {
@@ -115,7 +115,7 @@ func genSQLText(dbType string, p GenSQLParams, validCols map[string]bool) (strin
 			}
 			idx, ok := colIdx[strings.ToLower(pk)]
 			if !ok {
-				return nil, fmt.Errorf("主键列「%s」不在列清单中", pk)
+				return nil, NewMsgErr(errGenPKNotInCols, pk)
 			}
 			vals = append(vals, row[idx])
 		}
@@ -168,11 +168,11 @@ func genSQLText(dbType string, p GenSQLParams, validCols map[string]bool) (strin
 			colIdx = append(colIdx, i)
 		}
 		if len(cols) == 0 {
-			return "", fmt.Errorf("无可插入列（全部为跳过的自增列）")
+			return "", NewMsgErr(errGenNoInsertCols)
 		}
 		for ri, row := range p.Rows {
 			if len(row) != len(p.Columns) {
-				return "", fmt.Errorf("第 %d 行数据与列清单数量不一致", ri+1)
+				return "", NewMsgErr(errGenRowMismatchN, ri+1)
 			}
 			vals := make([]any, 0, len(colIdx))
 			for _, i := range colIdx {
@@ -181,14 +181,14 @@ func genSQLText(dbType string, p GenSQLParams, validCols map[string]bool) (strin
 			var q def.SQLStmt = ss.Q().Insert(p.Table).Columns(stringsToAny(cols)...).Values(vals...)
 			sql, err := build(q)
 			if err != nil {
-				return "", fmt.Errorf("生成 INSERT 失败: %w", err)
+				return "", NewMsgErrf(errGenInsert, err)
 			}
 			stmts = append(stmts, sql)
 		}
 
 	case GenSQLUpdate:
 		if len(p.Rows) == 0 {
-			return "", fmt.Errorf("缺少行数据")
+			return "", NewMsgErr(errGenNoRowData)
 		}
 		row := p.Rows[0]
 		conds, err := pkConds(row)
@@ -211,21 +211,21 @@ func genSQLText(dbType string, p GenSQLParams, validCols map[string]bool) (strin
 			assigns = append(assigns, ss.Assign(ss.Col(c), ss.Lit(row[i])))
 		}
 		if len(assigns) == 0 {
-			return "", fmt.Errorf("表「%s」仅含主键列，无可更新列", p.Table)
+			return "", NewMsgErr(errGenPKOnly, p.Table)
 		}
 		var q def.SQLStmt = ss.Q().Update(p.Table).Set(assigns...).Where(cydb.AND(conds...))
 		sql, err := build(q)
 		if err != nil {
-			return "", fmt.Errorf("生成 UPDATE 失败: %w", err)
+			return "", NewMsgErrf(errGenUpdate, err)
 		}
 		stmts = append(stmts, sql)
 
 	case GenSQLDelete:
 		if len(p.Rows) == 0 {
-			return "", fmt.Errorf("缺少行数据")
+			return "", NewMsgErr(errGenNoRowData)
 		}
 		if len(p.PKColumns) == 0 {
-			return "", fmt.Errorf("表「%s」无主键，无法按行定位", p.Table)
+			return "", NewMsgErr(errGenNoPK, p.Table)
 		}
 		var cond ss.Condition
 		switch {
@@ -262,13 +262,13 @@ func genSQLText(dbType string, p GenSQLParams, validCols map[string]bool) (strin
 		var q def.SQLStmt = ss.Q().Delete(p.Table).Where(cond)
 		sql, err := build(q)
 		if err != nil {
-			return "", fmt.Errorf("生成 DELETE 失败: %w", err)
+			return "", NewMsgErrf(errGenDelete, err)
 		}
 		stmts = append(stmts, sql)
 
 	case GenSQLSelectByPK:
 		if len(p.Rows) == 0 {
-			return "", fmt.Errorf("缺少行数据")
+			return "", NewMsgErr(errGenNoRowData)
 		}
 		conds, err := pkConds(p.Rows[0])
 		if err != nil {
@@ -281,14 +281,14 @@ func genSQLText(dbType string, p GenSQLParams, validCols map[string]bool) (strin
 		var q def.SQLStmt = ss.Q().Select(cols...).From(p.Table).Where(cydb.AND(conds...))
 		sql, err := build(q)
 		if err != nil {
-			return "", fmt.Errorf("生成 SELECT 失败: %w", err)
+			return "", NewMsgErrf(errGenSelect, err)
 		}
 		stmts = append(stmts, sql)
 
 	case GenSQLWhereCell:
 		// Columns[0] = 条件列名，Rows[0][0] = 单元格值（nil = NULL → IS NULL）
 		if len(p.Columns) != 1 || len(p.Rows) == 0 || len(p.Rows[0]) != 1 {
-			return "", fmt.Errorf("单元格条件需要 1 列 1 值")
+			return "", NewMsgErr(errGenCellCond)
 		}
 		col := p.Columns[0]
 		if err := checkCol(col); err != nil {
@@ -303,7 +303,7 @@ func genSQLText(dbType string, p GenSQLParams, validCols map[string]bool) (strin
 		var q def.SQLStmt = ss.Q().Select(ss.Star()).From(p.Table).Where(cond)
 		sql, err := build(q)
 		if err != nil {
-			return "", fmt.Errorf("生成 WHERE 条件失败: %w", err)
+			return "", NewMsgErrf(errGenWhere, err)
 		}
 		stmts = append(stmts, sql)
 
@@ -344,13 +344,13 @@ func genSQLText(dbType string, p GenSQLParams, validCols map[string]bool) (strin
 		}
 		sql, err := build(q)
 		if err != nil {
-			return "", fmt.Errorf("生成 SELECT 失败: %w", err)
+			return "", NewMsgErrf(errGenSelect, err)
 		}
 		stmts = append(stmts, sql)
 	}
 
 	if len(stmts) == 0 {
-		return "", fmt.Errorf("未生成任何语句")
+		return "", NewMsgErr(errGenNoStmt)
 	}
 	// 统一结尾分号（与导出 SQL 一致：各方言返回风格不一）
 	parts := make([]string, len(stmts))
@@ -370,10 +370,10 @@ func buildFilterWheresLiteral(filters []ColumnFilter) ([]ss.Condition, error) {
 	conds := make([]ss.Condition, 0, len(filters))
 	for _, f := range filters {
 		if f.Column == "" {
-			return nil, fmt.Errorf("过滤列名不能为空")
+			return nil, NewMsgErr(errFilterColEmpty)
 		}
 		if !validFilterOps[f.Op] {
-			return nil, fmt.Errorf("未知的过滤操作符: %s", f.Op)
+			return nil, NewMsgErr(errFilterOp, f.Op)
 		}
 		var cond ss.Condition
 		switch f.Op {

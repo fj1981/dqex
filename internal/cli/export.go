@@ -91,7 +91,7 @@ func cliExport(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if task.ExportOpts == nil {
-			return cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("任务配置 %s 不是导出任务", v))
+			return cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errTaskNotExp, v))
 		}
 		opts = *task.ExportOpts
 	}
@@ -160,7 +160,7 @@ func cliExport(cmd *cobra.Command, args []string) error {
 		opts.OutputDir, wantZip = splitOutput(v)
 	}
 	if opts.Source == nil && opts.SourceConn == "" {
-		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少源连接：配置 source/source_ref 段或 --source-*/--source-conn"))
+		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoSrcConn))
 	}
 
 	svc, err := newCliService()

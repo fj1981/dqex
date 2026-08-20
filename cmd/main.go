@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -27,7 +28,7 @@ func runWeb(args *cli.WebArgs) {
 	defer engine.CloseAllCliPool() // 释放进程级连接池（对比/获取表信息复用池化 cli）
 	cylog.InitDefault()
 
-	svc, err := service.NewServiceWith(args.DataDir, args.ConfigFile)
+	svc, err := service.NewServiceWith(context.Background(), args.DataDir, args.ConfigFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "初始化服务失败: %v\n", err)
 		os.Exit(1)

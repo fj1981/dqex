@@ -77,7 +77,7 @@ func cliImport(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if task.ImportOpts == nil {
-			return cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("任务配置 %s 不是导入任务", v))
+			return cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errTaskNotImp, v))
 		}
 		opts = *task.ImportOpts
 	}
@@ -119,10 +119,10 @@ func cliImport(cmd *cobra.Command, args []string) error {
 		opts.BatchSize, _ = f.GetInt("batch-size")
 	}
 	if opts.Target == nil && opts.TargetConn == "" {
-		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少目标连接：配置 target/target_ref 段或 --target-*/--target-conn"))
+		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoTgtConn))
 	}
 	if opts.InputPath == "" {
-		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少导入文件：配置 input 字段或 --input"))
+		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoImportFile))
 	}
 	if opts.ResetMode != ResetNone && !opts.Backup {
 		fmt.Println(yellow(cliTextsFor(cliLang()).warnReset))

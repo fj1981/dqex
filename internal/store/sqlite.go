@@ -9,6 +9,8 @@ import (
 
 	"github.com/rs/xid"
 
+	"dbimpex/internal/engine"
+
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
@@ -19,15 +21,15 @@ import (
 
 // 表名常量（行模型见 models.go）。
 const (
-	tableConn       = "conn_record"
-	tableTask       = "task_record"
-	tableHistory    = "history_record"
-	tableSQLHist    = "sql_history"
-	tableSQLAudit   = "sql_audit"
-	tableWebAcc     = "web_access"
-	tableWorkspace  = "workspace"
-	tableAISession  = "ai_session"
-	tableSQLFav     = "sql_favorites"
+	tableConn      = "conn_record"
+	tableTask      = "task_record"
+	tableHistory   = "history_record"
+	tableSQLHist   = "sql_history"
+	tableSQLAudit  = "sql_audit"
+	tableWebAcc    = "web_access"
+	tableWorkspace = "workspace"
+	tableAISession = "ai_session"
+	tableSQLFav    = "sql_favorites"
 )
 
 // SQLiteStore 基于 SQLite 的 Store 实现。
@@ -54,12 +56,12 @@ func sqliteDSN(dbPath string) string {
 func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	cli, err := cydb.TryConnect(&def.DBConnection{Type: "sqlite", Path: sqliteDSN(dbPath)})
 	if err != nil {
-		return nil, fmt.Errorf("打开 SQLite 存储失败: %w", err)
+		return nil, engine.NewMsgErrf(engine.ErrStoreOpen, err)
 	}
 	s := &SQLiteStore{cli: cli}
 	if err := s.Migrate(); err != nil {
 		_ = cli.Close()
-		return nil, fmt.Errorf("存储迁移失败: %w", err)
+		return nil, engine.NewMsgErrf(engine.ErrStoreMigrate, err)
 	}
 	return s, nil
 }
@@ -428,7 +430,7 @@ func (s *SQLiteStore) LoadHistory(taskType, taskConfigID string) []ExecutionReco
 func (s *SQLiteStore) GetHistory(id string) (ExecutionRecord, error) {
 	m, err := s.cli.First(tableHistory, map[string]any{"id": id}, cydb.WithWhere(cydb.EQ("id")))
 	if err != nil || m == nil {
-		return ExecutionRecord{}, fmt.Errorf("执行记录不存在: %s", id)
+		return ExecutionRecord{}, engine.NewMsgErr(engine.ErrStoreRecordNotFound, id)
 	}
 	r := historyRow{
 		ID:           str(m["id"]),

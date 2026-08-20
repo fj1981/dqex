@@ -200,11 +200,11 @@ func MaskResult(result *SQLQueryResult) {
 func RunSQLQuery(ctx context.Context, cli *cydb.DBCli, sql string, limit, offset int, mode string) (*SQLQueryResult, error) {
 	warnings, forbidden := CheckDangerous(sql)
 	if len(forbidden) > 0 {
-		return nil, fmt.Errorf("检测到禁止函数，已拦截: %s", strings.Join(forbidden, "; "))
+		return nil, NewMsgErr(errQryForbidden, strings.Join(forbidden, "; "))
 	}
 	isWrite := ClassifySQL(sql)
 	if isWrite {
-		return nil, fmt.Errorf("检测到写操作，请使用写操作接口执行: %s", strings.TrimSpace(sql))
+		return nil, NewMsgErr(errQryWriteOp, strings.TrimSpace(sql))
 	}
 	limit = normalizeLimit(limit)
 	start := time.Now()
@@ -224,12 +224,12 @@ func RunSQLQuery(ctx context.Context, cli *cydb.DBCli, sql string, limit, offset
 		// 解析 AST → 判断是否已有限制 → 无则按方言重构追加上限（MySQL/PG 用 LIMIT，Oracle 用 ROWNUM）。
 		execSQL, err = cli.EnsureLimit(sql, limit, offset)
 		if err != nil {
-			return nil, fmt.Errorf("查询 SQL 处理失败: %w", err)
+			return nil, NewMsgErrf(errQryProcess, err)
 		}
 		rows, columns, err = cli.QueryWithLimitContext(ctx, sql, limit, offset)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("查询失败: %w", cleanDBError(err))
+		return nil, NewMsgErrf(errQryFail, cleanDBError(err))
 	}
 	if mode != "raw" && len(rows) > limit {
 		rows = rows[:limit]
@@ -304,14 +304,14 @@ func buildFilterWheres(filters []ColumnFilter, isBigField func(column string) bo
 	conds := make([]ss.Condition, 0, len(filters))
 	for _, f := range filters {
 		if f.Column == "" {
-			return nil, fmt.Errorf("过滤列名不能为空")
+			return nil, NewMsgErr(errFilterColEmpty)
 		}
 		if !validFilterOps[f.Op] {
-			return nil, fmt.Errorf("未知的过滤操作符: %s", f.Op)
+			return nil, NewMsgErr(errFilterOp, f.Op)
 		}
 		// 大字段列限制：二进制/超长文本不支持文本过滤，仅允许空值判断
 		if isBigField != nil && isBigField(f.Column) && f.Op != FilterIsNull && f.Op != FilterIsNotNull {
-			return nil, fmt.Errorf("大字段列「%s」不支持该过滤方式，仅支持「为空/非空」", f.Column)
+			return nil, NewMsgErr(errQryBigFieldFilter, f.Column)
 		}
 		var cond ss.Condition
 		switch f.Op {
@@ -400,13 +400,13 @@ func QueryTablePage(ctx context.Context, cli *cydb.DBCli, table string, page, pa
 	// 过滤列名白名单校验
 	for _, f := range filters {
 		if len(validCols) > 0 && !validCols[strings.ToLower(f.Column)] {
-			return nil, fmt.Errorf("过滤列「%s」不存在于表 %s", f.Column, table)
+			return nil, NewMsgErr(errQryFilterColNotExist, f.Column, table)
 		}
 	}
 	// 排序列名白名单校验
 	for _, sp := range sortSpecs {
 		if sp.Column != "" && len(validCols) > 0 && !validCols[strings.ToLower(sp.Column)] {
-			return nil, fmt.Errorf("排序列「%s」不存在于表 %s", sp.Column, table)
+			return nil, NewMsgErr(errQrySortColNotExist, sp.Column, table)
 		}
 	}
 
@@ -438,11 +438,11 @@ func QueryTablePage(ctx context.Context, cli *cydb.DBCli, table string, page, pa
 
 	res := q.QueryPagedResult(cli, ss.WithExecContext(ctx))
 	if res.HasError() {
-		return nil, fmt.Errorf("查询失败: %w", cleanDBError(res.Err()))
+		return nil, NewMsgErrf(errQryFail, cleanDBError(res.Err()))
 	}
 	rows, columns, err := res.RawData()
 	if err != nil {
-		return nil, fmt.Errorf("解析查询结果失败: %w", err)
+		return nil, NewMsgErrf(errQryParseResult, err)
 	}
 	if rows == nil {
 		rows = [][]any{}
@@ -506,7 +506,7 @@ func ExportTableExcel(ctx context.Context, cli *cydb.DBCli, table string, sortSp
 	for ci, col := range res.Columns {
 		cell, _ := excelize.CoordinatesToCellName(ci+1, 1)
 		if err := f.SetCellValue(sheet, cell, col); err != nil {
-			return nil, 0, false, fmt.Errorf("写入表头失败: %w", err)
+			return nil, 0, false, NewMsgErrf(errQryWriteHeader, err)
 		}
 	}
 	// 数据行
@@ -514,7 +514,7 @@ func ExportTableExcel(ctx context.Context, cli *cydb.DBCli, table string, sortSp
 		for ci, v := range row {
 			cell, _ := excelize.CoordinatesToCellName(ci+1, ri+2)
 			if err := f.SetCellValue(sheet, cell, v); err != nil {
-				return nil, 0, false, fmt.Errorf("写入数据失败: %w", err)
+				return nil, 0, false, NewMsgErrf(errQryWriteData, err)
 			}
 		}
 	}
@@ -529,7 +529,7 @@ func ExportTableExcel(ctx context.Context, cli *cydb.DBCli, table string, sortSp
 
 	buf, err := f.WriteToBuffer()
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("生成 Excel 失败: %w", err)
+		return nil, 0, false, NewMsgErrf(errQryGenExcel, err)
 	}
 	return buf.Bytes(), res.Total, truncated, nil
 }
@@ -539,12 +539,12 @@ func ExportTableExcel(ctx context.Context, cli *cydb.DBCli, table string, sortSp
 func RunSQLExec(ctx context.Context, cli *cydb.DBCli, sql string) (*SQLQueryResult, error) {
 	warnings, forbidden := CheckDangerous(sql)
 	if len(forbidden) > 0 {
-		return nil, fmt.Errorf("检测到禁止函数，已拦截: %s", strings.Join(forbidden, "; "))
+		return nil, NewMsgErr(errQryForbidden, strings.Join(forbidden, "; "))
 	}
 	start := time.Now()
 	affected, err := cli.DirectExecuteContext(ctx, sql)
 	if err != nil {
-		return nil, fmt.Errorf("执行失败: %w", cleanDBError(err))
+		return nil, NewMsgErrf(errQryExecFail, cleanDBError(err))
 	}
 	return &SQLQueryResult{
 		AffectedRows: affected,
@@ -572,7 +572,7 @@ type UpdateCellParams struct {
 // 生成形如：UPDATE `t` SET `c` = :set_val WHERE `id` = :pk_0
 func RunParamUpdate(ctx context.Context, cli *cydb.DBCli, p UpdateCellParams) (int64, error) {
 	if p.Table == "" || p.SetColumn == "" || len(p.PKColumns) == 0 {
-		return 0, fmt.Errorf("表名/目标列/主键不能为空")
+		return 0, NewMsgErr(errQryNoIdent)
 	}
 
 	params := cydb.PARAMS{"set_val": p.SetValue}
@@ -587,12 +587,12 @@ func RunParamUpdate(ctx context.Context, cli *cydb.DBCli, p UpdateCellParams) (i
 	q = q.Where(cydb.AND(pkConds...))
 	sql, _, err := q.BuildSQL(ss.BuildOptions{Flavor: ss.FlavorForDatabase(cli.DBType())})
 	if err != nil {
-		return 0, fmt.Errorf("构建 SQL 失败: %w", err)
+		return 0, NewMsgErrf(errQryBuildSQL, err)
 	}
 
 	affected, err := cli.DirectNamedExecuteContext(ctx, sql, params)
 	if err != nil {
-		return 0, fmt.Errorf("执行失败: %w", cleanDBError(err))
+		return 0, NewMsgErrf(errQryExecFail, cleanDBError(err))
 	}
 	return affected, nil
 }
@@ -611,10 +611,10 @@ type DeleteRowParams struct {
 // 生成形如：DELETE FROM `t` WHERE `id` = :pk_0 AND `c` = :pk_1
 func RunParamDelete(ctx context.Context, cli *cydb.DBCli, p DeleteRowParams) (int64, error) {
 	if p.Table == "" || len(p.PKColumns) == 0 {
-		return 0, fmt.Errorf("表名/主键不能为空")
+		return 0, NewMsgErr(errQryNoPKIdent)
 	}
 	if len(p.PKColumns) != len(p.PKValues) {
-		return 0, fmt.Errorf("主键列与值数量不一致")
+		return 0, NewMsgErr(errQryPKValueMismatch)
 	}
 
 	params := cydb.PARAMS{}
@@ -629,12 +629,12 @@ func RunParamDelete(ctx context.Context, cli *cydb.DBCli, p DeleteRowParams) (in
 	q = q.Where(cydb.AND(pkConds...))
 	sql, _, err := q.BuildSQL(ss.BuildOptions{Flavor: ss.FlavorForDatabase(cli.DBType())})
 	if err != nil {
-		return 0, fmt.Errorf("构建 SQL 失败: %w", err)
+		return 0, NewMsgErrf(errQryBuildSQL, err)
 	}
 
 	affected, err := cli.DirectNamedExecuteContext(ctx, sql, params)
 	if err != nil {
-		return 0, fmt.Errorf("执行失败: %w", cleanDBError(err))
+		return 0, NewMsgErrf(errQryExecFail, cleanDBError(err))
 	}
 	return affected, nil
 }
@@ -654,10 +654,10 @@ type InsertRowParams struct {
 // 生成形如：INSERT INTO `t` (`a`,`b`) VALUES (:v_0,:v_1)
 func RunParamInsert(ctx context.Context, cli *cydb.DBCli, p InsertRowParams) (int64, error) {
 	if p.Table == "" || len(p.Columns) == 0 {
-		return 0, fmt.Errorf("表名/列不能为空")
+		return 0, NewMsgErr(errQryNoColIdent)
 	}
 	if len(p.Columns) != len(p.Values) {
-		return 0, fmt.Errorf("列与值数量不一致")
+		return 0, NewMsgErr(errQryColValueMismatch)
 	}
 
 	params := cydb.PARAMS{}
@@ -671,12 +671,12 @@ func RunParamInsert(ctx context.Context, cli *cydb.DBCli, p InsertRowParams) (in
 	var q def.SQLStmt = ss.Q().Insert(p.Table).Columns(stringsToAny(p.Columns)...).Values(valueExprs...)
 	sql, _, err := q.BuildSQL(ss.BuildOptions{Flavor: ss.FlavorForDatabase(cli.DBType())})
 	if err != nil {
-		return 0, fmt.Errorf("构建 SQL 失败: %w", err)
+		return 0, NewMsgErrf(errQryBuildSQL, err)
 	}
 
 	affected, err := cli.DirectNamedExecuteContext(ctx, sql, params)
 	if err != nil {
-		return 0, fmt.Errorf("执行失败: %w", cleanDBError(err))
+		return 0, NewMsgErrf(errQryExecFail, cleanDBError(err))
 	}
 	return affected, nil
 }
@@ -695,7 +695,7 @@ func stringsToAny(s []string) []any {
 // 主键值用命名参数绑定（防值注入）。查询不到行时返回 nil。
 func GetCellValue(ctx context.Context, cli *cydb.DBCli, table, column string, pkColumns []string, pkValues []any) (any, error) {
 	if table == "" || column == "" || len(pkColumns) == 0 {
-		return nil, fmt.Errorf("表名/列名/主键不能为空")
+		return nil, NewMsgErr(errQryNoIdentAll)
 	}
 
 	params := cydb.PARAMS{}
@@ -710,13 +710,13 @@ func GetCellValue(ctx context.Context, cli *cydb.DBCli, table, column string, pk
 	q = q.Where(cydb.AND(pkConds...))
 	sql, _, err := q.BuildSQL(ss.BuildOptions{Flavor: ss.FlavorForDatabase(cli.DBType())})
 	if err != nil {
-		return nil, fmt.Errorf("构建 SQL 失败: %w", err)
+		return nil, NewMsgErrf(errQryBuildSQL, err)
 	}
 
 	// 单行查询（主键唯一），返回 [值, 列名]；无行时返回 nil
 	row, _, err := cli.DirectNamedQueryRowFastContext(ctx, sql, params)
 	if err != nil {
-		return nil, fmt.Errorf("查询失败: %w", cleanDBError(err))
+		return nil, NewMsgErrf(errQryFail, cleanDBError(err))
 	}
 	if len(row) == 0 {
 		return nil, nil
@@ -743,7 +743,7 @@ func RunSQLScript(ctx context.Context, cli *cydb.DBCli, sql string, limit, offse
 	}
 	stmts := cydb.SplitSQLStatements(splitDialect, sql)
 	if len(stmts) == 0 {
-		return nil, fmt.Errorf("未检测到可执行的 SQL 语句")
+		return nil, NewMsgErr(errQryNoSQL)
 	}
 	results := make([]*SQLQueryResult, 0, len(stmts))
 	for i, stmt := range stmts {
@@ -784,7 +784,7 @@ func appendSkipped(results []*SQLQueryResult, rest []string) []*SQLQueryResult {
 func Ping(ctx context.Context, cli *cydb.DBCli) (int64, error) {
 	start := time.Now()
 	if _, _, err := cli.DirectQueryFastContext(ctx, "SELECT 1"); err != nil {
-		return 0, fmt.Errorf("连接不可用: %w", cleanDBError(err))
+		return 0, NewMsgErrf(errQryConnUnavailable, cleanDBError(err))
 	}
 	return time.Since(start).Milliseconds(), nil
 }

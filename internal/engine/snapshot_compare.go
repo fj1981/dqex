@@ -33,7 +33,7 @@ func snapshotDatabases(snap *Snapshot) []SnapshotDatabase {
 func RunSnapshotCompare(ctx context.Context, snapshot *Snapshot, targetConn *DBConnInfo, opts SnapshotCompareOptions, cb ProgressFunc) (*CompareResult, error) {
 	dbs := snapshotDatabases(snapshot)
 	if len(dbs) == 0 {
-		return nil, fmt.Errorf("快照不包含任何库数据")
+		return nil, NewMsgErr(errScmpNoData)
 	}
 
 	// 解析快照库→目标库映射（默认同名）
@@ -57,7 +57,7 @@ func RunSnapshotCompare(ctx context.Context, snapshot *Snapshot, targetConn *DBC
 	// 每个库对的实际查询由 loop 里 ConnectPooled 出的绑定库名连接承担。
 	probeCli, err := ConnectPooled(*targetConn, targetScope)
 	if err != nil {
-		return nil, fmt.Errorf("目标库连接失败: %w", err)
+		return nil, NewMsgErrf(errScmpConn, err)
 	}
 	normTgt := typeNormalizer(probeCli)
 
@@ -79,7 +79,7 @@ func RunSnapshotCompare(ctx context.Context, snapshot *Snapshot, targetConn *DBC
 		tgtConn.DBName, tgtConn.Schema = scopeDBValue(targetConn, dbName)
 		tgtCli, err := ConnectPooled(tgtConn, dbName)
 		if err != nil {
-			return nil, fmt.Errorf("目标库[%s]连接失败: %w", dbName, err)
+			return nil, NewMsgErrf(errScmpConnDB, err, dbName)
 		}
 		dr, err := runSnapshotCompareDatabase(ctx, snapshot, sd, dbName, normTgt, tgtCli, opts, t)
 		if err != nil {
@@ -109,7 +109,7 @@ func runSnapshotCompareDatabase(ctx context.Context, snapshot *Snapshot, sd Snap
 	}
 	tgtAll, err := targetCli.GetTables(dbName, schemaPtr, nil)
 	if err != nil {
-		return nil, fmt.Errorf("获取目标库[%s]表列表失败: %w", dbName, err)
+		return nil, NewMsgErrf(errScmpListTables, err, dbName)
 	}
 	tgtAll = excludeViews(targetCli, dbName, "", tgtAll)
 
@@ -176,7 +176,7 @@ func runSnapshotCompareDatabase(ctx context.Context, snapshot *Snapshot, sd Snap
 	dr := &CompareDatabaseResult{SourceDB: sd.DBName, TargetDB: dbName, Tables: []CompareTableResult{}}
 	for _, p := range pairs {
 		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("任务已取消")
+			return nil, NewMsgErr(errCancelled)
 		}
 		t.p.CurrentTable = p.name
 		t.emit(true)

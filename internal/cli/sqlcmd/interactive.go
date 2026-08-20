@@ -16,19 +16,19 @@ func runInteractive(info *engine.DBConnInfo) error {
 	txt := cliTextsFor(cliLang)
 	sess, err := newSession(info)
 	if err != nil {
-		return fmt.Errorf("连接数据库失败: %w", err)
+		return textErr(err, cliTextsFor(cliLang).errConnDB)
 	}
 	defer sess.close()
 
 	// 读取全局配置中的默认显示模式（config.yaml cli.display_mode），
 	// 未配置时为 ""（等价 auto：表格超宽自动降级）
-	if svc, err := newAIService("", ""); err == nil {
+	if svc, err := newAIService(langCtx(), "", ""); err == nil {
 		sess.displayMode = strings.TrimSpace(svc.Config().CLI.DisplayMode)
 	}
 
 	// 检查是否为终端环境
 	if !isTerminal() {
-		return fmt.Errorf("交互模式需要终端环境，请使用 -e 执行 SQL 或 --json 输出")
+		return textErr(nil, cliTextsFor(cliLang).errNeedTTY)
 	}
 
 	line := liner.NewLiner()

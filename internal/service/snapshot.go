@@ -37,20 +37,20 @@ func (s *Service) CreateSnapshot(ctx context.Context, connID string, dbNames []s
 			perConn.Schema = "" // oracle 时由引擎按 type 取 schema
 		}
 		if perConn.DBName == "" && perConn.Schema == "" {
-			return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("第 %d 个库未指定数据库名", i+1))
+			return nil, newSvcErr(cygin.ErrParamsInvalid, svcSnapNoDBName, i+1)
 		}
 		one, err := engine.CreateSnapshot(ctx, &perConn, name, description, opts, cb)
 		if err != nil {
 			// 空库：多库场景跳过并警告，单库场景返回明确提示（不崩溃）
 			if errors.Is(err, engine.ErrEmptyDatabase) {
 				if len(dbNames) == 1 {
-					return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(),
-						cygin.WithErrDetailf("库 %s 内没有表（或仅含视图），无法创建快照", dbName))
+					return nil, newSvcErr(cygin.ErrParamsInvalid, svcSnapEmptyDB, dbName)
 				}
 				cylog.Warnf("跳过空库 %s（无表，已忽略）", dbName)
 				continue
 			}
-			return nil, cygin.WrapError(err, ErrExecFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+			wrapped := renderErrFor(err, lang)
+			return nil, cygin.WrapError(wrapped, ErrExecFailed, cygin.WithErrPrint())
 		}
 		dbs = append(dbs, engine.SnapshotDatabase{
 			DBName:     one.DBName,
@@ -63,8 +63,7 @@ func (s *Service) CreateSnapshot(ctx context.Context, connID string, dbNames []s
 	}
 	// 全部库都为空时，给出明确提示
 	if len(dbNames) > 1 && len(dbs) == 0 {
-		return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(),
-			cygin.WithErrDetailf("所选 %d 个库均为空（无表或仅含视图），无法创建快照", len(dbNames)))
+		return nil, newSvcErr(cygin.ErrParamsInvalid, svcSnapAllEmpty, len(dbNames))
 	}
 
 	snapshot := &Snapshot{
@@ -84,7 +83,7 @@ func (s *Service) CreateSnapshot(ctx context.Context, connID string, dbNames []s
 
 	// 落盘
 	if err := s.saveSnapshot(snapshot); err != nil {
-		return nil, cygin.WrapError(err, ErrExecFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return nil, cygin.WrapError(err, ErrExecFailed, cygin.WithErrPrint())
 	}
 	if err := s.addSnapshotToIndex(snapshotToInfo(snapshot)); err != nil {
 		cylog.Warnf("更新快照索引失败（不影响创建）: %v", err)
@@ -119,7 +118,7 @@ func (s *Service) DeleteSnapshot(id string) error {
 	}
 	dataPath := s.snapshotDataPath(id)
 	if err := os.Remove(dataPath); err != nil && !os.IsNotExist(err) {
-		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
 	}
 	return nil
 }
@@ -130,7 +129,7 @@ func (s *Service) DeleteSnapshot(id string) error {
 func (s *Service) StartSnapshotCompare(opts SnapshotCompareOptions, taskConfigID string) (string, error) {
 	snap, err := s.loadSnapshot(opts.SnapshotID)
 	if err != nil {
-		return "", cygin.NewError(ErrTaskNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("快照不存在: %s", opts.SnapshotID))
+		return "", newSvcErr(ErrTaskNotFound, svcSnapNotFound, opts.SnapshotID)
 	}
 
 	target, err := s.resolveConn(opts.TargetConn, opts.Target)
@@ -155,10 +154,13 @@ func (s *Service) StartSnapshotCompare(opts SnapshotCompareOptions, taskConfigID
 	}
 	_ = s.persist.SaveHistory(record)
 
-	s.runner.Start(taskID, "snapshot_compare", func(ctx context.Context, publish ProgressFunc) error {
+	s.runner.Start(taskID, "snapshot_compare", opts.Lang, func(ctx context.Context, publish ProgressFunc) error {
 		var last ProgressInfo
 		wrapped := func(p ProgressInfo) { last = p; publish(p) }
 		result, err := engine.RunSnapshotCompareWithConn(ctx, snap, target, opts, wrapped)
+		if err != nil {
+			err = renderErrFor(err, opts.Lang) // 按任务语言渲染 engine.MsgError
+		}
 		s.finishRecord(ctx, &record, err, last, func(r *ExecutionRecord) {
 			r.TotalUnits = last.TotalUnits
 			r.TotalRows = last.DoneRows
@@ -194,7 +196,7 @@ func (s *Service) RunSnapshotCompareRecorded(ctx context.Context, snap *Snapshot
 	record.Duration = record.FinishedAt - record.StartedAt
 	if err != nil {
 		record.Status = "error"
-		record.ErrorMsg = err.Error()
+		record.ErrorMsg = renderErrFor(err, opts.Lang).Error()
 	} else {
 		record.Status = "done"
 		outputPath := filepath.Join(s.persist.CompareDir(), "snapshot-compare-"+taskID+".json")
@@ -224,11 +226,11 @@ func (s *Service) GetSnapshotCompareResult(taskID string) (*CompareResult, error
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, cygin.NewError(ErrTaskNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("快照对比结果不存在: %s", taskID))
+		return nil, newSvcErr(ErrTaskNotFound, svcSnapCmpNotFound, taskID)
 	}
 	var result CompareResult
 	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
 	}
 	return &result, nil
 }
@@ -255,13 +257,13 @@ func (s *Service) loadSnapshot(id string) (*Snapshot, error) {
 	data, err := os.ReadFile(s.snapshotDataPath(id))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, cygin.NewError(ErrTaskNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("快照不存在: %s", id))
+			return nil, newSvcErr(ErrTaskNotFound, svcSnapNotFound, id)
 		}
-		return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
 	}
 	var snap Snapshot
 	if err := json.Unmarshal(data, &snap); err != nil {
-		return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
 	}
 	return &snap, nil
 }
@@ -312,7 +314,7 @@ func (s *Service) addSnapshotToIndex(info SnapshotInfo) error {
 func (s *Service) removeSnapshotFromIndex(id string) error {
 	infos, err := s.loadSnapshotIndex()
 	if err != nil {
-		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
 	}
 	ret := make([]SnapshotInfo, 0, len(infos))
 	for _, info := range infos {

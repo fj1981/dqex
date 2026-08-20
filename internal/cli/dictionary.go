@@ -81,7 +81,7 @@ func cliDictionary(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if task.DictionaryOpts == nil {
-			return cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("任务配置 %s 不是数据字典任务", v))
+			return cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errTaskNotDict, v))
 		}
 		opts = *task.DictionaryOpts
 	}
@@ -121,7 +121,7 @@ func cliDictionary(cmd *cobra.Command, args []string) error {
 		opts.OutputDir, wantZip = splitOutput(v)
 	}
 	if opts.Source == nil && opts.SourceConn == "" {
-		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少源连接：配置 source/source_ref 段或 --source-*/--source-conn"))
+		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoSrcConn))
 	}
 
 	svc, err := newCliService()

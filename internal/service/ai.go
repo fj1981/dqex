@@ -159,10 +159,10 @@ func (s *Service) aiPickTarget(ctx context.Context, conn *DBConnInfo, dbName str
 	}
 	tree, err := engine.GetTableTree(*conn)
 	if err != nil {
-		return "", nil, cyginWrapAI(fmt.Errorf("获取表结构失败: %w", err))
+		return "", nil, cyginWrapAI(newSvcErrf(0, err, svcAISchemaFail))
 	}
 	if err := ctx.Err(); err != nil {
-		return "", nil, cyginWrapAI(fmt.Errorf("任务已取消"))
+		return "", nil, cyginWrapAI(newSvcErr(0, svcAICancelled))
 	}
 	// 选定目标库：dbName 精确匹配，未匹配则取连接库，再退化为第一个库
 	target := ""
@@ -180,7 +180,7 @@ func (s *Service) aiPickTarget(ctx context.Context, conn *DBConnInfo, dbName str
 		}
 	}
 	if target == "" {
-		return "", nil, cyginWrapAI(errors.New("未找到可用数据库"))
+		return "", nil, cyginWrapAI(newSvcErr(0, svcAINoTargetDB))
 	}
 	var tableNames []string
 	for _, db := range tree {
@@ -190,7 +190,7 @@ func (s *Service) aiPickTarget(ctx context.Context, conn *DBConnInfo, dbName str
 		}
 	}
 	if len(tableNames) == 0 {
-		return "", nil, cyginWrapAI(fmt.Errorf("目标库 %s 中没有可用的表，请检查连接配置的数据库名，或确认该库下存在表", target))
+		return "", nil, cyginWrapAI(newSvcErr(0, svcAINoTables, target))
 	}
 	return target, tableNames, nil
 }
@@ -202,7 +202,7 @@ func (s *Service) aiPickTarget(ctx context.Context, conn *DBConnInfo, dbName str
 // tabID 可选：所属 query tab（按 tab 隔离对话；空 = 不隔离）。
 func (s *Service) AINewSession(ctx context.Context, lang, connKey, dbName, tabID string, history []*schema.Message, sessionID string) (*AISession, error) {
 	if !s.AIEnabled() {
-		return nil, cyginWrapAI(errors.New("AI 功能未配置：请先在设置中填写 BaseURL / API Key / Model"))
+		return nil, cyginWrapAI(newSvcErr(0, svcAINotConfigured))
 	}
 	conn, err := s.resolveConn(connKey, nil)
 	if err != nil {
@@ -461,7 +461,7 @@ func (s *Service) aiChat(ctx context.Context, sessionID, action, task, msgID str
 		return aiChatResult{}, err
 	}
 	if strings.TrimSpace(task) == "" {
-		return aiChatResult{}, cyginWrapAI(errors.New("请输入需求描述"))
+		return aiChatResult{}, cyginWrapAI(newSvcErr(0, svcAIEmptyPrompt))
 	}
 	// 会话对话互斥：同一会话的并发对话串行化，避免 Messages 切片并发读写（data race）。
 	// 锁持有整个对话周期（含 agent 多轮工具调用），并发请求会排队等待而非交错破坏状态。
@@ -563,7 +563,7 @@ func (s *Service) aiAgentChat(ctx context.Context, ses *AISession, action string
 		return aiChatResult{}, cyginWrapAI(err)
 	}
 	if strings.TrimSpace(content) == "" {
-		return aiChatResult{}, cyginWrapAI(errors.New("模型返回空结果"))
+		return aiChatResult{}, cyginWrapAI(newSvcErr(0, svcAIEmptyResponse))
 	}
 	// 校验：仅拦截「只输出思考过程、无有效答案」的无效回复；
 	// 「是否查过真实表结构」不再硬拦截，改为随结果返回 schemaVerified，由前端图标提示可靠度。
@@ -676,7 +676,7 @@ func (s *Service) buildAgentTools(conn DBConnInfo, maxSchemaChars int, ses *AISe
 			return strings.Join(names, "\n"), nil
 		})
 	if err != nil {
-		return nil, cyginWrapAI(fmt.Errorf("构建工具 list_databases 失败: %w", err))
+		return nil, cyginWrapAI(newSvcErrf(0, err, svcAIToolListDBs))
 	}
 
 	listTables, err := utils.InferTool("list_tables",
@@ -702,7 +702,7 @@ func (s *Service) buildAgentTools(conn DBConnInfo, maxSchemaChars int, ses *AISe
 			return fmt.Sprintf(tt.DBNotFound, args.DB, strings.Join(dbNames, ", ")), nil
 		})
 	if err != nil {
-		return nil, cyginWrapAI(fmt.Errorf("构建工具 list_tables 失败: %w", err))
+		return nil, cyginWrapAI(newSvcErrf(0, err, svcAIToolListTables))
 	}
 
 	getSchema, err := utils.InferTool("get_schema",
@@ -758,7 +758,7 @@ func (s *Service) buildAgentTools(conn DBConnInfo, maxSchemaChars int, ses *AISe
 			return llm.BuildSchemaTextFull(ses.Lang, []llm.TableInfo{ti}, 1, maxSchemaChars), nil
 		})
 	if err != nil {
-		return nil, cyginWrapAI(fmt.Errorf("构建工具 get_schema 失败: %w", err))
+		return nil, cyginWrapAI(newSvcErrf(0, err, svcAIToolGetSchema))
 	}
 	return []tool.InvokableTool{listDBs, listTables, getSchema}, nil
 }
@@ -790,7 +790,7 @@ func (s *Service) AIResetSession(sessionID string) error {
 	defer m.mu.Unlock()
 	ses, ok := m.sessions[sessionID]
 	if !ok {
-		return cyginWrapAI(fmt.Errorf("会话不存在: %s", sessionID))
+		return cyginWrapAI(newSvcErr(0, svcAISessionNotFound, sessionID))
 	}
 	// 重建名录 system，复用已有 Agent（model + tools 不变）
 	ses.mu.Lock()
@@ -809,7 +809,7 @@ func (s *Service) AIDeleteSession(sessionID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.sessions[sessionID]; !ok {
-		return cyginWrapAI(fmt.Errorf("会话不存在: %s", sessionID))
+		return cyginWrapAI(newSvcErr(0, svcAISessionNotFound, sessionID))
 	}
 	delete(m.sessions, sessionID)
 	// 同步删除落盘记录
@@ -825,7 +825,7 @@ func (s *Service) getSession(sessionID string) (*AISession, error) {
 	defer m.mu.Unlock()
 	ses, ok := m.sessions[sessionID]
 	if !ok {
-		return nil, cyginWrapAI(fmt.Errorf("会话不存在或已过期，请重新创建"))
+		return nil, cyginWrapAI(newSvcErr(0, svcAISessionExpired))
 	}
 	return ses, nil
 }
@@ -1070,25 +1070,35 @@ func cyginWrapAI(err error) error {
 	if errors.As(err, &ce) {
 		return err
 	}
+	// SvcError：按 key 映射错误码（不再依赖中文文案匹配）
+	if se := AsSvcErr(err); se != nil {
+		var code int
+		switch se.Key {
+		case svcAINotConfigured:
+			code = ErrAINotConfigured
+		case svcAIEmptyPrompt:
+			code = ErrAIEmptyPrompt
+		case svcAISessionNotFound, svcAISessionExpired:
+			code = ErrAISessionNotFound
+		case svcAISchemaFail:
+			code = ErrAISchemaFailed
+		case svcAINoTargetDB:
+			code = ErrAINoTargetDB
+		case svcAINoTables:
+			code = ErrAINoTables
+		case svcAIEmptyResponse:
+			code = ErrAIEmptyResponse
+		default:
+			code = ErrServiceException
+		}
+		cylog.Errorf("[ai] 错误映射 code=%d err=%v", code, err)
+		return cygin.NewError(code)
+	}
 	msg := err.Error()
 	var code int
 	switch {
 	case errors.Is(err, context.DeadlineExceeded) || strings.Contains(msg, "context deadline exceeded"):
 		code = ErrAITimeout
-	case strings.Contains(msg, "AI 功能未配置"):
-		code = ErrAINotConfigured
-	case strings.Contains(msg, "请输入需求描述"):
-		code = ErrAIEmptyPrompt
-	case strings.Contains(msg, "会话不存在"):
-		code = ErrAISessionNotFound
-	case strings.Contains(msg, "获取表结构失败"):
-		code = ErrAISchemaFailed
-	case strings.Contains(msg, "未找到可用数据库"):
-		code = ErrAINoTargetDB
-	case strings.Contains(msg, "没有可用的表"):
-		code = ErrAINoTables
-	case strings.Contains(msg, "模型返回空结果") || strings.Contains(msg, "只输出了思考过程"):
-		code = ErrAIEmptyResponse
 	default:
 		code = ErrServiceException
 	}

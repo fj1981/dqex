@@ -58,12 +58,12 @@ func (s *session) aiGet() (*aiState, error) {
 	if s.ai != nil {
 		return s.ai, nil
 	}
-	svc, err := newAIService("", "")
+	svc, err := newAIService(langCtx(), "", "")
 	if err != nil {
-		return nil, fmt.Errorf("初始化服务失败: %w", err)
+		return nil, textErr(err, cliTextsFor(cliLang).errInitSvc)
 	}
 	if !svc.AIEnabled() {
-		return nil, fmt.Errorf("AI 功能未配置：请先在 config.yaml 或 Web 设置中填写 ai.base_url / ai.api_key / ai.model")
+		return nil, textErr(nil, cliTextsFor(cliLang).errAINotConfigured)
 	}
 	// 全局 debug：config 顶层 debug=true（或外层 --debug）时切到 debug 级别
 	if svc.Config().Debug {
@@ -105,7 +105,7 @@ func (s *session) aiTargetTables() (string, []string, error) {
 	}
 	tree, err := getTableTree(conn)
 	if err != nil {
-		return "", nil, fmt.Errorf("获取表结构失败: %w", err)
+		return "", nil, textErr(err, cliTextsFor(cliLang).errSchemaFail)
 	}
 	target := s.currentDB
 	found := false
@@ -125,7 +125,7 @@ func (s *session) aiTargetTables() (string, []string, error) {
 		}
 	}
 	if target == "" {
-		return "", nil, fmt.Errorf("未找到可用数据库")
+		return "", nil, textErr(nil, cliTextsFor(cliLang).errNoTargetDB)
 	}
 	for _, db := range tree {
 		if db.Name == target {
@@ -134,7 +134,7 @@ func (s *session) aiTargetTables() (string, []string, error) {
 			return target, names, nil
 		}
 	}
-	return "", nil, fmt.Errorf("目标库 %s 未在表树中找到", target)
+	return "", nil, textErr(nil, cliTextsFor(cliLang).errNoTableInTree, target)
 }
 
 // aiEnsure 确保会话已初始化（system prompt 含库/表名录）。
@@ -207,7 +207,7 @@ func (s *session) buildAgentTools(maxSchemaChars int) ([]tool.InvokableTool, err
 			return strings.Join(names, "\n"), nil
 		})
 	if err != nil {
-		return nil, fmt.Errorf("构建工具 list_databases 失败: %w", err)
+		return nil, textErr(err, cliTextsFor(cliLang).errToolListDBs)
 	}
 
 	listTables, err := utils.InferTool("list_tables",
@@ -233,7 +233,7 @@ func (s *session) buildAgentTools(maxSchemaChars int) ([]tool.InvokableTool, err
 			return sprintf(tt.DBNotFound, args.DB, strings.Join(dbNames, ", ")), nil
 		})
 	if err != nil {
-		return nil, fmt.Errorf("构建工具 list_tables 失败: %w", err)
+		return nil, textErr(err, cliTextsFor(cliLang).errToolListTables)
 	}
 
 	getSchema, err := utils.InferTool("get_schema",
@@ -287,7 +287,7 @@ func (s *session) buildAgentTools(maxSchemaChars int) ([]tool.InvokableTool, err
 			return llm.BuildSchemaTextFull(cliLang, []llm.TableInfo{ti}, 1, maxSchemaChars), nil
 		})
 	if err != nil {
-		return nil, fmt.Errorf("构建工具 get_schema 失败: %w", err)
+		return nil, textErr(err, cliTextsFor(cliLang).errToolGetSchema)
 	}
 	return []tool.InvokableTool{listDBs, listTables, getSchema}, nil
 }
@@ -396,7 +396,7 @@ func (s *session) aiCopy() {
 // 逐项提示，直接回车保持原值，输入 . 退出。
 func (s *session) aiConfig() {
 	txt := cliTextsFor(cliLang)
-	svc, err := newAIService("", "")
+	svc, err := newAIService(langCtx(), "", "")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, red(sprintf(txt.aiInitFail, err.Error())))
 		return
@@ -477,7 +477,7 @@ func (s *session) aiConfig() {
 	} else if v != "" {
 		next.SystemPrompt = v
 	}
-	if err := svc.SaveConfig(*cfg); err != nil {
+	if err := svc.SaveConfig(langCtx(), *cfg); err != nil {
 		fmt.Fprintln(os.Stderr, red(sprintf(txt.aiSaveFail, err.Error())))
 		return
 	}

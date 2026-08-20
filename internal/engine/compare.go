@@ -44,7 +44,7 @@ type comparePair struct {
 // 表按裸表名匹配（大小写不敏感）；Aliases 别名配对优先于同名匹配；行数超阈值仅比较行数。
 func RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*CompareResult, error) {
 	if opts.Source == nil || opts.Target == nil {
-		return nil, fmt.Errorf("未提供源或目标数据库连接")
+		return nil, NewMsgErr(errCmpNoConn)
 	}
 	threshold := opts.Threshold
 	if threshold <= 0 {
@@ -73,11 +73,11 @@ func RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*Com
 	// 连接走进程级池化（GetOrCreateCli），相同库复用同一实例，程序退出前无需 Close
 	sourceCli, err := ConnectPooled(*opts.Source, opts.Source.DBName)
 	if err != nil {
-		return nil, fmt.Errorf("源库连接失败: %w", err)
+		return nil, NewMsgErrf(errCmpSrcConn, err)
 	}
 	targetCli, err := ConnectPooled(*opts.Target, opts.Target.DBName)
 	if err != nil {
-		return nil, fmt.Errorf("目标库连接失败: %w", err)
+		return nil, NewMsgErrf(errCmpTgtConn, err)
 	}
 
 	result := &CompareResult{
@@ -96,11 +96,11 @@ func RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*Com
 		// 否则 GetTableInfo 会查错库导致结构/数据张冠李戴
 		srcCli, err := ConnectPooled(srcConn, dp.SourceDB)
 		if err != nil {
-			return nil, fmt.Errorf("源库[%s]连接失败: %w", dp.SourceDB, err)
+			return nil, NewMsgErrf(errCmpSrcConnDB, err, dp.SourceDB)
 		}
 		tgtCli, err := ConnectPooled(tgtConn, dp.TargetDB)
 		if err != nil {
-			return nil, fmt.Errorf("目标库[%s]连接失败: %w", dp.TargetDB, err)
+			return nil, NewMsgErrf(errCmpTgtConnDB, err, dp.TargetDB)
 		}
 		dr, err := runCompareDatabase(ctx, &srcConn, &tgtConn, srcCli, tgtCli, dp.SourceDB, dp.TargetDB, opts, ignore, tableIgnore, t)
 		if err != nil {
@@ -155,7 +155,7 @@ func resolveCompareDBPairs(opts CompareOptions) ([]CompareDBPair, error) {
 	srcDB := compareScopeDB(opts.Source)
 	tgtDB := compareScopeDB(opts.Target)
 	if srcDB == "" || tgtDB == "" {
-		return nil, fmt.Errorf("请先选择对比的库")
+		return nil, NewMsgErr(errCmpNoDB)
 	}
 	return []CompareDBPair{{SourceDB: srcDB, TargetDB: tgtDB}}, nil
 }
@@ -169,11 +169,11 @@ func runCompareDatabase(ctx context.Context, srcConn, tgtConn *DBConnInfo, sourc
 	}
 	srcTables, err := listCompareTables(sourceCli, srcConn, opts.Tables)
 	if err != nil {
-		return nil, fmt.Errorf("获取源库[%s]表列表失败: %w", srcDB, err)
+		return nil, NewMsgErrf(errCmpSrcListTables, err, srcDB)
 	}
 	tgtTables, err := listCompareTables(targetCli, tgtConn, opts.Tables)
 	if err != nil {
-		return nil, fmt.Errorf("获取目标库[%s]表列表失败: %w", tgtDB, err)
+		return nil, NewMsgErrf(errCmpTgtListTables, err, tgtDB)
 	}
 
 	pairs, err := buildComparePairs(srcTables, tgtTables, opts.Aliases, srcDB)
@@ -186,7 +186,7 @@ func runCompareDatabase(ctx context.Context, srcConn, tgtConn *DBConnInfo, sourc
 	dr := &CompareDatabaseResult{SourceDB: srcDB, TargetDB: tgtDB, Tables: []CompareTableResult{}}
 	for _, pair := range pairs {
 		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("任务已取消")
+			return nil, NewMsgErr(errCancelled)
 		}
 		t.p.CurrentTable = pair.Name
 		t.emit(true)
@@ -335,7 +335,7 @@ func buildComparePairs(srcTables, tgtTables []string, aliases []TableAlias, sour
 		}
 		s := strings.ToLower(srcKey)
 		if seenSrc[s] || seenTgt[tg] {
-			return nil, fmt.Errorf("别名配对配置重复: %s ↔ %s", a.Source, a.Target)
+			return nil, NewMsgErr(errCmpAliasDup, a.Source, a.Target)
 		}
 		seenSrc[s] = true
 		seenTgt[tg] = true
@@ -412,11 +412,11 @@ func sortedKeys(m map[string]string) []string {
 func compareColumns(sourceCli, targetCli *cydb.DBCli, srcTable, tgtTable string) (*ColumnDiff, error) {
 	srcCols, err := tableColumns(sourceCli, srcTable)
 	if err != nil {
-		return nil, fmt.Errorf("获取源表列信息失败: %w", err)
+		return nil, NewMsgErrf(errCmpSrcCols, err)
 	}
 	tgtCols, err := tableColumns(targetCli, tgtTable)
 	if err != nil {
-		return nil, fmt.Errorf("获取目标表列信息失败: %w", err)
+		return nil, NewMsgErrf(errCmpTgtCols, err)
 	}
 	return diffColumns(srcCols, tgtCols, typeNormalizer(sourceCli), typeNormalizer(targetCli)), nil
 }
@@ -524,11 +524,11 @@ func normalizeIgnoreColumns(cols []string) map[string]bool {
 func compareTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, srcTable, tgtTable string, threshold int, ignore map[string]bool, t *tracker) (*DataDiff, error) {
 	srcRows, err := countTableRows(sourceCli, srcTable)
 	if err != nil {
-		return nil, fmt.Errorf("统计源表行数失败: %w", err)
+		return nil, NewMsgErrf(errCmpSrcRows, err)
 	}
 	tgtRows, err := countTableRows(targetCli, tgtTable)
 	if err != nil {
-		return nil, fmt.Errorf("统计目标表行数失败: %w", err)
+		return nil, NewMsgErrf(errCmpTgtRows, err)
 	}
 	dd := &DataDiff{SourceRows: srcRows, TargetRows: tgtRows}
 	// 任一侧超过阈值即走 count 模式（阈值判断取两侧最大值）
@@ -545,11 +545,11 @@ func compareTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, src
 	// 行比较基于公共列交集：非公共列差异已由结构对比报告，避免整行 key 必然失配的噪声
 	srcCols, err := tableColumns(sourceCli, srcTable)
 	if err != nil {
-		return nil, fmt.Errorf("获取源表列信息失败: %w", err)
+		return nil, NewMsgErrf(errCmpSrcCols, err)
 	}
 	tgtCols, err := tableColumns(targetCli, tgtTable)
 	if err != nil {
-		return nil, fmt.Errorf("获取目标表列信息失败: %w", err)
+		return nil, NewMsgErrf(errCmpTgtCols, err)
 	}
 	common := commonColumns(srcCols, tgtCols)
 	if len(common) == 0 {
@@ -580,11 +580,11 @@ func compareTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, src
 	// 无主键回退：整行归一化多重集比较（无法区分「变化」与「缺失+多出」）
 	srcSet, srcSamples, err := loadRowMultiset(ctx, sourceCli, srcTable, content, t)
 	if err != nil {
-		return nil, fmt.Errorf("读取源表数据失败: %w", err)
+		return nil, NewMsgErrf(errCmpSrcData, err)
 	}
 	tgtSet, tgtSamples, err := loadRowMultiset(ctx, targetCli, tgtTable, content, t)
 	if err != nil {
-		return nil, fmt.Errorf("读取目标表数据失败: %w", err)
+		return nil, NewMsgErrf(errCmpTgtData, err)
 	}
 	missing, extra := multisetDiff(srcSet, tgtSet)
 	dd.Missing = sumCounts(missing)
@@ -636,11 +636,11 @@ func compareByKey(ctx context.Context, sourceCli, targetCli *cydb.DBCli, srcTabl
 	dd.KeyColumns = pk
 	srcRows, err := loadRowsByPK(ctx, sourceCli, srcTable, pk, content, t)
 	if err != nil {
-		return fmt.Errorf("读取源表数据失败: %w", err)
+		return NewMsgErrf(errCmpSrcData, err)
 	}
 	tgtRows, err := loadRowsByPK(ctx, targetCli, tgtTable, pk, content, t)
 	if err != nil {
-		return fmt.Errorf("读取目标表数据失败: %w", err)
+		return NewMsgErrf(errCmpTgtData, err)
 	}
 
 	missingKeys := make([]string, 0)
@@ -698,7 +698,7 @@ func loadRowsByPK(ctx context.Context, cli *cydb.DBCli, table string, pk, conten
 	selectSQL := fmt.Sprintf("SELECT * FROM %s", EscapeTable(cli.DBType(), cli.DBSubType(), table))
 	err := cli.ForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("任务已取消")
+			return NewMsgErr(errCancelled)
 		}
 		obj, err := rd.AsObject()
 		if err != nil {
@@ -777,7 +777,7 @@ func countTableRows(cli *cydb.DBCli, table string) (int64, error) {
 		return 0, err
 	}
 	if len(rows) == 0 {
-		return 0, fmt.Errorf("行数查询结果为空")
+		return 0, NewMsgErr(errCmpRowCountEmpty)
 	}
 	for _, v := range rows[0] {
 		if v == nil {
@@ -787,7 +787,7 @@ func countTableRows(cli *cydb.DBCli, table string) (int64, error) {
 			return n, nil
 		}
 	}
-	return 0, fmt.Errorf("行数解析失败")
+	return 0, NewMsgErr(errCmpRowCountParse)
 }
 
 // commonColumns 两侧公共列（小写归一，按源表列定义顺序，供采样展示按真实列序）
@@ -814,7 +814,7 @@ func loadRowMultiset(ctx context.Context, cli *cydb.DBCli, table string, common 
 	selectSQL := fmt.Sprintf("SELECT * FROM %s", EscapeTable(cli.DBType(), cli.DBSubType(), table))
 	err := cli.ForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("任务已取消")
+			return NewMsgErr(errCancelled)
 		}
 		obj, err := rd.AsObject()
 		if err != nil {

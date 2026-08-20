@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -102,13 +101,21 @@ type connFlags struct {
 
 func registerConnFlags(cmd *cobra.Command, prefix string, cf *connFlags) {
 	f := cmd.Flags()
-	f.StringVar(&cf.typ, prefix+"-type", "", prefix+" 数据库类型(mysql/postgresql/oracle)")
-	f.StringVar(&cf.host, prefix+"-host", "", prefix+" 主机")
-	f.IntVar(&cf.port, prefix+"-port", 0, prefix+" 端口")
-	f.StringVar(&cf.un, prefix+"-un", "", prefix+" 用户名")
-	f.StringVar(&cf.pw, prefix+"-pw", "", prefix+" 密码")
-	f.StringVar(&cf.db, prefix+"-db", "", prefix+" 数据库名")
-	f.StringVar(&cf.subtype, prefix+"-subtype", "", prefix+" 数据库产品")
+	// 前缀非空时插入分隔符（source-type），空前缀直接用 type 等名（--type 而非 ---type）；
+	// 空前缀时 host/port 由 registerConnAliases 提供（mysqldump 风格 -h/-P），避免同名重复注册
+	sep := ""
+	if prefix != "" {
+		sep = "-"
+	}
+	f.StringVar(&cf.typ, prefix+sep+"type", "", prefix+" 数据库类型(mysql/postgresql/oracle)")
+	if prefix != "" {
+		f.StringVar(&cf.host, prefix+sep+"host", "", prefix+" 主机")
+		f.IntVar(&cf.port, prefix+sep+"port", 0, prefix+" 端口")
+	}
+	f.StringVar(&cf.un, prefix+sep+"un", "", prefix+" 用户名")
+	f.StringVar(&cf.pw, prefix+sep+"pw", "", prefix+" 密码")
+	f.StringVar(&cf.db, prefix+sep+"db", "", prefix+" 数据库名")
+	f.StringVar(&cf.subtype, prefix+sep+"subtype", "", prefix+" 数据库产品")
 }
 
 func registerConnAliases(cmd *cobra.Command, aliasPrefix, refPrefix string, cf *connFlags) {
@@ -160,7 +167,7 @@ func run(_ *cobra.Command, opts *options, args []string) error {
 		if opts.file != "" {
 			data, err := os.ReadFile(opts.file)
 			if err != nil {
-				return fmt.Errorf("读取文件失败: %w", err)
+				return textErr(err, cliTextsFor(cliLang).errReadFile)
 			}
 			sql = string(data)
 		}
@@ -174,14 +181,14 @@ func run(_ *cobra.Command, opts *options, args []string) error {
 }
 
 func resolveConn(opts *options) (*engine.DBConnInfo, error) {
-	svc, err := service.NewServiceWith("", "")
+	svc, err := service.NewServiceWith(langCtx(), "", "")
 	if err != nil {
-		return nil, fmt.Errorf("初始化服务失败: %w", err)
+		return nil, textErr(err, cliTextsFor(cliLang).errInitSvc)
 	}
 	if opts.connKey != "" {
 		rec, ok := svc.Persist().GetConn(opts.connKey)
 		if !ok {
-			return nil, fmt.Errorf("未找到连接: %s", opts.connKey)
+			return nil, textErr(nil, cliTextsFor(cliLang).errConnNotFound, opts.connKey)
 		}
 		conn := rec.Conn
 		if opts.cf.db != "" {
@@ -225,7 +232,7 @@ func executeOnce(info *engine.DBConnInfo, sql string, opts *options) error {
 		}
 		rows, columns, err := cliDB.DirectQueryFastContext(ctx, processedSQL)
 		if err != nil {
-			return fmt.Errorf("查询失败: %w", err)
+			return textErr(err, cliTextsFor(cliLang).errQueryFail)
 		}
 		result := &queryResult{
 			Columns:  columns,
@@ -239,7 +246,7 @@ func executeOnce(info *engine.DBConnInfo, sql string, opts *options) error {
 
 	affected, err := cliDB.DirectExecuteContext(ctx, sql)
 	if err != nil {
-		return fmt.Errorf("执行失败: %w", err)
+		return textErr(err, cliTextsFor(cliLang).errExecFail)
 	}
 	result := &queryResult{
 		AffectedRows: affected,

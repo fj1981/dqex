@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/user"
 	"strings"
+
+	"dbimpex/internal/engine"
 )
 
 // encPrefix 密文前缀：标识加密字段，同时用于识别旧版明文（无此头即明文，直接兼容）。
@@ -62,7 +64,7 @@ func decryptString(s string) (string, error) {
 	}
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(s, encPrefix))
 	if err != nil {
-		return "", fmt.Errorf("密文格式无效: %w", err)
+		return "", engine.NewMsgErrf(engine.ErrCryptoFormat, err)
 	}
 	key, err := machineKey()
 	if err != nil {
@@ -77,11 +79,11 @@ func decryptString(s string) (string, error) {
 		return "", err
 	}
 	if len(raw) < gcm.NonceSize() {
-		return "", fmt.Errorf("密文长度无效")
+		return "", engine.NewMsgErr(engine.ErrCryptoLen)
 	}
 	plain, err := gcm.Open(nil, raw[:gcm.NonceSize()], raw[gcm.NonceSize():], nil)
 	if err != nil {
-		return "", fmt.Errorf("解密失败（可能数据来自其他机器或已被篡改）")
+		return "", engine.NewMsgErr(engine.ErrCryptoDecrypt)
 	}
 	return string(plain), nil
 }

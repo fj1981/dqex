@@ -90,7 +90,7 @@ func handleAICreateSession(svc *service.Service) gin.HandlerFunc {
 		ses, err := svc.AINewSession(ctx, cygin.FromCtx(c), req.ConnID, req.DB, req.TabID, history, "")
 		if err != nil {
 			cylog.Debugf("[ai] 创建会话失败 conn=%s db=%s tab=%s err=%v", req.ConnID, req.DB, req.TabID, err)
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		cylog.Debugf("[ai] 创建会话完成 session=%s db=%s tab=%s dialect=%s 耗时=%s",
 			ses.ID, ses.DBName, ses.TabID, ses.Dialect, time.Since(start).Round(time.Millisecond))
@@ -107,7 +107,7 @@ type AISessionIDReq struct {
 func handleAIDeleteSession(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req AISessionIDReq) (any, error) {
 		if err := svc.AIDeleteSession(req.ID); err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return gin.H{"ok": true}, nil
 	})
@@ -117,7 +117,7 @@ func handleAIDeleteSession(svc *service.Service) gin.HandlerFunc {
 func handleAIResetSession(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req AISessionIDReq) (any, error) {
 		if err := svc.AIResetSession(req.ID); err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return gin.H{"ok": true}, nil
 	})
@@ -192,7 +192,7 @@ func handleAIChat(svc *service.Service) gin.HandlerFunc {
 		}
 		content, usage, schemaVerified, err := svc.AIChat(c.Request.Context(), req.SessionID, action, req.Text, req.MsgID)
 		if err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return gin.H{"content": content, "usage": usage, "schemaVerified": schemaVerified}, nil
 	})

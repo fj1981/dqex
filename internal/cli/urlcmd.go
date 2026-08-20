@@ -25,13 +25,13 @@ var urlCmd = &cobra.Command{
 		}
 		info, ok := svc.Persist().LoadWebAccess()
 		if !ok {
-			return fmt.Errorf("未找到 Web 访问凭证，请先启动 Web 服务（直接运行 dbx）")
+			return textErr(nil, cliTextsFor(cliLang()).errNoWebCred)
 		}
 		tokenOnly, _ := cmd.Flags().GetBool("token-only")
 		expireAt := time.UnixMilli(info.IssuedAt).Add(24 * time.Hour)
 		if tokenOnly {
 			if info.Token == "" {
-				return fmt.Errorf("当前凭证无 token（上次以 --no-auth 启动）")
+				return textErr(nil, cliTextsFor(cliLang()).errNoToken)
 			}
 			fmt.Println(info.Token)
 			return nil

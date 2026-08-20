@@ -101,7 +101,7 @@ type dictDBInfo struct {
 //     斑马纹按表分区重置，主键列高亮
 func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc) (*ExportResult, error) {
 	if opts.Source == nil {
-		return nil, fmt.Errorf("未提供源数据库连接")
+		return nil, NewMsgErr(errDictNoSrc)
 	}
 	txt := dictTextsFor(opts.Lang) // 产物文案语言（发起时确定，历史产物不回改）
 	t := newTracker(cb, opts.Lang)
@@ -113,7 +113,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 		outputDir = filepath.Join(home, ".dbimpex", "exports")
 	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return nil, fmt.Errorf("创建输出目录失败: %w", err)
+		return nil, NewMsgErrf(errDictOutDir, err)
 	}
 
 	taskName := sanitizeName(opts.TaskName)
@@ -123,14 +123,14 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 	ts := time.Now().Format("20060102_150405")
 	baseDir := filepath.Join(outputDir, fmt.Sprintf("%s_%s", taskName, ts))
 	if err := os.MkdirAll(baseDir, 0o755); err != nil {
-		return nil, fmt.Errorf("创建导出目录失败: %w", err)
+		return nil, NewMsgErrf(errDictExpDir, err)
 	}
 
 	// 1. 确定库列表（未选库时明确报错，对齐 compare 的交互）
 	databases := opts.Databases
 	if len(databases) == 0 {
 		if opts.Source.DBName == "" {
-			return nil, fmt.Errorf("请先选择要生成数据字典的数据库（连接配置或 databases 参数至少提供一个）")
+			return nil, NewMsgErr(errDictNoDB)
 		}
 		databases = []string{opts.Source.DBName}
 	}
@@ -144,7 +144,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 	var plan []dbTables
 	for _, db := range databases {
 		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("任务已取消")
+			return nil, NewMsgErr(errCancelled)
 		}
 		cli, err := ConnectDB(*opts.Source, db)
 		if err != nil {
@@ -156,7 +156,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 		}
 		cli.Close()
 		if err != nil {
-			return nil, fmt.Errorf("获取库 %s 的表列表失败: %w", db, err)
+			return nil, NewMsgErrf(errDictListTables, err, db)
 		}
 		tables := filterTables(all, opts.Tables, db)
 		if len(tables) == 0 {
@@ -167,7 +167,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 		plan = append(plan, dbTables{db: db, tables: tables})
 	}
 	if len(plan) == 0 {
-		return nil, fmt.Errorf("所选库中没有可生成数据字典的表")
+		return nil, NewMsgErr(errDictNoTables)
 	}
 
 	totalTables := 0
@@ -188,7 +188,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 		for _, tb := range p.tables {
 			if err := ctx.Err(); err != nil {
 				cli.Close()
-				return nil, fmt.Errorf("任务已取消")
+				return nil, NewMsgErr(errCancelled)
 			}
 			t.p.CurrentTable = p.db + "." + tb
 			t.emit(true)
@@ -220,7 +220,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 
 	xlsxPath := filepath.Join(baseDir, fmt.Sprintf("%s_%s.xlsx", taskName, ts))
 	if err := f.SaveAs(xlsxPath); err != nil {
-		return nil, fmt.Errorf("写入数据字典文件失败: %w", err)
+		return nil, NewMsgErrf(errDictWrite, err)
 	}
 
 	// 5. 打包 zip（可选，OutputPath 语义与导出一致）
@@ -229,7 +229,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 		zipPath := filepath.Join(outputDir, fmt.Sprintf("%s_%s.zip", taskName, ts))
 		t.log(engineTextsFor(t.lang).zipPack, zipPath)
 		if err := zipDir(baseDir, zipPath); err != nil {
-			return nil, fmt.Errorf("打包 zip 失败: %w", err)
+			return nil, NewMsgErrf(errDictZipPack, err)
 		}
 		_ = os.RemoveAll(baseDir)
 		result.OutputPath = zipPath
@@ -359,7 +359,7 @@ func newDictStyles(f *excelize.File) (*dictStyles, error) {
 func buildDictionaryWorkbook(f *excelize.File, infos []*dictDBInfo, taskName, srcLabel string, txt dictTexts, t *tracker) error {
 	st, err := newDictStyles(f)
 	if err != nil {
-		return fmt.Errorf("创建 Excel 样式失败: %w", err)
+		return NewMsgErrf(errDictExcelStyle, err)
 	}
 
 	// 默认 Sheet1 重命名为总览（保持其为第一个 sheet），明细 sheet 依次追加
@@ -375,11 +375,11 @@ func buildDictionaryWorkbook(f *excelize.File, infos []*dictDBInfo, taskName, sr
 	for _, dbi := range infos {
 		sheet := dictSheetName(dbi.name, usedSheets)
 		if _, err := f.NewSheet(sheet); err != nil {
-			return fmt.Errorf("创建工作表 %s 失败: %w", sheet, err)
+			return NewMsgErrf(errDictSheet, err, sheet)
 		}
 		names, err := writeDictDetailSheet(f, st, sheet, dbi, usedNames, txt)
 		if err != nil {
-			return fmt.Errorf("生成库 %s 的明细工作表失败: %w", dbi.name, err)
+			return NewMsgErrf(errDictSheetDetail, err, dbi.name)
 		}
 		for tb, name := range names {
 			definedNames[dbi.name+"\x00"+tb] = name
@@ -421,7 +421,7 @@ func writeDictDetailSheet(f *excelize.File, st *dictStyles, sheet string, dbi *d
 	for _, tb := range dbi.tables {
 		// 超大规模防护：提前检查 Excel 行数上限，避免生成到一半失败
 		if row+1+len(tb.cols) > dictMaxSheetRows {
-			return nil, fmt.Errorf("库 %s 的表/字段数量超过 Excel 单表行数上限（%d），请拆分后按库分别生成", dbi.name, dictMaxSheetRows)
+			return nil, NewMsgErr(errDictRowLimit, dbi.name, dictMaxSheetRows)
 		}
 
 		// ---- 分组标题行（合并单元格：表名 + 注释 + 列数）----

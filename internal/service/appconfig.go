@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -105,7 +106,7 @@ func FindConfigFile(explicit string) string {
 // LoadAppConfig 加载全局配置；path 为空返回默认配置（首次初始化：兼容排序规则默认开启），
 // 文件不存在或解析失败报错。
 // 加载完成后会对 AI 数字字段填充默认值（0 视为未设置），保证运行时与展示均使用有效值。
-func LoadAppConfig(path string) (*AppConfig, error) {
+func LoadAppConfig(ctx context.Context, path string) (*AppConfig, error) {
 	cfg := &AppConfig{}
 	if strings.TrimSpace(path) == "" {
 		// 首次初始化：无配置文件，兼容排序规则默认开启
@@ -113,12 +114,13 @@ func LoadAppConfig(path string) (*AppConfig, error) {
 		cfg.AI.normalize()
 		return cfg, nil
 	}
+	txt := svcTextsFor(langFrom(ctx))
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, cygin.WrapError(err, cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("failed to read global config: %s", path))
+		return nil, cygin.WrapError(err, cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(txt.errCfgRead, path))
 	}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, cygin.WrapError(err, cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("failed to parse global config: %s", path))
+		return nil, cygin.WrapError(err, cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(txt.errCfgParse, path))
 	}
 	cfg.AI.normalize()
 	return cfg, nil
@@ -225,19 +227,20 @@ func tildifyHome(p string) string {
 // SaveConfig 将修改后的全局配置写回 config.yaml。
 // 目录项中，data 根目录固定（已打开的 SQLite 位置不变）；其余目录保存后立即热生效。
 // 访问白名单由 handleSaveConfig 额外刷新过滤器。
-func (s *Service) SaveConfig(cfg AppConfig) error {
+func (s *Service) SaveConfig(ctx context.Context, cfg AppConfig) error {
+	txt := svcTextsFor(langFrom(ctx))
 	path := s.configFile
 	if strings.TrimSpace(path) == "" {
 		// 未发现配置文件：写入默认位置 ~/.dbimpex/config.yaml
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetailf("cannot locate user home directory: %v", err))
+			return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(txt.errCfgHome))
 		}
 		path = filepath.Join(home, ".dbimpex", DefaultConfigName)
 	}
 	// 确保目录存在
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetailf("failed to create config directory: %v", err))
+		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(txt.errCfgMkdir))
 	}
 	if cfg.Web.Allow == nil {
 		cfg.Web.Allow = []string{}
@@ -251,10 +254,10 @@ func (s *Service) SaveConfig(cfg AppConfig) error {
 	cfg.AI.normalize()
 	data, err := yaml.Marshal(&cfg)
 	if err != nil {
-		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetailf("failed to serialize global config: %v", err))
+		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(txt.errCfgSerialize))
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetailf("failed to write global config: %v", err))
+		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(txt.errCfgWrite))
 	}
 	// 更新内存中的配置（读取接口立即返回最新值）
 	s.cfg = &cfg
@@ -263,7 +266,7 @@ func (s *Service) SaveConfig(cfg AppConfig) error {
 	// 热更新非 data 目录（data 根目录保持当前运行时 SQLite 所在位置不变）
 	dirs := resolveSubDirs(s.persist.BaseDir(), &cfg)
 	if err := s.persist.UpdateDirs(dirs); err != nil {
-		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetailf("failed to hot-reload directories: %v", err))
+		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(txt.errCfgHotReload))
 	}
 	return nil
 }
@@ -333,7 +336,7 @@ func browseRoot() string {
 
 // BrowseDirs 列出 path 下的子目录，供设置页目录选择器使用。
 // 浏览范围限制在用户主目录内：path 为空、不存在或超出范围时回退到主目录。
-func (s *Service) BrowseDirs(path string) (DirBrowseResult, error) {
+func (s *Service) BrowseDirs(ctx context.Context, path string) (DirBrowseResult, error) {
 	root := browseRoot()
 	path = strings.TrimSpace(path)
 	dir := path
@@ -351,7 +354,7 @@ func (s *Service) BrowseDirs(path string) (DirBrowseResult, error) {
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return DirBrowseResult{}, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetailf("failed to read directory: %s", dir))
+		return DirBrowseResult{}, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetailf(svcTextsFor(langFrom(ctx)).errDirRead, dir))
 	}
 	dirs := make([]DirEntry, 0, len(entries))
 	for _, e := range entries {

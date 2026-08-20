@@ -304,7 +304,8 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 		cygin.WithEmbeddedFiles("/", webui.DistFS, "dist"),
 	}
 	// 始终挂载访问控制中间件：空规则放行，配置保存后热更新（无需重启）
-	middlewares := []gin.HandlerFunc{securityHeaders(), accessControl(filter)}
+	// langCtx 将请求语言注入 ctx，service 同步方法在真实出错点按语言渲染 details
+	middlewares := []gin.HandlerFunc{langCtx(), securityHeaders(), accessControl(filter)}
 	if len(filter.rules) > 0 {
 		cylog.Infof("访问来源白名单已启用: %d 条规则（本机回环始终放行，保存配置后热更新）", len(filter.rules))
 	}

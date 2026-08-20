@@ -2,6 +2,7 @@ package cli
 
 // 点导入：CLI 层大量复用 service 包的模型别名与入口（NewService/选项模型/错误码）
 import (
+	"context"
 	. "dbimpex/internal/service"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"dbimpex/internal/cli/sqlcmd"
+	"dbimpex/internal/engine"
 	"dbimpex/internal/llm"
 
 	"github.com/spf13/cobra"
@@ -108,12 +110,18 @@ func Execute() *WebArgs {
 	return webArgs
 }
 
-// cliErrMsg 提取可读错误信息：*cygin.Error 输出当前语言消息；
-// details 为中文补充详情（服务端日志口径），仅 zh 下拼接展示，en 下避免中文泄漏。
+// cliErrMsg 提取可读错误信息：engine.MsgError / service.SvcError 按当前语言渲染（双语核心业务错误）；
+// *cygin.Error 输出当前语言消息；details 已按当前语言渲染（参数校验/存储/任务链路均双语），zh/en 均拼接展示。
 func cliErrMsg(err error) string {
+	if me := engine.AsMsgErr(err); me != nil {
+		return me.Msg(cliLang())
+	}
+	if se := AsSvcErr(err); se != nil {
+		return se.Msg(cliLang())
+	}
 	if e, ok := err.(*cygin.Error); ok {
 		msg := e.Msg(cliLang())
-		if len(e.Details) > 0 && cliLang() == "zh" {
+		if len(e.Details) > 0 {
 			return sprintf("%s (%s)", msg, strings.Join(e.Details, "; "))
 		}
 		return msg
@@ -123,7 +131,7 @@ func cliErrMsg(err error) string {
 
 // newCliService 解析全局配置（--data-dir/--config-file/DBIMPEX_CONFIG/~/.dbimpex/config.yaml）后构建 Service
 func newCliService() (*Service, error) {
-	svc, err := NewServiceWith(webArgs.DataDir, webArgs.ConfigFile)
+	svc, err := NewServiceWith(WithLang(context.Background(), cliLang()), webArgs.DataDir, webArgs.ConfigFile)
 	if err != nil {
 		return nil, err
 	}
@@ -210,13 +218,18 @@ type connFlags struct {
 
 func registerConnFlags(cmd *cobra.Command, prefix string, cf *connFlags) {
 	f := cmd.Flags()
-	f.StringVar(&cf.typ, prefix+"-type", "", prefix+" 数据库类型(mysql/postgresql/oracle)")
-	f.StringVar(&cf.host, prefix+"-host", "", prefix+" 主机")
-	f.IntVar(&cf.port, prefix+"-port", 0, prefix+" 端口")
-	f.StringVar(&cf.un, prefix+"-un", "", prefix+" 用户名")
-	f.StringVar(&cf.pw, prefix+"-pw", "", prefix+" 密码")
-	f.StringVar(&cf.db, prefix+"-db", "", prefix+" 数据库名")
-	f.StringVar(&cf.subtype, prefix+"-subtype", "", prefix+" 数据库产品（兼容库，如 oceanbase/gaussdb/dameng，留空=原生）")
+	// 前缀非空时插入分隔符（source-type），空前缀直接用 type 等名（--type 而非 ---type）
+	sep := ""
+	if prefix != "" {
+		sep = "-"
+	}
+	f.StringVar(&cf.typ, prefix+sep+"type", "", prefix+" 数据库类型(mysql/postgresql/oracle)")
+	f.StringVar(&cf.host, prefix+sep+"host", "", prefix+" 主机")
+	f.IntVar(&cf.port, prefix+sep+"port", 0, prefix+" 端口")
+	f.StringVar(&cf.un, prefix+sep+"un", "", prefix+" 用户名")
+	f.StringVar(&cf.pw, prefix+sep+"pw", "", prefix+" 密码")
+	f.StringVar(&cf.db, prefix+sep+"db", "", prefix+" 数据库名")
+	f.StringVar(&cf.subtype, prefix+sep+"subtype", "", prefix+" 数据库产品（兼容库，如 oceanbase/gaussdb/dameng，留空=原生）")
 }
 
 // registerConnAliases mysqldump 风格连接 flag 别名（绑定同一变量，便于 DBA 肌肉记忆）；
@@ -274,7 +287,7 @@ func (cf *connFlags) toConn() *DBConnInfo {
 func overrideConnDB(svc *Service, key, dbName string) (*DBConnInfo, error) {
 	rec, ok := svc.Persist().GetConn(key)
 	if !ok {
-		return nil, cygin.NewError(ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("未找到连接: %s", key))
+		return nil, cygin.NewError(ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errConnNotFound, key))
 	}
 	conn := rec.Conn
 	if dbName != "" {

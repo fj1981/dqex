@@ -48,7 +48,7 @@ func GetTableTree(conn DBConnInfo) ([]DBTables, error) {
 	case "oracle":
 		return oracleTableTree(conn)
 	default:
-		return nil, fmt.Errorf("不支持的数据库类型: %s", conn.Type)
+		return nil, NewMsgErr(errMetaType, conn.Type)
 	}
 }
 
@@ -62,7 +62,7 @@ func mysqlTableTree(conn DBConnInfo) ([]DBTables, error) {
 	if conn.DBName != "" {
 		tables, err := cli.GetTables(conn.DBName, nil, nil)
 		if err != nil {
-			return nil, fmt.Errorf("获取库 %s 的表列表失败: %w", conn.DBName, err)
+			return nil, NewMsgErrf(errMetaListTables, err, conn.DBName)
 		}
 		d := DBTables{Name: conn.DBName, Tables: excludeViews(cli, conn.DBName, "", tables)}
 		attachObjects(cli, conn.DBName, "", &d)
@@ -71,7 +71,7 @@ func mysqlTableTree(conn DBConnInfo) ([]DBTables, error) {
 
 	rows, err := cli.DirectQuery("SHOW DATABASES")
 	if err != nil {
-		return nil, fmt.Errorf("获取数据库列表失败: %w", err)
+		return nil, NewMsgErrf(errMetaListDBs, err)
 	}
 	tree := make([]DBTables, 0, len(rows))
 	for _, r := range rows {
@@ -105,7 +105,7 @@ func postgresTableTree(conn DBConnInfo) ([]DBTables, error) {
 	if conn.DBName != "" {
 		tables, err := cli.GetTables(conn.DBName, nil, nil)
 		if err != nil {
-			return nil, fmt.Errorf("获取库 %s 的表列表失败: %w", conn.DBName, err)
+			return nil, NewMsgErrf(errMetaListTables, err, conn.DBName)
 		}
 		d := DBTables{Name: conn.DBName, Tables: excludeViews(cli, conn.DBName, conn.Schema, tables)}
 		attachObjects(cli, conn.DBName, conn.Schema, &d)
@@ -114,7 +114,7 @@ func postgresTableTree(conn DBConnInfo) ([]DBTables, error) {
 
 	rows, err := cli.DirectQuery("SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname")
 	if err != nil {
-		return nil, fmt.Errorf("获取数据库列表失败: %w", err)
+		return nil, NewMsgErrf(errMetaListDBs, err)
 	}
 	tree := make([]DBTables, 0, len(rows))
 	for _, r := range rows {
@@ -152,7 +152,7 @@ func oracleTableTree(conn DBConnInfo) ([]DBTables, error) {
 	if schema != "" {
 		tables, err := cli.GetTables("", &schema, nil)
 		if err != nil {
-			return nil, fmt.Errorf("获取 schema %s 的表列表失败: %w", schema, err)
+			return nil, NewMsgErrf(errMetaListSchemas, err, schema)
 		}
 		d := DBTables{Name: strings.ToUpper(schema), Tables: excludeViews(cli, schema, "", tables)}
 		attachObjects(cli, schema, "", &d)
@@ -161,7 +161,7 @@ func oracleTableTree(conn DBConnInfo) ([]DBTables, error) {
 
 	rows, err := cli.DirectQuery("SELECT username FROM all_users ORDER BY username")
 	if err != nil {
-		return nil, fmt.Errorf("获取 schema 列表失败: %w", err)
+		return nil, NewMsgErrf(errMetaSchemaList, err)
 	}
 	tree := make([]DBTables, 0, len(rows))
 	for _, r := range rows {
@@ -254,10 +254,10 @@ func GetTableMeta(conn DBConnInfo, tableName string) (TableMeta, error) {
 	}
 	info, err := cli.GetTableInfo(tableName)
 	if err != nil {
-		return TableMeta{}, fmt.Errorf("获取表 %s 的元数据失败: %w", tableName, err)
+		return TableMeta{}, NewMsgErrf(errMetaTableInfo, err, tableName)
 	}
 	if info == nil {
-		return TableMeta{}, fmt.Errorf("获取表 %s 的元数据失败: 返回空结构", tableName)
+		return TableMeta{}, NewMsgErr(errMetaTableEmpty, tableName)
 	}
 	cols := info.GetColumns()
 	result := make([]TableColumnInfo, 0, len(cols))

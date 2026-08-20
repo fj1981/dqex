@@ -53,7 +53,7 @@ func (s *session) switchDB(newDB string) error {
 	s.connInfo.DBName = newDB
 	cliDB, err := engine.Connect(s.connInfo)
 	if err != nil {
-		return fmt.Errorf("切换数据库失败: %w", err)
+		return textErr(err, cliTextsFor(cliLang).errSwitchDB)
 	}
 	s.cli = cliDB
 	s.currentDB = newDB
@@ -278,14 +278,14 @@ func (s *session) renderResult(r *queryResult, forceVertical bool) {
 // saveDisplayMode 将当前显示模式写回 config.yaml（cli.display_mode），下次启动作为默认生效。
 func (s *session) saveDisplayMode() {
 	txt := cliTextsFor(cliLang)
-	svc, err := newAIService("", "")
+	svc, err := newAIService(langCtx(), "", "")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, dim(sprintf(txt.displayModeSaveFail, err.Error())))
 		return
 	}
 	cfg := *svc.Config()
 	cfg.CLI.DisplayMode = s.displayMode
-	if err := svc.SaveConfig(cfg); err != nil {
+	if err := svc.SaveConfig(langCtx(), cfg); err != nil {
 		fmt.Fprintln(os.Stderr, dim(sprintf(txt.displayModeSaveFail, err.Error())))
 	}
 }

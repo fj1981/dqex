@@ -140,7 +140,7 @@ var taskRunCmd = &cobra.Command{
 			}
 			return err
 		}
-		return cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("未知任务类型: %s", task.Type))
+		return cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errTaskType, task.Type))
 	},
 }
 
@@ -152,7 +152,7 @@ var taskSaveCmd = &cobra.Command{
 		name, _ := f.GetString("name")
 		configPath, _ := f.GetString("config")
 		if name == "" || configPath == "" {
-			return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少 --name 或 --config"))
+			return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoNameConfig))
 		}
 		data, err := readConfigFile(configPath)
 		if err != nil {

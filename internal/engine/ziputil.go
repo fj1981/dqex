@@ -2,7 +2,6 @@ package engine
 
 import (
 	"archive/zip"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -59,7 +58,7 @@ func unzip(zipPath, destDir string) error {
 		target := filepath.Join(destDir, filepath.FromSlash(f.Name))
 		// 防 zip-slip
 		if !strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) {
-			return fmt.Errorf("非法的 zip 路径: %s", f.Name)
+			return NewMsgErr(errZipPath, f.Name)
 		}
 		if f.FileInfo().IsDir() {
 			_ = os.MkdirAll(target, 0o755)

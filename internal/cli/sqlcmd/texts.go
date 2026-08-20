@@ -1,7 +1,11 @@
 package sqlcmd
 
 import (
+	"context"
+
 	"dbimpex/internal/llm"
+	"dbimpex/internal/service"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -12,7 +16,20 @@ func printf(format string, args ...any)               { fmt.Printf(format, args.
 func fprintf(w io.Writer, format string, args ...any) { fmt.Fprintf(w, format, args...) }
 func sprintf(format string, args ...any) string       { return fmt.Sprintf(format, args...) }
 
-// ---- CLI 输出语言（元命令/帮助/状态类高频文本；核心业务错误沿用中文） ----
+// textErr 按当前语言渲染注册表文案并构造错误：args[0] 为文案模板，args[1:] 为模板参数；
+// cause 非 nil 时保留错误链（等价 fmt.Errorf("模板: %w", cause)）。
+// 签名避开 go vet 的 printf wrapper 识别（无 string+...any 模式），规避 go1.24+
+// 对「非常量格式串为最后参数」的检查（golang/go#71485）；调用方须保证 args[0] 为字符串模板。
+func textErr(cause error, args ...any) error {
+	tpl, _ := args[0].(string)
+	msg := sprintf(tpl, args[1:]...)
+	if cause == nil {
+		return errors.New(msg)
+	}
+	return fmt.Errorf("%s: %w", msg, cause)
+}
+
+// ---- CLI 输出语言（元命令/帮助/状态类高频文本；核心业务错误见下方 textErr + err* 注册） ----
 
 // cliLang 当前 CLI 输出语言（由父命令 --lang / 环境变量 DBX_LANG 注入，默认 zh）。
 // 语言代码走 llm.NormLang 归一与回退，与 AI/字典注册表一致，可扩展。
@@ -21,6 +38,11 @@ var cliLang = "zh"
 // SetLang 设置 CLI 输出语言（父命令 --lang / DBX_LANG 入口，归一化存储）。
 func SetLang(lang string) {
 	cliLang = llm.NormLang(lang)
+}
+
+// langCtx 返回注入 CLI 语言的 context（供 service 同步方法按语言渲染错误 details）
+func langCtx() context.Context {
+	return service.WithLang(context.Background(), cliLang)
 }
 
 // cliTexts SQL 终端高频输出文案（按语言索引，新增语言只加 map 条目）。
@@ -157,6 +179,23 @@ type cliTexts struct {
 	toolProgressListTables string // 正在查询表列表
 	toolProgressGetSchema  string // 正在查询表结构
 	toolRunning            string //   ⟳ %s (%s)...
+
+	// 核心业务错误（按语言渲染）
+	errInitSvc         string // 初始化服务失败
+	errAINotConfigured string // AI 功能未配置：请先在 config.yaml 或 Web 设置中填写 ai.base_url / ai.api_key / ai.model
+	errSchemaFail      string // 获取表结构失败
+	errNoTargetDB      string // 未找到可用数据库
+	errNoTableInTree   string // 目标库 %s 未在表树中找到
+	errToolListDBs     string // 构建工具 list_databases 失败
+	errToolListTables  string // 构建工具 list_tables 失败
+	errToolGetSchema   string // 构建工具 get_schema 失败
+	errReadFile        string // 读取文件失败
+	errConnNotFound    string // 未找到连接: %s
+	errQueryFail       string // 查询失败
+	errExecFail        string // 执行失败
+	errConnDB          string // 连接数据库失败
+	errNeedTTY         string // 交互模式需要终端环境，请使用 -e 执行 SQL 或 --json 输出
+	errSwitchDB        string // 切换数据库失败
 }
 
 // cliTextsMap 语言注册表：缺失语言回退 zh。
@@ -297,6 +336,21 @@ var cliTextsMap = map[string]cliTexts{
 		toolProgressListTables: "正在查询表列表",
 		toolProgressGetSchema:  "正在查询表结构",
 		toolRunning:            "  ⟳ %s (%s)...",
+		errInitSvc:             "初始化服务失败",
+		errAINotConfigured:     "AI 功能未配置：请先在 config.yaml 或 Web 设置中填写 ai.base_url / ai.api_key / ai.model",
+		errSchemaFail:          "获取表结构失败",
+		errNoTargetDB:          "未找到可用数据库",
+		errNoTableInTree:       "目标库 %s 未在表树中找到",
+		errToolListDBs:         "构建工具 list_databases 失败",
+		errToolListTables:      "构建工具 list_tables 失败",
+		errToolGetSchema:       "构建工具 get_schema 失败",
+		errReadFile:            "读取文件失败",
+		errConnNotFound:        "未找到连接: %s",
+		errQueryFail:           "查询失败",
+		errExecFail:            "执行失败",
+		errConnDB:              "连接数据库失败",
+		errNeedTTY:             "交互模式需要终端环境，请使用 -e 执行 SQL 或 --json 输出",
+		errSwitchDB:            "切换数据库失败",
 	},
 	"en": {
 		bannerTitle:          "dbx sql - interactive SQL terminal",
@@ -434,6 +488,21 @@ Tools (list_databases / list_tables / get_schema) are called automatically to qu
 		toolProgressListTables: "querying tables",
 		toolProgressGetSchema:  "querying table structure",
 		toolRunning:            "  ⟳ %s (%s)...",
+		errInitSvc:             "failed to initialize service",
+		errAINotConfigured:     "AI is not configured: fill in ai.base_url / ai.api_key / ai.model in config.yaml or Web settings",
+		errSchemaFail:          "failed to fetch table structure",
+		errNoTargetDB:          "no available database found",
+		errNoTableInTree:       "target database %s not found in the table tree",
+		errToolListDBs:         "failed to build tool list_databases",
+		errToolListTables:      "failed to build tool list_tables",
+		errToolGetSchema:       "failed to build tool get_schema",
+		errReadFile:            "failed to read file",
+		errConnNotFound:        "connection not found: %s",
+		errQueryFail:           "query failed",
+		errExecFail:            "execution failed",
+		errConnDB:              "failed to connect to database",
+		errNeedTTY:             "interactive mode requires a terminal; use -e to run SQL or --json output",
+		errSwitchDB:            "failed to switch database",
 	},
 }
 

@@ -30,13 +30,13 @@ func backupTable(cli *cydb.DBCli, table string, t *tracker) error {
 	bak := backupTableName(table)
 	// 清理上一次遗留的备份表
 	if err := dropTableIfExists(cli, bak); err != nil {
-		return fmt.Errorf("清理旧备份表失败: %w", err)
+		return NewMsgErrf(errRstCleanBak, err)
 	}
 	escaped := EscapeTable(cli.DBType(), cli.DBSubType(), table)
 	escapedBak := EscapeTable(cli.DBType(), cli.DBSubType(), bak)
 	sql := fmt.Sprintf("CREATE TABLE %s AS SELECT * FROM %s", escapedBak, escaped)
 	if _, err := cli.DirectExecute(sql); err != nil {
-		return fmt.Errorf("创建备份表失败: %w", err)
+		return NewMsgErrf(errRstCreateBak, err)
 	}
 	t.log(engineTextsFor(t.lang).rstBackup, bak)
 	return nil
@@ -69,12 +69,12 @@ func resetTable(cli *cydb.DBCli, table string, mode ResetMode, backup bool, t *t
 	case ResetTruncate:
 		escaped := EscapeTable(cli.DBType(), cli.DBSubType(), table)
 		if _, err := cli.DirectExecute(fmt.Sprintf("TRUNCATE TABLE %s", escaped)); err != nil {
-			return backup, fmt.Errorf("清空表 %s 失败: %w", table, err)
+			return backup, NewMsgErrf(errRstTrunc, err, table)
 		}
 		t.log(engineTextsFor(t.lang).rstTrunc, table)
 	case ResetDrop:
 		if err := dropTableIfExists(cli, table); err != nil {
-			return backup, fmt.Errorf("删除表 %s 失败: %w", table, err)
+			return backup, NewMsgErrf(errRstDrop, err, table)
 		}
 		t.log(engineTextsFor(t.lang).rstDrop, table)
 	}

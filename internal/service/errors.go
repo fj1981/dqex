@@ -69,7 +69,8 @@ func init() {
 // 保证 WithErrPrint 打印的日志定位到真实出错文件行号）：
 //
 //	cygin.NewError(code, cygin.WithErrPrint(), cygin.WithErrDetailf(...))
-//	cygin.WrapError(err, code, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+//	cygin.WrapError(err, code, cygin.WithErrPrint())
 //
+// WrapError 会自动把 err 的消息拼入 details，无需再传 WithErrDetails(err.Error())。
 // 返回的 *cygin.Error 在 Web 模式由 cygin.Handle 统一以 {code, msg, success:false} 响应，
 // CLI 模式直接输出。

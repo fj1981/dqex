@@ -35,9 +35,9 @@ type SaveConnReq struct {
 
 func handleCreateConn(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req SaveConnReq) (any, error) {
-		rec, err := svc.AddConnection(service.ConnRecord{ID: req.ID, Name: req.Name, ShortName: req.ShortName, Env: req.Env, Conn: req.Conn})
+		rec, err := svc.AddConnection(c.Request.Context(), service.ConnRecord{ID: req.ID, Name: req.Name, ShortName: req.ShortName, Env: req.Env, Conn: req.Conn})
 		if err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return gin.H{"id": rec.ID, "name": rec.Name, "shortName": rec.ShortName}, nil
 	})
@@ -72,12 +72,12 @@ func handleTestConn(svc *service.Service) gin.HandlerFunc {
 		if conn.Type == "" && req.ID != "" {
 			saved, ok := svc.Persist().GetConn(req.ID)
 			if !ok {
-				return nil, cygin.NewError(service.ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("connection not found: %s", req.ID))
+				return nil, cygin.NewError(service.ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf(webTextsFor(cygin.FromCtx(c)).errConnNotFound, req.ID))
 			}
 			conn = saved.Conn
 		}
-		if err := svc.TestConnection(conn); err != nil {
-			return gin.H{"ok": false}, err
+		if err := svc.TestConnection(c.Request.Context(), conn); err != nil {
+			return gin.H{"ok": false}, renderErr(c, err)
 		}
 		return gin.H{"ok": true}, nil
 	})
@@ -91,9 +91,9 @@ type GetTablesReq struct {
 
 func handleGetTables(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req GetTablesReq) (any, error) {
-		tree, err := svc.GetTableTree(req.ID, req.DB)
+		tree, err := svc.GetTableTree(c.Request.Context(), req.ID, req.DB)
 		if err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return gin.H{"databases": tree}, nil
 	})
@@ -108,9 +108,9 @@ type GetTableColumnsReq struct {
 
 func handleGetTableColumns(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req GetTableColumnsReq) (any, error) {
-		cols, err := svc.GetTableColumns(req.ID, req.DB, req.Table)
+		cols, err := svc.GetTableColumns(c.Request.Context(), req.ID, req.DB, req.Table)
 		if err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return gin.H{"columns": cols}, nil
 	})
@@ -136,7 +136,7 @@ func handleExport(svc *service.Service) gin.HandlerFunc {
 		}
 		taskID, err := svc.StartExport(opts, req.TaskConfigID)
 		if err != nil {
-			return StartResp{}, err
+			return StartResp{}, renderErr(c, err)
 		}
 		return StartResp{TaskID: taskID}, nil
 	})
@@ -162,7 +162,7 @@ func handleDictionary(svc *service.Service) gin.HandlerFunc {
 		}
 		taskID, err := svc.StartDictionary(opts, req.TaskConfigID)
 		if err != nil {
-			return StartResp{}, err
+			return StartResp{}, renderErr(c, err)
 		}
 		return StartResp{TaskID: taskID}, nil
 	})
@@ -188,7 +188,7 @@ func handleImport(svc *service.Service) gin.HandlerFunc {
 		}
 		taskID, err := svc.StartImport(opts, req.TaskConfigID)
 		if err != nil {
-			return StartResp{}, err
+			return StartResp{}, renderErr(c, err)
 		}
 		return StartResp{TaskID: taskID}, nil
 	})
@@ -209,10 +209,10 @@ func handleImportUpload(svc *service.Service) gin.HandlerFunc {
 		ext := filepath.Ext(lower)
 		// .sql / .zip / .sql.gz（gzip 压缩的 SQL）
 		if ext != ".sql" && ext != ".zip" && !(ext == ".gz" && strings.HasSuffix(lower, ".sql.gz")) {
-			return nil, cygin.NewError(service.ErrFileType, cygin.WithErrPrint(), cygin.WithErrDetailf("only .sql / .sql.gz / .zip files are supported: %s", name))
+			return nil, cygin.NewError(service.ErrFileType, cygin.WithErrPrint(), cygin.WithErrDetailf(webTextsFor(cygin.FromCtx(c)).errFileTypeOnly, name))
 		}
 		if req.File.Size > maxUploadSize {
-			return nil, cygin.NewError(service.ErrFileType, cygin.WithErrPrint(), cygin.WithErrDetailf("file exceeds the 2GB upload size limit: %s", name))
+			return nil, cygin.NewError(service.ErrFileType, cygin.WithErrPrint(), cygin.WithErrDetailf(webTextsFor(cygin.FromCtx(c)).errFileTooLarge, name))
 		}
 		dir := svc.Persist().UploadDir()
 		saveExt := ext
@@ -221,7 +221,7 @@ func handleImportUpload(svc *service.Service) gin.HandlerFunc {
 		}
 		saveTo := filepath.Join(dir, fmt.Sprintf("%d%s", nowMillis(), saveExt))
 		if err := c.SaveUploadedFile(req.File, saveTo); err != nil {
-			return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetailf("failed to save uploaded file: %v", err))
+			return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(webTextsFor(cygin.FromCtx(c)).errSaveUploadFail))
 		}
 		// 同时返回原始文件名 name，供前端展示（隐藏服务器存储路径）
 		info, err := engine.InspectImportFile(saveTo)
@@ -263,7 +263,7 @@ func handleMigrate(svc *service.Service) gin.HandlerFunc {
 		}
 		taskID, err := svc.StartMigrate(opts, req.TaskConfigID)
 		if err != nil {
-			return StartResp{}, err
+			return StartResp{}, renderErr(c, err)
 		}
 		return StartResp{TaskID: taskID}, nil
 	})
@@ -283,7 +283,7 @@ func handleCompare(svc *service.Service) gin.HandlerFunc {
 		opts.Lang = cygin.FromCtx(c) // 任务日志语言跟随请求语言（缺省回退 zh）
 		taskID, err := svc.StartCompare(opts, req.TaskConfigID)
 		if err != nil {
-			return StartResp{}, err
+			return StartResp{}, renderErr(c, err)
 		}
 		return StartResp{TaskID: taskID}, nil
 	})
@@ -316,7 +316,7 @@ func handleListTasks(svc *service.Service) gin.HandlerFunc {
 func handleSaveTask(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req service.TaskConfig) (any, error) {
 		if err := svc.SaveTask(&req); err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return req, nil
 	})
@@ -336,10 +336,10 @@ func handleGetTask(svc *service.Service) gin.HandlerFunc {
 func handleUpdateTask(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req service.TaskConfig) (any, error) {
 		if req.ID == "" {
-			return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("missing task ID"))
+			return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(webTextsFor(cygin.FromCtx(c)).errMissingTaskID))
 		}
 		if err := svc.SaveTask(&req); err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return req, nil
 	})
@@ -375,7 +375,7 @@ func handleRunTask(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req RunTaskReq) (StartResp, error) {
 		taskID, err := svc.RunTaskByID(req.ID)
 		if err != nil {
-			return StartResp{}, err
+			return StartResp{}, renderErr(c, err)
 		}
 		return StartResp{TaskID: taskID}, nil
 	})
@@ -423,7 +423,7 @@ func handleCreateSnapshot(svc *service.Service) gin.HandlerFunc {
 		ctx := context.Background()
 		snapshot, err := svc.CreateSnapshot(ctx, req.ConnID, req.DBNames, req.Name, req.Description, req.IncludeSamples, req.SampleLimit, cygin.FromCtx(c), nil)
 		if err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return gin.H{"id": snapshot.ID, "name": snapshot.Name}, nil
 	})
@@ -464,7 +464,7 @@ func handleSnapshotCompare(svc *service.Service) gin.HandlerFunc {
 		opts.Lang = cygin.FromCtx(c) // 任务日志语言跟随请求语言（缺省回退 zh）
 		taskID, err := svc.StartSnapshotCompare(opts, req.TaskConfigID)
 		if err != nil {
-			return StartResp{}, err
+			return StartResp{}, renderErr(c, err)
 		}
 		return StartResp{TaskID: taskID}, nil
 	})
@@ -520,8 +520,8 @@ func handleGetConfig(svc *service.Service) gin.HandlerFunc {
 // 白名单类配置热生效：保存后立即刷新访问过滤器，无需重启服务。
 func handleSaveConfig(svc *service.Service, filter *accessFilter) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req service.AppConfig) (any, error) {
-		if err := svc.SaveConfig(req); err != nil {
-			return nil, err
+		if err := svc.SaveConfig(c.Request.Context(), req); err != nil {
+			return nil, renderErr(c, err)
 		}
 		filter.Set(req.Web.Allow)
 		cylog.Infof("访问来源白名单已热更新: %d 条规则", len(req.Web.Allow))
@@ -537,6 +537,6 @@ type BrowseDirsReq struct {
 // handleBrowseDirs 浏览本机目录（仅目录、限制在用户主目录内），供设置页目录选择器使用。
 func handleBrowseDirs(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req BrowseDirsReq) (service.DirBrowseResult, error) {
-		return svc.BrowseDirs(req.Path)
+		return svc.BrowseDirs(c.Request.Context(), req.Path)
 	})
 }

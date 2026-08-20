@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -61,7 +60,7 @@ func (s *Service) UpdateTableCell(ctx context.Context, connKey, dbName string, p
 		cli, err = engine.Connect(*conn)
 	}
 	if err != nil {
-		return 0, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return 0, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	defer cli.Close()
 
@@ -90,7 +89,7 @@ func (s *Service) GetCellValue(ctx context.Context, connKey, dbName, table, colu
 		cli, err = engine.Connect(*conn)
 	}
 	if err != nil {
-		return nil, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return nil, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	defer cli.Close()
 
@@ -111,7 +110,7 @@ func (s *Service) DeleteTableRows(ctx context.Context, connKey, dbName, table st
 		cli, err = engine.Connect(*conn)
 	}
 	if err != nil {
-		return 0, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return 0, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	defer cli.Close()
 
@@ -144,7 +143,7 @@ func (s *Service) InsertTableRow(ctx context.Context, connKey, dbName string, p 
 		cli, err = engine.Connect(*conn)
 	}
 	if err != nil {
-		return 0, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return 0, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	defer cli.Close()
 
@@ -172,7 +171,7 @@ func (s *Service) GenerateSQL(ctx context.Context, connKey, dbName string, p eng
 		cli, err = engine.Connect(*conn)
 	}
 	if err != nil {
-		return "", cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return "", cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	defer cli.Close()
 
@@ -199,7 +198,7 @@ func (s *Service) QueryTablePage(ctx context.Context, connKey, dbName, table str
 		cli, err = engine.Connect(*conn)
 	}
 	if err != nil {
-		return nil, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return nil, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	defer cli.Close()
 
@@ -220,7 +219,7 @@ func (s *Service) ExportTableExcel(ctx context.Context, connKey, dbName, table s
 		cli, err = engine.Connect(*conn)
 	}
 	if err != nil {
-		return nil, 0, false, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return nil, 0, false, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	defer cli.Close()
 
@@ -243,7 +242,7 @@ func (s *Service) RunSQLScript(ctx context.Context, connKey, dbName, sql string,
 		cli, err = engine.Connect(*conn)
 	}
 	if err != nil {
-		return nil, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return nil, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	defer cli.Close()
 
@@ -363,12 +362,12 @@ func (s *Service) PingConnection(ctx context.Context, connKey string) (int64, er
 	}
 	cli, err := engine.Connect(*conn)
 	if err != nil {
-		return 0, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return 0, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	defer cli.Close()
 	elapsed, err := engine.Ping(ctx, cli)
 	if err != nil {
-		return 0, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return 0, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	return elapsed, nil
 }
@@ -382,7 +381,7 @@ type ObjectDDLResult struct {
 
 // GetObjectDDL 获取指定对象（表/视图/函数/存储过程）的创建语句。
 // dbName 覆盖连接默认库（Oracle 下即 schema）；连接复用短生命周期、调用方无需关心。
-func (s *Service) GetObjectDDL(connKey, dbName, objType, name string) (*ObjectDDLResult, error) {
+func (s *Service) GetObjectDDL(ctx context.Context, connKey, dbName, objType, name string) (*ObjectDDLResult, error) {
 	conn, err := s.resolveConn(connKey, nil)
 	if err != nil {
 		return nil, err
@@ -392,13 +391,13 @@ func (s *Service) GetObjectDDL(connKey, dbName, objType, name string) (*ObjectDD
 	}
 	cli, err := engine.Connect(*conn)
 	if err != nil {
-		return nil, cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return nil, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	defer cli.Close()
 
 	ddl, err := engine.GetObjectDDL(cli, engine.ObjectDDLType(objType), name)
 	if err != nil {
-		return nil, cygin.WrapError(err, ErrExecFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return nil, cygin.NewError(ErrExecFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	return &ObjectDDLResult{Type: objType, Name: name, DDL: ddl}, nil
 }
@@ -418,13 +417,13 @@ func (s *Service) ClearSQLHistory(connID string) {
 // AddFavorite 新增一条收藏。校验 SQL 非空、长度合理，标题缺省时取首行。
 func (s *Service) AddFavorite(f *SQLFavorite) error {
 	if f == nil || f.ConnID == "" {
-		return errors.New("connId 必填")
+		return newSvcErr(cygin.ErrParamsInvalid, svcFavConnID)
 	}
 	if strings.TrimSpace(f.SQL) == "" {
-		return errors.New("SQL 不可为空")
+		return newSvcErr(cygin.ErrParamsInvalid, svcFavSQLEmpty)
 	}
 	if len(f.SQL) > 64*1024 {
-		return errors.New("SQL 过长（≤64KB）")
+		return newSvcErr(cygin.ErrParamsInvalid, svcFavSQLTooLong)
 	}
 	if f.Title == "" {
 		f.Title = defaultFavoriteTitle(f.SQL)
@@ -446,7 +445,7 @@ func (s *Service) ListFavorites() []*SQLFavorite {
 // DeleteFavorite 删除收藏（按全局唯一 id 定位）
 func (s *Service) DeleteFavorite(id string) error {
 	if id == "" {
-		return errors.New("id 必填")
+		return newSvcErr(cygin.ErrParamsInvalid, svcFavIDEmpty)
 	}
 	return s.persist.DeleteFavorite(id)
 }
@@ -454,11 +453,11 @@ func (s *Service) DeleteFavorite(id string) error {
 // RenameFavorite 重命名收藏（按全局唯一 id 定位）
 func (s *Service) RenameFavorite(id, title string) error {
 	if id == "" {
-		return errors.New("id 必填")
+		return newSvcErr(cygin.ErrParamsInvalid, svcFavIDEmpty)
 	}
 	title = strings.TrimSpace(title)
 	if title == "" {
-		return errors.New("标题不可为空")
+		return newSvcErr(cygin.ErrParamsInvalid, svcFavTitleEmpty)
 	}
 	if len(title) > 256 {
 		title = title[:256]

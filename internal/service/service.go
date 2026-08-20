@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,13 +32,14 @@ type Service struct {
 
 // NewService 创建业务服务（自动发现全局配置 config.yaml）
 func NewService(dataDirFlag string) (*Service, error) {
-	return NewServiceWith(dataDirFlag, "")
+	return NewServiceWith(context.Background(), dataDirFlag, "")
 }
 
-// NewServiceWith 创建业务服务：configFile 显式指定全局配置，空则按默认顺序发现
-func NewServiceWith(dataDirFlag, configFile string) (*Service, error) {
+// NewServiceWith 创建业务服务：configFile 显式指定全局配置，空则按默认顺序发现；
+// ctx 携带请求语言（cli 注入 WithLang），配置加载错误的 details 按语言渲染。
+func NewServiceWith(ctx context.Context, dataDirFlag, configFile string) (*Service, error) {
 	resolvedPath := FindConfigFile(configFile)
-	cfg, err := LoadAppConfig(resolvedPath)
+	cfg, err := LoadAppConfig(ctx, resolvedPath)
 	if err != nil {
 		return nil, err
 	}
@@ -101,33 +103,34 @@ func validShortName(s string) bool {
 }
 
 // AddConnection 保存连接配置：rec.ID 非空为按主键更新，否则新建（生成 xid）
-func (s *Service) AddConnection(rec ConnRecord) (ConnRecord, error) {
+func (s *Service) AddConnection(ctx context.Context, rec ConnRecord) (ConnRecord, error) {
+	txt := svcTextsFor(langFrom(ctx))
 	rec.Name = strings.TrimSpace(rec.Name)
 	if !validName(rec.Name) {
-		return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("connection name cannot be empty or contain spaces/control characters"))
+		return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(txt.errConnNameEmpty))
 	}
 	rec.ShortName = strings.TrimSpace(rec.ShortName)
 	if rec.ShortName != "" {
 		if !validShortName(rec.ShortName) {
-			return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("short name: only letters, digits, hyphens and underscores, 1-32 chars"))
+			return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(txt.errConnShortName))
 		}
 		// 短名唯一性校验：新建或更新时不能与其他连接重复
 		conns := s.persist.LoadConns()
 		for _, existing := range conns {
 			if existing.ShortName == rec.ShortName && existing.ID != rec.ID {
-				return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("short name already exists: %s", rec.ShortName))
+				return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(txt.errConnShortNameDup, rec.ShortName))
 			}
 		}
 	}
 	if rec.Conn.Type == "" {
-		return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("database type cannot be empty"))
+		return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(txt.errConnTypeEmpty))
 	}
 	if _, ok := SupportedDBTypes[rec.Conn.Type]; !ok {
-		return rec, cygin.NewError(ErrUnsupportedType, cygin.WithErrPrint(), cygin.WithErrDetailf("unsupported database type: %s", rec.Conn.Type))
+		return rec, cygin.NewError(ErrUnsupportedType, cygin.WithErrPrint(), cygin.WithErrDetailf(txt.errConnTypeUnsupported, rec.Conn.Type))
 	}
 	saved, err := s.persist.SaveConn(rec)
 	if err != nil {
-		return rec, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return rec, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
 	}
 	return saved, nil
 }
@@ -151,7 +154,7 @@ func (s *Service) DeleteConnection(key string) error {
 		connID = rec.ID
 	}
 	if err := s.persist.DeleteConn(key); err != nil {
-		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
 	}
 	// 级联清理该连接的 AI 会话与工作区（连接删除后其对话/布局一并失效）
 	_ = s.persist.DeleteAISessionsByConn(connID)
@@ -160,10 +163,10 @@ func (s *Service) DeleteConnection(key string) error {
 }
 
 // TestConnection 测试连接可用性
-func (s *Service) TestConnection(conn DBConnInfo) error {
+func (s *Service) TestConnection(ctx context.Context, conn DBConnInfo) error {
 	cli, err := engine.Connect(conn)
 	if err != nil {
-		return cygin.WrapError(err, ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	defer cli.Close()
 	return nil
@@ -171,7 +174,7 @@ func (s *Service) TestConnection(conn DBConnInfo) error {
 
 // GetTableTree 获取指定连接（可覆盖库名）的 库→表 树形结构；
 // 连接未配置库时遍历所有库（Oracle 遍历 schema）
-func (s *Service) GetTableTree(connKey, dbName string) ([]engine.DBTables, error) {
+func (s *Service) GetTableTree(ctx context.Context, connKey, dbName string) ([]engine.DBTables, error) {
 	conn, err := s.resolveConn(connKey, nil)
 	if err != nil {
 		return nil, err
@@ -181,13 +184,13 @@ func (s *Service) GetTableTree(connKey, dbName string) ([]engine.DBTables, error
 	}
 	tree, err := engine.GetTableTree(*conn)
 	if err != nil {
-		return nil, cygin.WrapError(err, ErrExecFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return nil, cygin.NewError(ErrExecFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	return tree, nil
 }
 
 // GetTableColumns 获取指定连接/库下某表的列信息（名称/类型/可空/主键/默认值）
-func (s *Service) GetTableColumns(connKey, dbName, tableName string) ([]engine.TableColumnInfo, error) {
+func (s *Service) GetTableColumns(ctx context.Context, connKey, dbName, tableName string) ([]engine.TableColumnInfo, error) {
 	conn, err := s.resolveConn(connKey, nil)
 	if err != nil {
 		return nil, err
@@ -197,7 +200,7 @@ func (s *Service) GetTableColumns(connKey, dbName, tableName string) ([]engine.T
 	}
 	cols, err := engine.GetTableColumns(*conn, tableName)
 	if err != nil {
-		return nil, cygin.WrapError(err, ErrExecFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return nil, cygin.NewError(ErrExecFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	return cols, nil
 }
@@ -393,8 +396,8 @@ func newTaskRunner() *TaskRunner {
 	return &TaskRunner{running: map[string]*runningTask{}}
 }
 
-// Start 注册并启动一个异步任务
-func (r *TaskRunner) Start(taskID, taskType string, run func(ctx context.Context, publish ProgressFunc) error) {
+// Start 注册并启动一个异步任务；lang 为任务语言（错误终态消息按其渲染）
+func (r *TaskRunner) Start(taskID, taskType, lang string, run func(ctx context.Context, publish ProgressFunc) error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	rt := &runningTask{
 		cancel:   cancel,
@@ -431,9 +434,9 @@ func (r *TaskRunner) Start(taskID, taskType string, run func(ctx context.Context
 			final := t.latest
 			final.TaskID = taskID
 			if err != nil {
-				if ctx.Err() != nil || strings.Contains(err.Error(), "任务已取消") {
+				if ctx.Err() != nil || isCancelled(err) {
 					final.State = "cancelled"
-					final.Message = "任务已取消"
+					final.Message = engine.CancelledMsg(lang)
 				} else {
 					final.State = "error"
 					final.Message = err.Error()
@@ -525,10 +528,13 @@ func (s *Service) StartExport(opts ExportOptions, taskConfigID string) (string, 
 		Target: fmt.Sprintf("%s · %s", s.connLabel(opts.SourceConn, opts.Source), targetTables(opts.Databases, opts.Tables))}
 	_ = s.persist.SaveHistory(record)
 
-	s.runner.Start(taskID, "export", func(ctx context.Context, publish ProgressFunc) error {
+	s.runner.Start(taskID, "export", opts.Lang, func(ctx context.Context, publish ProgressFunc) error {
 		var last ProgressInfo
 		wrapped := func(p ProgressInfo) { last = p; publish(p) }
 		outputPath, err := s.RunExport(ctx, opts, wrapped)
+		if err != nil {
+			err = renderErrFor(err, opts.Lang) // 按任务语言渲染 engine.MsgError
+		}
 		s.finishRecord(ctx, &record, err, last, func(r *ExecutionRecord) {
 			r.TotalUnits = last.TotalUnits
 			r.TotalRows = last.DoneRows
@@ -556,10 +562,13 @@ func (s *Service) StartDictionary(opts DictionaryOptions, taskConfigID string) (
 		Target: fmt.Sprintf("%s · %s", s.connLabel(opts.SourceConn, opts.Source), targetTables(opts.Databases, opts.Tables))}
 	_ = s.persist.SaveHistory(record)
 
-	s.runner.Start(taskID, "dictionary", func(ctx context.Context, publish ProgressFunc) error {
+	s.runner.Start(taskID, "dictionary", opts.Lang, func(ctx context.Context, publish ProgressFunc) error {
 		var last ProgressInfo
 		wrapped := func(p ProgressInfo) { last = p; publish(p) }
 		outputPath, err := s.RunDictionary(ctx, opts, wrapped)
+		if err != nil {
+			err = renderErrFor(err, opts.Lang) // 按任务语言渲染 engine.MsgError
+		}
 		s.finishRecord(ctx, &record, err, last, func(r *ExecutionRecord) {
 			r.TotalUnits = last.TotalUnits
 			dbCount := len(opts.Databases)
@@ -591,10 +600,13 @@ func (s *Service) StartImport(opts ImportOptions, taskConfigID string) (string, 
 		Target: fmt.Sprintf("%s · %s", s.connLabel(opts.TargetConn, opts.Target), filepath.Base(opts.InputPath))}
 	_ = s.persist.SaveHistory(record)
 
-	s.runner.Start(taskID, "import", func(ctx context.Context, publish ProgressFunc) error {
+	s.runner.Start(taskID, "import", opts.Lang, func(ctx context.Context, publish ProgressFunc) error {
 		var last ProgressInfo
 		wrapped := func(p ProgressInfo) { last = p; publish(p) }
 		err := s.RunImport(ctx, opts, wrapped)
+		if err != nil {
+			err = renderErrFor(err, opts.Lang) // 按任务语言渲染 engine.MsgError
+		}
 		s.finishRecord(ctx, &record, err, last, func(r *ExecutionRecord) {
 			r.TotalUnits = last.TotalUnits
 			r.TotalRows = last.DoneRows
@@ -618,10 +630,13 @@ func (s *Service) StartMigrate(opts MigrateOptions, taskConfigID string) (string
 		Target: fmt.Sprintf("%s → %s · %s", s.connLabel(opts.SourceConn, opts.Source), s.connLabel(opts.TargetConn, opts.Target), targetTables(nil, opts.Tables))}
 	_ = s.persist.SaveHistory(record)
 
-	s.runner.Start(taskID, "migrate", func(ctx context.Context, publish ProgressFunc) error {
+	s.runner.Start(taskID, "migrate", opts.Lang, func(ctx context.Context, publish ProgressFunc) error {
 		var last ProgressInfo
 		wrapped := func(p ProgressInfo) { last = p; publish(p) }
 		err := s.RunMigrate(ctx, opts, wrapped)
+		if err != nil {
+			err = renderErrFor(err, opts.Lang) // 按任务语言渲染 engine.MsgError
+		}
 		s.finishRecord(ctx, &record, err, last, func(r *ExecutionRecord) {
 			r.TotalUnits = last.TotalUnits
 			r.TotalRows = last.DoneRows
@@ -654,10 +669,13 @@ func (s *Service) StartCompare(opts CompareOptions, taskConfigID string) (string
 		Target: fmt.Sprintf("%s → %s · %s", s.connLabel(opts.SourceConn, src), s.connLabel(opts.TargetConn, target), targetTables(nil, opts.Tables))}
 	_ = s.persist.SaveHistory(record)
 
-	s.runner.Start(taskID, "compare", func(ctx context.Context, publish ProgressFunc) error {
+	s.runner.Start(taskID, "compare", opts.Lang, func(ctx context.Context, publish ProgressFunc) error {
 		var last ProgressInfo
 		wrapped := func(p ProgressInfo) { last = p; publish(p) }
 		result, err := s.RunCompare(ctx, opts, wrapped)
+		if err != nil {
+			err = renderErrFor(err, opts.Lang) // 按任务语言渲染 engine.MsgError
+		}
 		s.finishRecord(ctx, &record, err, last, func(r *ExecutionRecord) {
 			r.TotalUnits = last.TotalUnits
 			r.TotalRows = last.DoneRows
@@ -706,7 +724,7 @@ func (s *Service) GetCompareResult(taskID string) (*CompareResult, error) {
 	}
 	var result CompareResult
 	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
 	}
 	return &result, nil
 }
@@ -721,13 +739,27 @@ func (s *Service) CancelTask(taskID string) error {
 	return s.runner.Cancel(taskID)
 }
 
+// renderErrFor 将 engine.MsgError 按任务/请求语言渲染为纯文本错误（供历史记录/SSE 展示）；
+// 其他错误类型原样透传（cygin.Error 继续由 Web 层按注册码处理）。
+func renderErrFor(err error, lang string) error {
+	if me := engine.AsMsgErr(err); me != nil {
+		return errors.New(me.Msg(lang))
+	}
+	return err
+}
+
+// isCancelled 判断任务错误是否为取消（engine 取消错误，类型化判断不依赖文案）
+func isCancelled(err error) bool {
+	return engine.IsCancelled(err)
+}
+
 // finishRecord 落盘终态记录：last 为最后一次进度快照，统一持久化完成单元数与日志快照（供终态回放与实时展示一致）；
 // ctx 已取消时一律记为 cancelled，不依赖错误文案匹配（驱动层报错文案不可控）
 func (s *Service) finishRecord(ctx context.Context, record *ExecutionRecord, err error, last ProgressInfo, fill func(*ExecutionRecord)) {
 	record.FinishedAt = time.Now().UnixMilli()
 	record.Duration = record.FinishedAt - record.StartedAt
 	if err != nil {
-		if ctx.Err() != nil || strings.Contains(err.Error(), "任务已取消") {
+		if ctx.Err() != nil || isCancelled(err) {
 			record.Status = "cancelled"
 		} else {
 			record.Status = "error"
@@ -772,10 +804,10 @@ func (s *Service) SaveTask(task *TaskConfig) error {
 	}
 	task.UpdatedAt = now
 	if err := s.persist.SaveTask(*task); err != nil {
-		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
 	}
 	if err := s.persist.MarkLastUsed(task.ID, task.Type); err != nil {
-		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
 	}
 	return nil
 }
@@ -807,7 +839,7 @@ func (s *Service) GetTask(id string) (TaskConfig, error) {
 // DeleteTask 删除任务配置
 func (s *Service) DeleteTask(id string) error {
 	if err := s.persist.DeleteTask(id); err != nil {
-		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
 	}
 	return nil
 }

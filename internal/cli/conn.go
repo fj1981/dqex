@@ -2,6 +2,7 @@ package cli
 
 // 点导入：CLI 层大量复用 service 包的模型别名与入口（NewService/选项模型/错误码）
 import (
+	"context"
 	. "dbimpex/internal/service"
 	"fmt"
 	"strings"
@@ -86,7 +87,7 @@ var connAddCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		conn := connAddFlags.toConn()
 		if conn == nil {
-			return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少 --type（mysql/postgresql/oracle）"))
+			return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoConnType))
 		}
 		name, _ := cmd.Flags().GetString("name")
 		shortName, _ := cmd.Flags().GetString("short-name")
@@ -96,7 +97,7 @@ var connAddCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		saved, err := svc.AddConnection(ConnRecord{ID: id, Name: name, ShortName: shortName, Env: env, Conn: *conn})
+		saved, err := svc.AddConnection(WithLang(context.Background(), cliLang()), ConnRecord{ID: id, Name: name, ShortName: shortName, Env: env, Conn: *conn})
 		if err != nil {
 			return err
 		}
@@ -120,11 +121,11 @@ var connTestCmd = &cobra.Command{
 		}
 		rec, ok := svc.Persist().GetConn(key)
 		if !ok {
-			return cygin.NewError(ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("未找到连接: %s", key))
+			return cygin.NewError(ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errConnNotFound, key))
 		}
 		txt := cliTextsFor(cliLang())
 		printf(txt.connTesting, rec.Name)
-		if err := svc.TestConnection(rec.Conn); err != nil {
+		if err := svc.TestConnection(WithLang(context.Background(), cliLang()), rec.Conn); err != nil {
 			fmt.Println(txt.connFail)
 			return err
 		}

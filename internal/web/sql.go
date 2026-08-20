@@ -30,7 +30,7 @@ func handleSQLRun(svc *service.Service) gin.HandlerFunc {
 		}
 		results, err := svc.RunSQLScript(c.Request.Context(), req.ConnID, req.DB, req.SQL, req.Limit, req.Offset, mode)
 		if err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		if req.Mask {
 			for _, r := range results {
@@ -84,7 +84,7 @@ func handleUpdateCell(svc *service.Service) gin.HandlerFunc {
 			PKValues:  req.PKValues,
 		})
 		if err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return map[string]any{"affectedRows": affected}, nil
 	})
@@ -104,7 +104,7 @@ func handleDeleteRows(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req DeleteRowsReq) (map[string]any, error) {
 		affected, err := svc.DeleteTableRows(c.Request.Context(), req.ConnID, req.DB, req.Table, req.PKColumns, req.Rows)
 		if err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return map[string]any{"affectedRows": affected}, nil
 	})
@@ -128,7 +128,7 @@ func handleInsertRow(svc *service.Service) gin.HandlerFunc {
 			Values:  req.Values,
 		})
 		if err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return map[string]any{"affectedRows": affected}, nil
 	})
@@ -150,7 +150,7 @@ func handleCellValue(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req CellValueReq) (map[string]any, error) {
 		val, err := svc.GetCellValue(c.Request.Context(), req.ConnID, req.DB, req.Table, req.Column, req.PKColumns, req.PKValues)
 		if err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return map[string]any{"value": val}, nil
 	})
@@ -210,7 +210,7 @@ func handleAddFavorite(svc *service.Service) gin.HandlerFunc {
 			SQL:    req.SQL,
 		}
 		if err := svc.AddFavorite(f); err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return gin.H{"ok": true, "id": f.ID}, nil
 	})
@@ -223,7 +223,7 @@ func handleDeleteFavorite(svc *service.Service) gin.HandlerFunc {
 			return nil, cygin.NewError(cygin.ErrParamsInvalid)
 		}
 		if err := svc.DeleteFavorite(id); err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return gin.H{"ok": true}, nil
 	})
@@ -232,7 +232,7 @@ func handleDeleteFavorite(svc *service.Service) gin.HandlerFunc {
 func handleRenameFavorite(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req FavoriteRenameReq) (any, error) {
 		if err := svc.RenameFavorite(req.ID, req.Title); err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return gin.H{"ok": true}, nil
 	})
@@ -286,7 +286,7 @@ func handleSQLGen(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req SQLGenReq) (map[string]string, error) {
 		sql, err := svc.GenerateSQL(c.Request.Context(), req.ConnID, req.DB, req.GenSQLParams)
 		if err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return map[string]string{"sql": sql}, nil
 	})
@@ -302,7 +302,7 @@ type SQLDDLReq struct {
 
 func handleSQLDDL(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req SQLDDLReq) (*service.ObjectDDLResult, error) {
-		return svc.GetObjectDDL(req.ConnID, req.DB, req.Type, req.Name)
+		return svc.GetObjectDDL(c.Request.Context(), req.ConnID, req.DB, req.Type, req.Name)
 	})
 }
 
@@ -334,7 +334,7 @@ func handleSaveWorkspace(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req WorkspaceSaveReq) (map[string]any, error) {
 		state := service.WorkspaceState{Tabs: req.Tabs, ActiveID: req.ActiveID}
 		if err := svc.SaveWorkspace(req.ConnID, state); err != nil {
-			return nil, err
+			return nil, renderErr(c, err)
 		}
 		return map[string]any{"ok": true}, nil
 	})

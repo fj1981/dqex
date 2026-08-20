@@ -2,6 +2,7 @@ package cli
 
 // 点导入：CLI 层大量复用 service 包的模型别名与入口（NewService/选项模型/错误码）
 import (
+	"context"
 	. "dbimpex/internal/service"
 	"fmt"
 	"os"
@@ -28,7 +29,7 @@ var configCmd = &cobra.Command{
 			return nil
 		}
 		cfgPath := FindConfigFile(webArgs.ConfigFile)
-		cfg, err := LoadAppConfig(cfgPath)
+		cfg, err := LoadAppConfig(WithLang(context.Background(), cliLang()), cfgPath)
 		if err != nil {
 			return err
 		}

@@ -5,7 +5,6 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -78,7 +77,7 @@ func openSQLFile(path string) (io.ReadCloser, error) {
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		f.Close()
-		return nil, fmt.Errorf("解压 gzip 失败: %w", err)
+		return nil, NewMsgErrf(errImpGzip, err)
 	}
 	return &gzReadCloser{gz: gz, f: f}, nil
 }
@@ -89,7 +88,7 @@ func InspectImportFile(path string) (*ImportFileInfo, error) {
 	st, err := os.Stat(path)
 	if err != nil {
 		// 不向外暴露服务器文件路径
-		return nil, fmt.Errorf("导入文件不存在或无法读取")
+		return nil, NewMsgErr(errImpNoFile)
 	}
 	ext := strings.ToLower(filepath.Ext(path))
 	info := &ImportFileInfo{Size: st.Size()}
@@ -109,7 +108,7 @@ func InspectImportFile(path string) (*ImportFileInfo, error) {
 		info.Type = "zip"
 		r, err := zip.OpenReader(path)
 		if err != nil {
-			return nil, fmt.Errorf("打开 zip 失败: %w", err)
+			return nil, NewMsgErrf(errImpZip, err)
 		}
 		defer r.Close()
 		dbSet := map[string]bool{}
@@ -145,7 +144,7 @@ func InspectImportFile(path string) (*ImportFileInfo, error) {
 		}
 		sort.Strings(info.Databases)
 	} else {
-		return nil, fmt.Errorf("不支持的文件格式: %s（仅支持 .sql / .sql.gz / .zip）", filepath.Ext(path))
+		return nil, NewMsgErr(errImpFormat, filepath.Ext(path))
 	}
 	return info, nil
 }
@@ -180,10 +179,10 @@ func readDescFromZip(f *zip.File) (*ExportDesc, error) {
 // RunImport 执行导入：支持 .sql 单文件与 .zip 包（每个 库名.sql 即一个库的完整导出）
 func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*ImportResult, error) {
 	if opts.Target == nil {
-		return nil, fmt.Errorf("未提供目标数据库连接")
+		return nil, NewMsgErr(errImpNoTgt)
 	}
 	if opts.InputPath == "" {
-		return nil, fmt.Errorf("未指定导入文件")
+		return nil, NewMsgErr(errImpNoInput)
 	}
 	t := newTracker(cb, opts.Lang)
 
@@ -193,7 +192,7 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 
 	if dbName, ok := sqlBaseName(filepath.Base(opts.InputPath)); ok {
 		if opts.Target.DBName == "" {
-			return nil, fmt.Errorf("连接配置未指定目标库，无法导入单文件")
+			return nil, NewMsgErr(errImpNoTgtDB)
 		}
 		files = []importFile{{db: opts.Target.DBName, name: dbName, path: opts.InputPath}}
 	} else if ext == ".zip" {
@@ -204,18 +203,18 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 		}
 		defer os.RemoveAll(tempDir)
 		if err := unzip(opts.InputPath, tempDir); err != nil {
-			return nil, fmt.Errorf("解压 zip 失败: %w", err)
+			return nil, NewMsgErrf(errImpZip, err)
 		}
 		files, err = planZipImport(tempDir, opts.Target)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		return nil, fmt.Errorf("不支持的文件格式: %s（仅支持 .sql / .sql.gz / .zip）", filepath.Ext(opts.InputPath))
+		return nil, NewMsgErr(errImpFormat, filepath.Ext(opts.InputPath))
 	}
 
 	if len(files) == 0 {
-		return nil, fmt.Errorf("导入文件中没有可导入的 SQL")
+		return nil, NewMsgErr(errImpNoSQL)
 	}
 
 	// 进度单元：按方言预切分统计 SQL 块总数（块内含建表/数据/对象语句，粒度远细于库级）；
@@ -241,11 +240,11 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 	var totalStmts int64
 	for _, f := range files {
 		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("任务已取消")
+			return nil, NewMsgErr(errCancelled)
 		}
 		// 导入前确保目标库存在（不存在则自动创建）
 		if err := EnsureDBExists(*opts.Target, f.db); err != nil {
-			return nil, fmt.Errorf("确保目标库 %s 存在失败: %w", f.db, err)
+			return nil, NewMsgErrf(errImpEnsureDB, err, f.db)
 		}
 		cli, err := ConnectDB(*opts.Target, f.db)
 		if err != nil {
@@ -258,7 +257,7 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 		stmts, err := importSQLFile(ctx, cli, f.path, t, blockUnits, opts.Target.CompatCollation)
 		if err != nil {
 			cli.Close()
-			return nil, fmt.Errorf("导入库 %s 失败: %w", f.db, err)
+			return nil, NewMsgErrf(errImpDB, err, f.db)
 		}
 		totalStmts += stmts
 		if !blockUnits {
@@ -334,7 +333,7 @@ func blockObjectName(content string) string {
 func countSQLBlocks(conn DBConnInfo, path string) (int, error) {
 	sqlFunc, ok := dialect.GetSqlDialect(conn.Type, conn.SubType)
 	if !ok {
-		return 0, fmt.Errorf("不支持的方言: %s", conn.Type)
+		return 0, NewMsgErr(errImpDialect, conn.Type)
 	}
 	f, err := openSQLFile(path)
 	if err != nil {
@@ -362,7 +361,7 @@ func importSQLFile(ctx context.Context, cli *cydb.DBCli, path string, t *tracker
 	var count int64
 	err = cli.ReadSQLFile(f, func(stmt *dialect.SQLBlock) error {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("任务已取消")
+			return NewMsgErr(errCancelled)
 		}
 		content := strings.TrimSpace(stmt.Content)
 		if content == "" {
@@ -373,7 +372,7 @@ func importSQLFile(ctx context.Context, cli *cydb.DBCli, path string, t *tracker
 			content = compatCollationSQL(content)
 		}
 		if _, err := cli.DirectExecute(content); err != nil {
-			return fmt.Errorf("执行 SQL 失败(第 %d 块): %w", stmt.Index, err)
+			return NewMsgErrf(errImpExec, err, stmt.Index)
 		}
 		count++
 		t.p.DoneRows = count

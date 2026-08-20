@@ -85,7 +85,7 @@ func cliMigrate(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if task.MigrateOpts == nil {
-			return cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("任务配置 %s 不是迁移任务", v))
+			return cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errTaskNotMig, v))
 		}
 		opts = *task.MigrateOpts
 	}
@@ -136,10 +136,10 @@ func cliMigrate(cmd *cobra.Command, args []string) error {
 		opts.BatchSize, _ = f.GetInt("batch-size")
 	}
 	if opts.Source == nil && opts.SourceConn == "" {
-		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少源连接：配置 source/source_ref 段或 --source-*/--source-conn"))
+		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoSrcConn))
 	}
 	if opts.Target == nil && opts.TargetConn == "" {
-		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少目标连接：配置 target/target_ref 段或 --target-*/--target-conn"))
+		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoTgtConn))
 	}
 	if opts.ResetMode != ResetNone && !opts.Backup {
 		fmt.Println(yellow(cliTextsFor(cliLang()).warnReset))

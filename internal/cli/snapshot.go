@@ -310,7 +310,7 @@ func cliSnapshotCompare(cmd *cobra.Command, args []string) error {
 	if snapCompareOutput != "" {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		if err := os.WriteFile(snapCompareOutput, data, 0o644); err != nil {
-			return fmt.Errorf("保存对比报告失败: %w", err)
+			return textErr(err, cliTextsFor(cliLang()).errSaveReport)
 		}
 		printf("\n对比报告已保存: %s\n", snapCompareOutput)
 	}

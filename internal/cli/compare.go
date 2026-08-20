@@ -146,7 +146,7 @@ func cliCompare(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if err := os.WriteFile(output, data, 0o644); err != nil {
-			return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
+			return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
 		}
 		printf(cliTextsFor(cliLang()).savedCompare+"\n", output)
 	}
@@ -185,7 +185,7 @@ func buildCompareOpts(cmd *cobra.Command, cfg *compareConfig) (CompareOptions, s
 		for _, item := range items {
 			parts := strings.SplitN(item, "=", 2)
 			if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
-				return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("别名格式应为 源表=目标表: %s", item))
+				return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errAliasFmt, item))
 			}
 			opts.Aliases = append(opts.Aliases, TableAlias{Source: strings.TrimSpace(parts[0]), Target: strings.TrimSpace(parts[1])})
 		}
@@ -208,14 +208,14 @@ func buildCompareOpts(cmd *cobra.Command, cfg *compareConfig) (CompareOptions, s
 		case "data":
 			opts.DataOnly = true
 		default:
-			return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("无效的对比范围: %s（可选 both/structure/data）", scope))
+			return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errCmpScope, scope))
 		}
 	}
 
 	if f.Changed("threshold") {
 		v, _ := f.GetInt("threshold")
 		if v < 0 {
-			return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("threshold 不能为负数"))
+			return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errThresholdNeg))
 		}
 		opts.Threshold = v
 	}
@@ -230,10 +230,10 @@ func buildCompareOpts(cmd *cobra.Command, cfg *compareConfig) (CompareOptions, s
 		output, _ = f.GetString("output")
 	}
 	if opts.Source == nil && opts.SourceConn == "" {
-		return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少源连接：配置 source/source_ref 段或 --source-*/--source-conn"))
+		return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoSrcConn))
 	}
 	if opts.Target == nil && opts.TargetConn == "" {
-		return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少目标连接：配置 target/target_ref 段或 --target-*/--target-conn"))
+		return opts, "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoTgtConn))
 	}
 	return opts, output, nil
 }
@@ -301,7 +301,7 @@ func cliCompareShow(cmd *cobra.Command, args []string) error {
 	f := cmd.Flags()
 	id, _ := f.GetString("id")
 	if id == "" {
-		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少 --id（对比记录 ID）"))
+		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(cliTextsFor(cliLang()).errNoCmpID))
 	}
 	svc, err := newCliService()
 	if err != nil {
@@ -314,7 +314,7 @@ func cliCompareShow(cmd *cobra.Command, args []string) error {
 	table, _ := f.GetString("table")
 	if len(args) > 0 {
 		if table != "" && table != args[0] {
-			return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("表名指定冲突：--table %s 与位置参数 %s", table, args[0]))
+			return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errTableConflict, table, args[0]))
 		}
 		table = args[0]
 	}
@@ -336,7 +336,7 @@ func cliCompareShow(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 	}
-	return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("记录 %s 中未找到表: %s", id, table))
+	return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(cliTextsFor(cliLang()).errNoTableInRec, id, table))
 }
 
 // printTableDetail 单表差异明细：列级结构对照 + 数据差异行样例

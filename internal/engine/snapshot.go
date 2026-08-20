@@ -22,7 +22,7 @@ var ErrEmptyDatabase = fmt.Errorf("empty database")
 func CreateSnapshot(ctx context.Context, conn *DBConnInfo, name, description string, opts CreateSnapshotOptions, cb ProgressFunc) (*Snapshot, error) {
 	cli, err := Connect(*conn)
 	if err != nil {
-		return nil, fmt.Errorf("连接数据库失败: %w", err)
+		return nil, NewMsgErrf(errSnapConn, err)
 	}
 	defer cli.Close()
 
@@ -31,7 +31,7 @@ func CreateSnapshot(ctx context.Context, conn *DBConnInfo, name, description str
 		dbName = conn.Schema
 	}
 	if dbName == "" {
-		return nil, fmt.Errorf("未指定数据库")
+		return nil, NewMsgErr(errSnapNoDB)
 	}
 
 	// 获取库内表列表（剔除视图）
@@ -41,11 +41,11 @@ func CreateSnapshot(ctx context.Context, conn *DBConnInfo, name, description str
 	}
 	allTables, err := cli.GetTables(dbName, schemaPtr, nil)
 	if err != nil {
-		return nil, fmt.Errorf("获取表列表失败: %w", err)
+		return nil, NewMsgErrf(errSnapListTables, err)
 	}
 	tables := excludeViews(cli, dbName, conn.Schema, allTables)
 	if len(tables) == 0 {
-		return nil, fmt.Errorf("库 %s 内没有表: %w", dbName, ErrEmptyDatabase)
+		return nil, NewMsgErrf(errSnapEmpty, ErrEmptyDatabase, dbName)
 	}
 
 	sampleLimit := opts.SampleLimit
@@ -72,7 +72,7 @@ func CreateSnapshot(ctx context.Context, conn *DBConnInfo, name, description str
 
 	for _, tbl := range tables {
 		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("任务已取消")
+			return nil, NewMsgErr(errCancelled)
 		}
 		t.p.CurrentTable = tbl
 		t.emit(true)
@@ -99,7 +99,7 @@ func CreateSnapshot(ctx context.Context, conn *DBConnInfo, name, description str
 func buildSnapshotTable(ctx context.Context, cli *cydb.DBCli, tableName string, includeSamples bool, sampleLimit int) (*SnapshotTable, error) {
 	info, err := cli.GetTableInfo(tableName)
 	if err != nil {
-		return nil, fmt.Errorf("获取表信息失败: %w", err)
+		return nil, NewMsgErrf(errSnapTableInfo, err)
 	}
 
 	cols := info.GetColumns()
@@ -150,7 +150,7 @@ func loadSampleRows(ctx context.Context, cli *cydb.DBCli, table string, limit in
 	count := 0
 	err := cli.ForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("任务已取消")
+			return NewMsgErr(errCancelled)
 		}
 		if count >= limit {
 			return fmt.Errorf("__stop__") // 达到上限后终止遍历
@@ -173,11 +173,11 @@ func loadSampleRows(ctx context.Context, cli *cydb.DBCli, table string, limit in
 func LoadSnapshot(path string) (*Snapshot, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("读取快照文件失败: %w", err)
+		return nil, NewMsgErrf(errSnapRead, err)
 	}
 	var snap Snapshot
 	if err := json.Unmarshal(data, &snap); err != nil {
-		return nil, fmt.Errorf("解析快照数据失败: %w", err)
+		return nil, NewMsgErrf(errSnapParse, err)
 	}
 	return &snap, nil
 }

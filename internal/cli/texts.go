@@ -2,6 +2,7 @@ package cli
 
 import (
 	"dbimpex/internal/llm"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -13,7 +14,7 @@ func fprintf(w io.Writer, format string, args ...any) { fmt.Fprintf(w, format, a
 func sprintf(format string, args ...any) string       { return fmt.Sprintf(format, args...) }
 
 // ---- CLI 子命令输出语言（conn/config/url/version/task/snapshot/history/compare 等状态类高频文本；
-// cobra 静态帮助见 help.go 注册表；核心业务错误沿用中文） ----
+// cobra 静态帮助见 help.go 注册表；核心业务错误见下方 textErr + err* 注册） ----
 
 // cliTexts 高频状态输出文案（按语言索引，新增语言只加 map 条目）。
 type cliTexts struct {
@@ -178,6 +179,54 @@ type cliTexts struct {
 	cmpChangedSamples string // 变化行样例（%d）
 	cmpSampleTitle    string // %s（%d）:
 	cmpSampleRow      string //      %s: 源=%v  目标=%v
+
+	// 核心业务错误（textErr 渲染）
+	errSaveReport string // 保存对比报告失败
+	errNoWebCred  string // 未找到 Web 访问凭证，请先启动 Web 服务（直接运行 dbx）
+	errNoToken    string // 当前凭证无 token（上次以 --no-auth 启动）
+
+	// 参数校验错误（cygin details 渲染，cliErrMsg 拼接展示）
+	errConnNotFound   string // 未找到连接: %s
+	errCfgRead        string // 读取配置文件失败: %s
+	errCfgParse       string // 解析配置文件失败: %s
+	errCfgNoCmp       string // 配置文件中未找到对比配置（需包含 source/target 段）: %s
+	errCfgNoExp       string // 配置文件中未找到导出配置（需包含 source 段）: %s
+	errCfgNoDict      string // 配置文件中未找到数据字典配置（需包含 source 段）: %s
+	errCfgNoImp       string // 配置文件中未找到导入配置（需包含 target 段）: %s
+	errCfgNoMig       string // 配置文件中未找到迁移配置（需包含 source/target 段）: %s
+	errResetMode      string // 无效的重置模式: %s（可选 truncate/drop）
+	errNoSrcConn      string // 缺少源连接：配置 source/source_ref 段或 --source-*/--source-conn
+	errNoTgtConn      string // 缺少目标连接：配置 target/target_ref 段或 --target-*/--target-conn
+	errCmpScope       string // 无效的对比范围: %s（可选 both/structure/data）
+	errThresholdNeg   string // threshold 不能为负数
+	errTaskNotImp     string // 任务配置 %s 不是导入任务
+	errTaskNotExp     string // 任务配置 %s 不是导出任务
+	errTaskNotDict    string // 任务配置 %s 不是数据字典任务
+	errTaskNotMig     string // 任务配置 %s 不是迁移任务
+	errNoImportFile   string // 缺少导入文件：配置 input 字段或 --input
+	errAliasFmt       string // 别名格式应为 源表=目标表: %s
+	errNoCmpID        string // 缺少 --id（对比记录 ID）
+	errTableConflict  string // 表名指定冲突：--table %s 与位置参数 %s
+	errNoTableInRec   string // 记录 %s 中未找到表: %s
+	errTaskType       string // 未知任务类型: %s
+	errNoNameConfig   string // 缺少 --name 或 --config
+	errNoConnType     string // 缺少 --type（mysql/postgresql/oracle）
+	errTaskHint       string // 无效的任务类型: %s（可选 export/import/migrate/compare/dictionary）
+	errCfgParseOnly   string // 解析配置文件失败
+	errCfgTypeUnknown string // 无法识别配置文件类型，可用 --type 指定（export/import/migrate/compare）
+}
+
+// textErr 构造双语错误：args[0] 为 cliTexts 注册文案模板，args[1:] 为模板参数；
+// cause 非空时追加 ": <cause>" 保留错误链。
+// 签名避开 go vet 的 printf wrapper 识别（无 string+...any 模式），规避 go1.24+
+// 对「非常量格式串为最后参数」的检查（golang/go#71485）；调用方须保证 args[0] 为字符串模板。
+func textErr(cause error, args ...any) error {
+	tpl, _ := args[0].(string)
+	msg := sprintf(tpl, args[1:]...)
+	if cause == nil {
+		return errors.New(msg)
+	}
+	return fmt.Errorf("%s: %w", msg, cause)
 }
 
 // cliTextsMap 语言注册表：缺失语言回退 zh。
@@ -331,6 +380,39 @@ var cliTextsMap = map[string]cliTexts{
 		cmpChangedSamples: "变化行样例（%d）",
 		cmpSampleTitle:    "%s（%d）:",
 		cmpSampleRow:      "     %s: 源=%v  目标=%v",
+
+		errSaveReport: "保存对比报告失败",
+		errNoWebCred:  "未找到 Web 访问凭证，请先启动 Web 服务（直接运行 dbx）",
+		errNoToken:    "当前凭证无 token（上次以 --no-auth 启动）",
+
+		errConnNotFound:   "未找到连接: %s",
+		errCfgRead:        "读取配置文件失败: %s",
+		errCfgParse:       "解析配置文件失败: %s",
+		errCfgNoCmp:       "配置文件中未找到对比配置（需包含 source/target 段）: %s",
+		errCfgNoExp:       "配置文件中未找到导出配置（需包含 source 段）: %s",
+		errCfgNoDict:      "配置文件中未找到数据字典配置（需包含 source 段）: %s",
+		errCfgNoImp:       "配置文件中未找到导入配置（需包含 target 段）: %s",
+		errCfgNoMig:       "配置文件中未找到迁移配置（需包含 source/target 段）: %s",
+		errResetMode:      "无效的重置模式: %s（可选 truncate/drop）",
+		errNoSrcConn:      "缺少源连接：配置 source/source_ref 段或 --source-*/--source-conn",
+		errNoTgtConn:      "缺少目标连接：配置 target/target_ref 段或 --target-*/--target-conn",
+		errCmpScope:       "无效的对比范围: %s（可选 both/structure/data）",
+		errThresholdNeg:   "threshold 不能为负数",
+		errTaskNotImp:     "任务配置 %s 不是导入任务",
+		errTaskNotExp:     "任务配置 %s 不是导出任务",
+		errTaskNotDict:    "任务配置 %s 不是数据字典任务",
+		errTaskNotMig:     "任务配置 %s 不是迁移任务",
+		errNoImportFile:   "缺少导入文件：配置 input 字段或 --input",
+		errAliasFmt:       "别名格式应为 源表=目标表: %s",
+		errNoCmpID:        "缺少 --id（对比记录 ID）",
+		errTableConflict:  "表名指定冲突：--table %s 与位置参数 %s",
+		errNoTableInRec:   "记录 %s 中未找到表: %s",
+		errTaskType:       "未知任务类型: %s",
+		errNoNameConfig:   "缺少 --name 或 --config",
+		errNoConnType:     "缺少 --type（mysql/postgresql/oracle）",
+		errTaskHint:       "无效的任务类型: %s（可选 export/import/migrate/compare/dictionary）",
+		errCfgParseOnly:   "解析配置文件失败",
+		errCfgTypeUnknown: "无法识别配置文件类型，可用 --type 指定（export/import/migrate/compare）",
 	},
 	"en": {
 		errPrefix:     "Error: %s",
@@ -481,6 +563,39 @@ var cliTextsMap = map[string]cliTexts{
 		cmpChangedSamples: "changed row samples (%d)",
 		cmpSampleTitle:    "%s (%d):",
 		cmpSampleRow:      "     %s: source=%v  target=%v",
+
+		errSaveReport: "failed to save compare report",
+		errNoWebCred:  "web access credential not found; start the web service first (run dbx directly)",
+		errNoToken:    "credential has no token (last start used --no-auth)",
+
+		errConnNotFound:   "connection not found: %s",
+		errCfgRead:        "failed to read config file: %s",
+		errCfgParse:       "failed to parse config file: %s",
+		errCfgNoCmp:       "no compare config found in config file (needs source/target sections): %s",
+		errCfgNoExp:       "no export config found in config file (needs source section): %s",
+		errCfgNoDict:      "no dictionary config found in config file (needs source section): %s",
+		errCfgNoImp:       "no import config found in config file (needs target section): %s",
+		errCfgNoMig:       "no migrate config found in config file (needs source/target sections): %s",
+		errResetMode:      "invalid reset mode: %s (truncate/drop)",
+		errNoSrcConn:      "missing source connection: configure the source/source_ref section or --source-*/--source-conn",
+		errNoTgtConn:      "missing target connection: configure the target/target_ref section or --target-*/--target-conn",
+		errCmpScope:       "invalid compare scope: %s (both/structure/data)",
+		errThresholdNeg:   "threshold must not be negative",
+		errTaskNotImp:     "task config %s is not an import task",
+		errTaskNotExp:     "task config %s is not an export task",
+		errTaskNotDict:    "task config %s is not a dictionary task",
+		errTaskNotMig:     "task config %s is not a migrate task",
+		errNoImportFile:   "missing import file: configure the input field or --input",
+		errAliasFmt:       "alias format should be source=target: %s",
+		errNoCmpID:        "missing --id (compare record ID)",
+		errTableConflict:  "table conflict: --table %s and positional argument %s",
+		errNoTableInRec:   "table %s not found in record %s",
+		errTaskType:       "unknown task type: %s",
+		errNoNameConfig:   "missing --name or --config",
+		errNoConnType:     "missing --type (mysql/postgresql/oracle)",
+		errTaskHint:       "invalid task type: %s (export/import/migrate/compare/dictionary)",
+		errCfgParseOnly:   "failed to parse config file",
+		errCfgTypeUnknown: "cannot recognize config file type; use --type to specify (export/import/migrate/compare)",
 	},
 }
 

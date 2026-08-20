@@ -20,7 +20,7 @@ func rawRoutes(svc *service.Service) func(*gin.RouterGroup) {
 		g.POST("/cancel/:taskID", func(c *gin.Context) {
 			taskID := c.Param("taskID")
 			if err := svc.CancelTask(taskID); err != nil {
-				cygin.ResponseError(c, err)
+				cygin.ResponseError(c, renderErr(c, err))
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok", "success": true})
@@ -29,7 +29,7 @@ func rawRoutes(svc *service.Service) func(*gin.RouterGroup) {
 		g.POST("/export/open-dir/:taskID", func(c *gin.Context) { openExportDir(c, svc) })
 		g.POST("/history/del/:taskID", func(c *gin.Context) {
 			if err := svc.DeleteHistory(c.Param("taskID")); err != nil {
-				cygin.ResponseError(c, err)
+				cygin.ResponseError(c, renderErr(c, err))
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok", "success": true})
@@ -123,8 +123,9 @@ func downloadExport(c *gin.Context, svc *service.Service) {
 		return
 	}
 	if rec.OutputPath == "" {
+		t := webTextsFor(cygin.FromCtx(c))
 		cygin.ResponseError(c, cygin.NewError(service.ErrNoArtifact, cygin.WithErrPrint(),
-			cygin.WithStatus(http.StatusNotFound), cygin.WithErrDetailf("任务没有可下载的产物: %s", rec.ID)))
+			cygin.WithStatus(http.StatusNotFound), cygin.WithErrDetailf(t.errNoArtifactDownload, rec.ID)))
 		return
 	}
 	c.FileAttachment(rec.OutputPath, filepath.Base(rec.OutputPath))
@@ -134,11 +135,12 @@ func downloadExport(c *gin.Context, svc *service.Service) {
 func openExportDir(c *gin.Context, svc *service.Service) {
 	rec, err := svc.GetHistory(c.Param("taskID"))
 	if err != nil {
-		cygin.ResponseError(c, err)
+		cygin.ResponseError(c, renderErr(c, err))
 		return
 	}
 	if rec.OutputPath == "" {
-		cygin.ResponseError(c, cygin.NewError(service.ErrNoArtifact, cygin.WithErrPrint(), cygin.WithErrDetailf("任务没有产物路径: %s", rec.ID)))
+		t := webTextsFor(cygin.FromCtx(c))
+		cygin.ResponseError(c, cygin.NewError(service.ErrNoArtifact, cygin.WithErrPrint(), cygin.WithErrDetailf(t.errNoArtifactPath, rec.ID)))
 		return
 	}
 	dir := filepath.Dir(rec.OutputPath)
@@ -152,7 +154,7 @@ func openExportDir(c *gin.Context, svc *service.Service) {
 		cmd = exec.Command("xdg-open", dir)
 	}
 	if err := cmd.Start(); err != nil {
-		cygin.ResponseError(c, cygin.WrapError(err, service.ErrOpenDirFailed, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error())))
+		cygin.ResponseError(c, cygin.WrapError(err, service.ErrOpenDirFailed, cygin.WithErrPrint()))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok", "success": true})
@@ -169,7 +171,7 @@ func exportTableExcel(c *gin.Context, svc *service.Service) {
 	maxRows := req.MaxRows
 	data, total, truncated, err := svc.ExportTableExcel(c.Request.Context(), req.ConnID, req.DB, req.Table, req.SortSpecs, req.Filters, maxRows)
 	if err != nil {
-		cygin.ResponseError(c, err)
+		cygin.ResponseError(c, renderErr(c, err))
 		return
 	}
 	filename := req.Table

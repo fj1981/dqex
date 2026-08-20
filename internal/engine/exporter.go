@@ -36,7 +36,7 @@ type ExportResult struct {
 // 可直接体现依赖顺序；前置/收尾语句（如 SET FOREIGN_KEY_CHECKS）包裹整个文件。
 func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*ExportResult, error) {
 	if opts.Source == nil {
-		return nil, fmt.Errorf("未提供源数据库连接")
+		return nil, NewMsgErr(errExpNoSrc)
 	}
 	t := newTracker(cb, opts.Lang)
 
@@ -47,7 +47,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 		outputDir = filepath.Join(home, ".dbimpex", "exports")
 	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return nil, fmt.Errorf("创建输出目录失败: %w", err)
+		return nil, NewMsgErrf(errExpOutDir, err)
 	}
 
 	taskName := sanitizeName(opts.TaskName)
@@ -57,14 +57,14 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 	ts := time.Now().Format("20060102_150405")
 	baseDir := filepath.Join(outputDir, fmt.Sprintf("%s_%s", taskName, ts))
 	if err := os.MkdirAll(baseDir, 0o755); err != nil {
-		return nil, fmt.Errorf("创建导出目录失败: %w", err)
+		return nil, NewMsgErrf(errExpExpDir, err)
 	}
 
 	// 1. 确定要导出的库列表
 	databases := opts.Databases
 	if len(databases) == 0 {
 		if opts.Source.DBName == "" {
-			return nil, fmt.Errorf("未指定要导出的数据库（连接配置或 databases 参数至少提供一个）")
+			return nil, NewMsgErr(errExpNoDB)
 		}
 		databases = []string{opts.Source.DBName}
 	}
@@ -77,7 +77,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 	var plan []dbTables
 	for _, db := range databases {
 		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("任务已取消")
+			return nil, NewMsgErr(errCancelled)
 		}
 		cli, err := ConnectDB(*opts.Source, db)
 		if err != nil {
@@ -89,7 +89,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 		}
 		cli.Close()
 		if err != nil {
-			return nil, fmt.Errorf("获取库 %s 的表列表失败: %w", db, err)
+			return nil, NewMsgErrf(errExpListTables, err, db)
 		}
 		tables := filterTables(all, opts.Tables, db)
 		if len(tables) == 0 {
@@ -98,7 +98,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 		plan = append(plan, dbTables{db: db, tables: tables})
 	}
 	if len(plan) == 0 {
-		return nil, fmt.Errorf("没有可导出的数据库")
+		return nil, NewMsgErr(errExpNoDatabases)
 	}
 
 	totalTables := 0
@@ -133,7 +133,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 		endSnapshot(err == nil)
 		if err != nil {
 			cli.Close()
-			return nil, fmt.Errorf("导出库 %s 失败: %w", p.db, err)
+			return nil, NewMsgErrf(errExpDB, err, p.db)
 		}
 		totalRows += rows
 		cli.Close()
@@ -145,7 +145,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 		zipPath := filepath.Join(outputDir, fmt.Sprintf("%s_%s.zip", taskName, ts))
 		t.log(engineTextsFor(t.lang).zipPack, zipPath)
 		if err := zipDir(baseDir, zipPath); err != nil {
-			return nil, fmt.Errorf("打包 zip 失败: %w", err)
+			return nil, NewMsgErrf(errExpZipPack, err)
 		}
 		// 打包成功后清理明细目录
 		_ = os.RemoveAll(baseDir)
@@ -249,14 +249,14 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 		fmt.Fprintf(w, "-- ============ Tables ============\n\n")
 		for _, table := range tables {
 			if err := ctx.Err(); err != nil {
-				return totalRows, fmt.Errorf("任务已取消")
+				return totalRows, NewMsgErr(errCancelled)
 			}
 			t.p.CurrentTable = db + "." + table
 			t.emit(true)
 
 			fmt.Fprintf(w, "-- Table: %s\n", table)
 			if err := writeTableDDL(cli, table, w, opts.CompatCollation); err != nil {
-				return totalRows, fmt.Errorf("导出表 %s.%s 建表语句失败: %w", db, table, err)
+				return totalRows, NewMsgErrf(errExpDDL, err, db, table)
 			}
 			// 表进度每表只计一次：SchemaOnly 无数据段在此计数，否则留给数据段
 			if opts.SchemaOnly {
@@ -272,7 +272,7 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 		fmt.Fprintf(w, "-- ============ Data ============\n\n")
 		for _, table := range tables {
 			if err := ctx.Err(); err != nil {
-				return totalRows, fmt.Errorf("任务已取消")
+				return totalRows, NewMsgErr(errCancelled)
 			}
 			t.p.CurrentTable = db + "." + table
 			t.emit(true)
@@ -303,7 +303,7 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 			}
 			rows, err := writeTableData(ctx, cli, db, table, w, opts, t)
 			if err != nil {
-				return totalRows, fmt.Errorf("导出表 %s.%s 数据失败: %w", db, table, err)
+				return totalRows, NewMsgErrf(errExpData, err, db, table)
 			}
 			totalRows += rows
 			t.p.DoneUnits++
@@ -323,7 +323,7 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 	if !opts.DataOnly {
 		exportedObjs, err := exportObjectsToWriter(ctx, cli, db, opts.Source.Schema, w, opts.Objects, t)
 		if err != nil {
-			return totalRows, fmt.Errorf("导出库 %s 的数据库对象失败: %w", db, err)
+			return totalRows, NewMsgErrf(errExpObjects, err, db)
 		}
 		if len(exportedObjs) > 0 {
 			desc.Objects = exportedObjs
@@ -433,7 +433,7 @@ func writeSqlBlock(w *bufio.Writer, sql string) {
 func writeTableDDL(cli *cydb.DBCli, table string, w *bufio.Writer, compatCollation bool) error {
 	content, err := cli.GetDDLSql(dialect.FuncNameGetCreateTableSql, table)
 	if err != nil {
-		return fmt.Errorf("生成建表语句失败: %w", err)
+		return NewMsgErrf(errExpGenDDL, err)
 	}
 	if content != nil && strings.TrimSpace(content.Content) != "" {
 		ddl := strings.TrimRight(strings.TrimSpace(content.Content), ";")
@@ -459,11 +459,11 @@ func writeTableData(ctx context.Context, cli *cydb.DBCli, db, table string, w *b
 	var rows int64
 	err := cli.ForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("任务已取消")
+			return NewMsgErr(errCancelled)
 		}
 		sql, err := rd.GetReplaceSql()
 		if err != nil {
-			return fmt.Errorf("生成 INSERT 语句失败: %w", err)
+			return NewMsgErrf(errExpGenInsert, err)
 		}
 		// 各方言返回的语句结尾分号不一致（MySQL/PG 自带 ;），统一规范化后写入
 		if _, err := fmt.Fprintf(w, "%s\n", terminateSQL(sql)); err != nil {
@@ -531,7 +531,7 @@ func exportObjectsToWriter(ctx context.Context, cli *cydb.DBCli, db, schema stri
 
 		for _, name := range names {
 			if err := ctx.Err(); err != nil {
-				return exported, fmt.Errorf("任务已取消")
+				return exported, NewMsgErr(errCancelled)
 			}
 			t.p.CurrentTable = db + "." + dirName + "/" + name
 			t.emit(true)
