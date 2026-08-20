@@ -322,78 +322,78 @@
   border-bottom: none;
 }
 
-/* AI 回答 Markdown 排版：react-markdown 输出无默认样式，这里补齐段落/列表/标题间距与代码/引用样式。
-   窄面板（约 24% 宽）下保持紧凑，字号跟随容器 text-xs 基准。 */
-.ai-markdown {
+/* 通用 Markdown 排版：react-markdown 输出无默认样式，这里补齐段落/列表/标题间距与代码/引用样式。
+   AIPanel / Changelog 等共用，字号跟随容器 text-xs 基准。 */
+.markdown-body {
   font-size: 0.8125rem;
   line-height: 1.6;
   word-break: break-word;
 }
-.ai-markdown > :first-child {
+.markdown-body > :first-child {
   margin-top: 0;
 }
-.ai-markdown > :last-child {
+.markdown-body > :last-child {
   margin-bottom: 0;
 }
-.ai-markdown p {
+.markdown-body p {
   margin: 0.5em 0;
 }
-.ai-markdown h1,
-.ai-markdown h2,
-.ai-markdown h3,
-.ai-markdown h4 {
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
   margin: 0.9em 0 0.4em;
   font-weight: 600;
   line-height: 1.3;
 }
-.ai-markdown h1 {
+.markdown-body h1 {
   font-size: 1.1em;
 }
-.ai-markdown h2 {
+.markdown-body h2 {
   font-size: 1.05em;
 }
-.ai-markdown h3 {
+.markdown-body h3 {
   font-size: 1em;
 }
-.ai-markdown h4 {
+.markdown-body h4 {
   font-size: 0.95em;
 }
-.ai-markdown ul,
-.ai-markdown ol {
+.markdown-body ul,
+.markdown-body ol {
   margin: 0.5em 0;
   padding-left: 1.5em;
 }
-.ai-markdown ul {
+.markdown-body ul {
   list-style: disc;
 }
-.ai-markdown ol {
+.markdown-body ol {
   list-style: decimal;
 }
-.ai-markdown li {
+.markdown-body li {
   margin: 0.2em 0;
 }
-.ai-markdown li > ul,
-.ai-markdown li > ol {
+.markdown-body li > ul,
+.markdown-body li > ol {
   margin: 0.2em 0;
 }
-.ai-markdown blockquote {
+.markdown-body blockquote {
   margin: 0.5em 0;
   padding-left: 0.75em;
   border-left: 3px solid hsl(var(--border));
   color: hsl(var(--muted-foreground));
 }
-.ai-markdown hr {
+.markdown-body hr {
   margin: 0.8em 0;
   border: none;
   border-top: 1px solid hsl(var(--border));
 }
-.ai-markdown strong {
+.markdown-body strong {
   font-weight: 600;
 }
-.ai-markdown em {
+.markdown-body em {
   font-style: italic;
 }
-.ai-markdown del {
+.markdown-body del {
   text-decoration: line-through;
   opacity: 0.6;
 }

@@ -336,7 +336,7 @@ function MarkdownContent({ content, hasSelection, schemaVerified, onApplySql }: 
 }) {
   const isSqlLang = (lang: string) => /^(sql|sqlite|mysql|mariadb|postgresql|pgsql|plsql|oracle|sqlserver|tsql)$/i.test(lang)
   return (
-    <div className="ai-markdown">
+    <div className="markdown-body">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{

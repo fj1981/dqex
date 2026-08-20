@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"dbimpex/changelog"
 	"dbimpex/internal/cli"
 	"dbimpex/internal/engine"
 	"dbimpex/internal/service"
@@ -504,6 +505,12 @@ func handleVersion() gin.HandlerFunc {
 		}
 		sort.Strings(dbTypes)
 		return VersionInfo{Version: cli.Version, BuildTime: cli.BuildTime, DBTypes: dbTypes}, nil
+	})
+}
+
+func handleChangelog() gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req struct{}) (any, error) {
+		return gin.H{"content": changelog.Get(cygin.FromCtx(c))}, nil
 	})
 }
 

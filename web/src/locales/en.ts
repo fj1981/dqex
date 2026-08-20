@@ -1297,6 +1297,8 @@ const en: typeof import("./zh").default = {
     version: "Version",
     buildTime: "Build time",
     dbTypes: "Supported databases",
+    changelog: "Changelog",
+    changelogLoadFailed: "Failed to load changelog",
   },
 
   // ---- Help dialog (HelpDialog) ----

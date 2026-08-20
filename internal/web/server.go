@@ -251,6 +251,7 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 		eb.GROUP("/meta", []cygin.APIHandler{
 			eb.GET("/dbtypes", handleDBTypes()),
 			eb.GET("/version", handleVersion()),
+			eb.GET("/changelog", handleChangelog()),
 		}),
 		// 全局配置
 		eb.GROUP("/config", []cygin.APIHandler{

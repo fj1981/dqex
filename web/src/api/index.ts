@@ -202,6 +202,8 @@ export const getDBTypes = () =>
 
 export const getVersion = () => request<VersionInfo>("/api/meta/version")
 
+export const getChangelog = () => request<{ content: string }>("/api/meta/changelog")
+
 // ---- 全局配置 ----
 
 export const getConfig = () => request<ConfigInfo>("/api/config")
