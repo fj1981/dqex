@@ -41,12 +41,22 @@ function parseChangelog(md: string): ChangelogVersion[] {
 
 // 关于弹窗：品牌展示 + 版本信息 + 更新日志（手风琴）
 export default function AboutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [version, setVersion] = useState<VersionInfo | null>(null)
   const [changelog, setChangelog] = useState<ChangelogVersion[]>([])
   const [changelogLoading, setChangelogLoading] = useState(false)
   const [changelogError, setChangelogError] = useState(false)
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
+  // 已加载语言：切换语言后清空缓存，重新按新语言拉取更新日志
+  const [changelogLang, setChangelogLang] = useState(i18n.language)
+
+  useEffect(() => {
+    if (i18n.language === changelogLang) return
+    setChangelogLang(i18n.language)
+    setChangelog([])
+    setChangelogError(false)
+    setExpandedIdx(null)
+  }, [i18n.language, changelogLang])
 
   useEffect(() => {
     if (!open) return

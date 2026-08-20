@@ -3,7 +3,7 @@ package changelog
 
 import "embed"
 
-//go:embed CHANGELOG_CN.md CHANGELOG_EN.md
+//go:embed *.md
 var changelogFS embed.FS
 
 // Get 根据语言标识返回对应语言的 CHANGELOG 内容（lang="en" 返回英文版，其余返回中文）。
