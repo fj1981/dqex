@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Braces, ChevronDown, ChevronRight, ChevronUp, Code2, Database, Eye, Filter, KeyRound, ListOrdered, Loader2, Plus, Settings2, ShieldCheck, Table2, Trash2, Workflow, X } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { confirm } from "@/components/ui/alert-dialog"
@@ -21,22 +22,23 @@ import TableIcon from "@/components/ui/table-icon"
 import * as api from "@/api"
 import { NO_VALUE_OPS, restoreSelectViaAst, serializeWhere, type WhereCond } from "@/lib/sqlCond"
 import type { DBTables, TableColumn, TableCondition, TableDataMode } from "@/types"
+import { tKey } from "@/lib/i18n"
 
 // ---- WHERE 条件可视化构建 ----
 
 const WHERE_OPERATORS = [
-  { value: "=", label: "= 等于" },
-  { value: "!=", label: "!= 不等于" },
-  { value: ">", label: "> 大于" },
-  { value: "<", label: "< 小于" },
-  { value: ">=", label: ">= 大于等于" },
-  { value: "<=", label: "<= 小于等于" },
-  { value: "LIKE", label: "LIKE 匹配" },
-  { value: "NOT LIKE", label: "NOT LIKE" },
-  { value: "IN", label: "IN (…)" },
-  { value: "NOT IN", label: "NOT IN (…)" },
-  { value: "IS NULL", label: "IS NULL" },
-  { value: "IS NOT NULL", label: "IS NOT NULL" },
+  { value: "=", label: "tablePicker.whereOp.eq" },
+  { value: "!=", label: "tablePicker.whereOp.neq" },
+  { value: ">", label: "tablePicker.whereOp.gt" },
+  { value: "<", label: "tablePicker.whereOp.lt" },
+  { value: ">=", label: "tablePicker.whereOp.gte" },
+  { value: "<=", label: "tablePicker.whereOp.lte" },
+  { value: "LIKE", label: "tablePicker.whereOp.like" },
+  { value: "NOT LIKE", label: "tablePicker.whereOp.notLike" },
+  { value: "IN", label: "tablePicker.whereOp.in" },
+  { value: "NOT IN", label: "tablePicker.whereOp.notIn" },
+  { value: "IS NULL", label: "tablePicker.whereOp.isNull" },
+  { value: "IS NOT NULL", label: "tablePicker.whereOp.isNotNull" },
 ]
 
 // 尝试将 WHERE 字符串解析为可视化条件（best-effort，失败则返回 ok=false）
@@ -104,9 +106,9 @@ interface Props {
 
 // 对象分组定义（dir 与后端 zip 子目录/对象白名单格式一致）
 const OBJECT_GROUPS = [
-  { dir: "_views", label: "视图", Icon: Eye },
-  { dir: "_functions", label: "函数", Icon: Braces },
-  { dir: "_procedures", label: "存储过程", Icon: Workflow },
+  { dir: "_views", label: "objectTree.group.view", Icon: Eye },
+  { dir: "_functions", label: "objectTree.group.function", Icon: Braces },
+  { dir: "_procedures", label: "objectTree.group.procedure", Icon: Workflow },
 ] as const
 
 // 表选择器：左侧 库→分组(表/视图/函数/存储过程)→项 树形；右侧已选表及条件 + 已选对象
@@ -115,7 +117,7 @@ export default function TablePicker({
   db,
   extraConnId,
   extraDb,
-  extraLabel = "仅目标库有",
+  extraLabel,
   dbMapping,
   selected,
   selectedObjects = [],
@@ -125,6 +127,8 @@ export default function TablePicker({
   conditions,
   onChange,
 }: Props) {
+  const { t: tr } = useTranslation()
+  const effectiveExtraLabel = extraLabel ?? tr("tablePicker.extraOnlyTarget")
   const [tree, setTree] = useState<DBTables[]>([])
   const [extraTree, setExtraTree] = useState<DBTables[]>([])
   const [loading, setLoading] = useState(false)
@@ -203,9 +207,9 @@ export default function TablePicker({
       .catch((e: Error) => {
         console.error("[TablePicker] extraTree error", { extraConnId, extraDb }, e)
         setExtraTree([])
-        setExtraError(e.message || "目标库表加载失败")
+        setExtraError(e.message || tr("tablePicker.extraLoadFailed"))
       })
-  }, [extraConnId, extraDb])
+  }, [extraConnId, extraDb, tr])
 
   const dbKey = (db: string) => `db:${db}`
   const grpKey = (db: string, dir: string) => `grp:${db}:${dir}`
@@ -566,9 +570,9 @@ export default function TablePicker({
     }
     // 三级：复杂语法无法还原，确认后丢弃
     const ok = await confirm({
-      title: "切换模式",
-      description: "当前 SQL 包含可视化构建器不支持的语法，无法还原为结构化条件。\n切换后可视化模式将为空条件，手动编写的 SQL 将丢失。",
-      confirmText: "继续切换",
+      title: tr("tablePicker.confirmModeTitle"),
+      description: tr("tablePicker.confirmModeDesc"),
+      confirmText: tr("tablePicker.continueSwitch"),
     })
     if (!ok) return // 留在 SQL 模式
     setVisConds([{ column: columns[0]?.name || "", operator: "=", value: "", connector: "AND" }])
@@ -624,20 +628,20 @@ export default function TablePicker({
           {/* 树中库名已由父节点体现，仅显示裸表名；title 保留限定名便于悬停确认 */}
           <span className="truncate" title={t}>{stripDB(t)}</span>
           {sourceOnlySet.has(t) && (
-            <span className="rounded bg-amber-500/10 px-1 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">{extraLabel}</span>
+            <span className="rounded bg-amber-500/10 px-1 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">{effectiveExtraLabel}</span>
           )}
           {dataMode === "skip" && (
-            <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">不导出数据</span>
+            <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">{tr("tablePicker.skipData")}</span>
           )}
           {hasCond && (
-            <span title="已设置过滤条件" className="flex items-center gap-0.5 text-xs text-blue-600">
-              <Filter className="h-3 w-3" /> 按条件
+            <span title={tr("tablePicker.hasCond")} className="flex items-center gap-0.5 text-xs text-blue-600">
+              <Filter className="h-3 w-3" /> {tr("tablePicker.byCond")}
             </span>
           )}
         </label>
         {isChecked && (
           <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => openEdit(t)}>
-            <Settings2 className="mr-1 h-3 w-3" /> 设置
+            <Settings2 className="mr-1 h-3 w-3" /> {tr("tablePicker.settings")}
           </Button>
         )}
       </div>
@@ -695,7 +699,7 @@ export default function TablePicker({
           <span className="flex-1 cursor-pointer text-xs font-medium text-foreground" onClick={() => setCollapsed((c) => ({ ...c, [key]: !c[key] }))}>
             {label}
             <span className="ml-1.5 font-normal text-muted-foreground">{ids.length}</span>
-            {selCount > 0 && <span className="ml-1.5 font-normal text-primary">已选 {selCount}</span>}
+            {selCount > 0 && <span className="ml-1.5 font-normal text-primary">{tr("tablePicker.selectedCount", { n: selCount })}</span>}
           </span>
         </div>
         {!isCol && <div className="ml-5 border-l border-border/60 pl-3">{dir === "tables" ? ids.map(tableRow) : ids.map((id) => objectRow(id, Icon))}</div>}
@@ -738,16 +742,16 @@ export default function TablePicker({
           >
             {d.name}
             <span className="ml-2 text-xs font-normal text-muted-foreground">
-              {tableIds.length} 张表{showObjects && objIds.length > 0 ? ` · ${objIds.length} 个对象` : ""}
+              {tr("tablePicker.tablesCount", { n: tableIds.length })}{showObjects && objIds.length > 0 ? tr("tablePicker.totalObjects", { n: objIds.length }) : ""}
             </span>
-            {selTotal > 0 && <span className="ml-2 text-xs font-normal text-primary">已选 {selTotal}</span>}
+            {selTotal > 0 && <span className="ml-2 text-xs font-normal text-primary">{tr("tablePicker.selectedCount", { n: selTotal })}</span>}
           </span>
         </div>
         {!isCol && (
           <div className="ml-5 border-l border-border/60 pl-3">
-            {groupSection(d.name, "tables", "表", Table2, tableIds)}
+            {groupSection(d.name, "tables", tr("objectTree.group.table"), Table2, tableIds)}
             {showObjects && OBJECT_GROUPS.map((g) =>
-              groupSection(d.name, g.dir, g.label, g.Icon, (d.objects?.[g.dir] || []).map((n) => qual(d.name, `${g.dir}/${n}`))),
+              groupSection(d.name, g.dir, tKey(g.label), g.Icon, (d.objects?.[g.dir] || []).map((n) => qual(d.name, `${g.dir}/${n}`))),
             )}
           </div>
         )}
@@ -758,9 +762,9 @@ export default function TablePicker({
   // 单库模式：直接渲染分组（无库头）
   const singleGroups = (d: DBTables) => (
     <div className="ml-2 border-l border-border/60 pl-3">
-      {groupSection(d.name, "tables", "表", Table2, d.tables.map((t) => qual(d.name, t)))}
+      {groupSection(d.name, "tables", tr("objectTree.group.table"), Table2, d.tables.map((t) => qual(d.name, t)))}
       {showObjects && OBJECT_GROUPS.map((g) =>
-        groupSection(d.name, g.dir, g.label, g.Icon, (d.objects?.[g.dir] || []).map((n) => qual(d.name, `${g.dir}/${n}`))),
+        groupSection(d.name, g.dir, tKey(g.label), g.Icon, (d.objects?.[g.dir] || []).map((n) => qual(d.name, `${g.dir}/${n}`))),
       )}
     </div>
   )
@@ -771,25 +775,25 @@ export default function TablePicker({
       <Card className="flex flex-col p-3">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-sm font-medium">
-            可用内容{!singleMode ? `（${tree.length} 个库，` : "（"}共 {totalTables} 张表{showObjects && totalObjects > 0 ? ` · ${totalObjects} 个对象` : ""}）
+            {!singleMode ? tr("tablePicker.availableContentMulti", { dbs: tree.length, tables: totalTables }) : tr("tablePicker.availableContent", { tables: totalTables })}{showObjects && totalObjects > 0 ? tr("tablePicker.totalObjects", { n: totalObjects }) : ""}{tr("tablePicker.availableTail")}
           </span>
           <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <Checkbox checked={allChecked} onCheckedChange={(v) => toggleAll(v === true)} />
-            全选
+            {tr("tablePicker.selectAll")}
           </label>
         </div>
         {extraConnId && extraError && (
           <div className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-300">
-            目标库表加载失败：{extraError}，无法合并「仅目标库有」的表（树与已选内容仅含源端）。
+            {tr("tablePicker.extraLoadFailDesc", { err: extraError })}
           </div>
         )}
         {extraConnId && !extraError && extraTree.length === 0 && !loading && (
           <div className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-300">
-            目标库返回为空，未合并「仅目标库有」的表（请确认目标连接与库映射是否正确）。
+            {tr("tablePicker.extraEmptyDesc")}
           </div>
         )}
         <Input
-          placeholder="搜索表名/对象名..."
+          placeholder={tr("tablePicker.searchPlaceholder")}
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
           className="mb-2 h-8"
@@ -797,12 +801,12 @@ export default function TablePicker({
         <ScrollArea className="h-[340px] rounded border pr-3">
           {loading && (
             <div className="flex items-center justify-center py-8 text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 加载中...
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> {tr("tablePicker.loading")}
             </div>
           )}
-          {error && <div className="p-3 text-sm text-destructive">加载失败: {error}</div>}
+          {error && <div className="p-3 text-sm text-destructive">{tr("tablePicker.loadFailed", { err: error })}</div>}
           {!loading && !error && filteredTree.length === 0 && (
-            <div className="py-8 text-center text-sm text-muted-foreground">暂无数据</div>
+            <div className="py-8 text-center text-sm text-muted-foreground">{tr("tablePicker.noData")}</div>
           )}
           {!loading && !error && singleMode && filteredTree[0] && singleGroups(filteredTree[0])}
           {!loading && !error && !singleMode && filteredTree.map(dbSection)}
@@ -812,11 +816,11 @@ export default function TablePicker({
       {/* 右：已选表及条件 + 已选对象 */}
       <Card className="flex flex-col p-3">
         <div className="mb-2 text-sm font-medium">
-          已选内容（{effectiveSelected.length} 张表{showObjects ? ` · ${selectedObjects.length} 个对象` : ""}）
+          {tr("tablePicker.selectedContent", { tables: effectiveSelected.length })}{showObjects ? tr("tablePicker.totalObjects", { n: selectedObjects.length }) : ""}{tr("tablePicker.availableTail")}
         </div>
         <ScrollArea className="h-[388px] rounded border pr-3">
           {effectiveSelected.length === 0 && selectedObjects.length === 0 && (
-            <div className="py-8 text-center text-sm text-muted-foreground">未选择任何内容（空 = 不处理）</div>
+            <div className="py-8 text-center text-sm text-muted-foreground">{tr("tablePicker.nothingSelected")}</div>
           )}
           {effectiveSelected.map((t) => {
             const isExtra = sourceOnlySet.has(t)
@@ -828,21 +832,21 @@ export default function TablePicker({
                     <Table2 className="h-3.5 w-3.5 text-muted-foreground" /> {t}
                     {isExtra && (
                       <span className="flex items-center gap-0.5 rounded bg-amber-500/10 px-1 py-0.5 text-[10px] font-normal text-amber-600 dark:text-amber-400">
-                        {extraLabel}
+                        {effectiveExtraLabel}
                       </span>
                     )}
                     {cond && (
                       <span className="flex items-center gap-0.5 rounded bg-blue-500/10 px-1 py-0.5 text-[10px] font-normal text-blue-600 dark:text-blue-400">
-                        <Filter className="h-2.5 w-2.5" /> 有条件
+                        <Filter className="h-2.5 w-2.5" /> {tr("tablePicker.hasCondition")}
                       </span>
                     )}
                   </span>
                   <div className="flex gap-1">
-                    <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" title="设置条件" onClick={() => openEdit(t)}>
+                    <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" title={tr("tablePicker.setCondition")} onClick={() => openEdit(t)}>
                       <Settings2 className="h-3 w-3" />
                     </Button>
                     {!isExtra && (
-                      <Button variant="ghost" size="sm" className="h-6 px-2" title="移除" onClick={() => toggleTable(t, false)}>
+                      <Button variant="ghost" size="sm" className="h-6 px-2" title={tr("tablePicker.remove")} onClick={() => toggleTable(t, false)}>
                         <Trash2 className="h-3 w-3 text-destructive" />
                       </Button>
                     )}
@@ -850,13 +854,13 @@ export default function TablePicker({
                 </div>
                 <div className="mt-1 break-all text-xs text-muted-foreground">
                   {cond?.query
-                    ? `SQL: ${cond.query}`
+                    ? tr("tablePicker.sqlLabel", { sql: cond.query })
                     : cond?.where
-                      ? `WHERE: ${cond.where}（旧版配置）`
-                      : "（无，全量）"}
+                      ? tr("tablePicker.whereLegacy", { where: cond.where })
+                      : tr("tablePicker.noCondFull")}
                 </div>
                 {!cond?.query && cond?.columns && cond.columns.length > 0 && (
-                  <div className="break-all text-xs text-muted-foreground">列: {cond.columns.join(",")}</div>
+                  <div className="break-all text-xs text-muted-foreground">{tr("tablePicker.colsLabel", { cols: cond.columns.join(",") })}</div>
                 )}
               </div>
             )
@@ -871,10 +875,10 @@ export default function TablePicker({
                   <div key={id} className="flex items-center justify-between border-b px-2 py-2 last:border-0">
                     <span className="flex items-center gap-1.5 text-sm">
                       <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="text-xs font-normal text-muted-foreground">{g?.label}</span>
+                      <span className="text-xs font-normal text-muted-foreground">{g ? tKey(g.label) : ""}</span>
                       {name}
                     </span>
-                    <Button variant="ghost" size="sm" className="h-6 px-2" title="移除" onClick={() => toggleObject(id, false)}>
+                    <Button variant="ghost" size="sm" className="h-6 px-2" title={tr("tablePicker.remove")} onClick={() => toggleObject(id, false)}>
                       <Trash2 className="h-3 w-3 text-destructive" />
                     </Button>
                   </div>
@@ -892,7 +896,7 @@ export default function TablePicker({
             <DialogTitle className="flex items-center gap-2">
               <Table2 className="h-4 w-4 text-muted-foreground" />
               {editing}
-              <span className="text-xs font-normal text-muted-foreground">条件设置</span>
+              <span className="text-xs font-normal text-muted-foreground">{tr("tablePicker.condSettings")}</span>
             </DialogTitle>
           </DialogHeader>
 
@@ -901,7 +905,7 @@ export default function TablePicker({
 
           {/* 数据导出模式选择 */}
           <div className="space-y-1.5">
-            <Label className="text-xs">数据导出</Label>
+            <Label className="text-xs">{tr("tablePicker.dataExport")}</Label>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -910,8 +914,8 @@ export default function TablePicker({
                   editDataMode === "" ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-accent"
                 }`}
               >
-                <div className="font-medium">导出所有数据</div>
-                <div className="mt-0.5 text-[10px] text-muted-foreground">导出该表全部行</div>
+                <div className="font-medium">{tr("tablePicker.exportAll")}</div>
+                <div className="mt-0.5 text-[10px] text-muted-foreground">{tr("tablePicker.exportAllDesc")}</div>
               </button>
               <button
                 type="button"
@@ -920,8 +924,8 @@ export default function TablePicker({
                   editDataMode === "condition" ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-accent"
                 }`}
               >
-                <div className="font-medium">按条件导出</div>
-                <div className="mt-0.5 text-[10px] text-muted-foreground">使用自定义 SQL 过滤行/列</div>
+                <div className="font-medium">{tr("tablePicker.exportByCond")}</div>
+                <div className="mt-0.5 text-[10px] text-muted-foreground">{tr("tablePicker.exportByCondDesc")}</div>
               </button>
               <button
                 type="button"
@@ -930,8 +934,8 @@ export default function TablePicker({
                   editDataMode === "skip" ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-accent"
                 }`}
               >
-                <div className="font-medium">不导出数据</div>
-                <div className="mt-0.5 text-[10px] text-muted-foreground">仅导出表结构</div>
+                <div className="font-medium">{tr("tablePicker.exportSkip")}</div>
+                <div className="mt-0.5 text-[10px] text-muted-foreground">{tr("tablePicker.schemaOnlyDesc")}</div>
               </button>
             </div>
           </div>
@@ -940,7 +944,7 @@ export default function TablePicker({
           <div className={`space-y-2 ${editDataMode !== "condition" ? "opacity-50 pointer-events-none" : ""}`}>
             <div className="flex items-center justify-between">
               <Label className="text-xs">
-                {whereMode === "visual" ? "导出列与查询条件（可视化）" : "查询条件（完整 SELECT）"}
+                {whereMode === "visual" ? tr("tablePicker.condVisual") : tr("tablePicker.condFullSelect")}
               </Label>
               <div className="flex items-center gap-0.5 rounded-md border p-0.5">
                 <button
@@ -950,7 +954,7 @@ export default function TablePicker({
                     whereMode === "visual" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"
                   }`}
                 >
-                  <Filter className="h-3 w-3" /> 可视化
+                  <Filter className="h-3 w-3" /> {tr("tablePicker.visual")}
                 </button>
                 <button
                   type="button"
@@ -959,7 +963,7 @@ export default function TablePicker({
                     whereMode === "sql" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"
                   }`}
                 >
-                  <Code2 className="h-3 w-3" /> SQL
+                  <Code2 className="h-3 w-3" /> {tr("tablePicker.sqlMode")}
                 </button>
               </div>
             </div>
@@ -968,16 +972,16 @@ export default function TablePicker({
             {whereMode === "visual" && (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs">指定导出列（不勾选 = 全部列）</Label>
+                  <Label className="text-xs">{tr("tablePicker.specifyCols")}</Label>
                   {columns.length > 0 && (
                     <div className="flex gap-2">
-                      <button type="button" className="text-[10px] text-primary hover:underline" onClick={() => setEditCols(columns.map((c) => c.name))}>全选</button>
-                      <button type="button" className="text-[10px] text-muted-foreground hover:underline" onClick={() => setEditCols([])}>清空</button>
+                      <button type="button" className="text-[10px] text-primary hover:underline" onClick={() => setEditCols(columns.map((c) => c.name))}>{tr("tablePicker.selectAll")}</button>
+                      <button type="button" className="text-[10px] text-muted-foreground hover:underline" onClick={() => setEditCols([])}>{tr("tablePicker.clear")}</button>
                     </div>
                   )}
                 </div>
                 {colsLoading ? (
-                  <div className="py-2 text-xs text-muted-foreground">加载列信息中...</div>
+                  <div className="py-2 text-xs text-muted-foreground">{tr("tablePicker.loadingCols")}</div>
                 ) : columns.length > 0 ? (
                   <div className="flex max-h-[100px] flex-wrap gap-1.5 overflow-y-auto rounded-md border p-2">
                     {columns.map((col) => {
@@ -1000,14 +1004,14 @@ export default function TablePicker({
                     })}
                   </div>
                 ) : (
-                  <div className="py-2 text-xs text-muted-foreground">暂无列信息</div>
+                  <div className="py-2 text-xs text-muted-foreground">{tr("tablePicker.noCols")}</div>
                 )}
               </div>
             )}
 
             {/* 查询条件 */}
             {whereMode === "visual" && (
-              <Label className="text-xs">查询条件（可选）</Label>
+              <Label className="text-xs">{tr("tablePicker.condOptional")}</Label>
             )}
 
             {/* 条件编辑区域 */}
@@ -1016,7 +1020,7 @@ export default function TablePicker({
             {whereMode === "visual" && (
               <div className="space-y-1.5 rounded-md border p-2">
                 {visConds.length === 0 && (
-                  <div className="py-1 text-center text-xs text-muted-foreground">无条件（导出全表数据）</div>
+                  <div className="py-1 text-center text-xs text-muted-foreground">{tr("tablePicker.noCond")}</div>
                 )}
                 {visConds.map((c, i) => (
                   <div key={i} className="flex items-center gap-1.5">
@@ -1041,14 +1045,14 @@ export default function TablePicker({
                       value={c.column}
                       onValueChange={(v) => updateCond(i, { column: v })}
                     >
-                      <SelectTrigger className="h-7 flex-1 text-xs"><SelectValue placeholder="选择列" /></SelectTrigger>
+                      <SelectTrigger className="h-7 flex-1 text-xs"><SelectValue placeholder={tr("tablePicker.selectCol")} /></SelectTrigger>
                       <SelectContent>
                         {colsLoading ? (
                           <div className="flex items-center justify-center py-2 text-xs text-muted-foreground">
-                            <Loader2 className="mr-1 h-3 w-3 animate-spin" /> 加载中...
+                            <Loader2 className="mr-1 h-3 w-3 animate-spin" /> {tr("tablePicker.loading")}
                           </div>
                         ) : columns.length === 0 ? (
-                          <div className="py-2 text-center text-xs text-muted-foreground">暂无列信息</div>
+                          <div className="py-2 text-center text-xs text-muted-foreground">{tr("tablePicker.noCols")}</div>
                         ) : (
                           columns.map((col) => (
                             <SelectItem key={col.name} value={col.name}>
@@ -1069,7 +1073,7 @@ export default function TablePicker({
                       <SelectTrigger className="h-7 w-[130px] shrink-0 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {WHERE_OPERATORS.map((op) => (
-                          <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>
+                          <SelectItem key={op.value} value={op.value}>{tKey(op.label)}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -1085,7 +1089,7 @@ export default function TablePicker({
                             ? "1, 2, 3"
                             : c.operator === "LIKE" || c.operator === "NOT LIKE"
                               ? "%keyword%"
-                              : "值"
+                              : tr("tablePicker.value")
                         }
                       />
                     )}
@@ -1110,7 +1114,7 @@ export default function TablePicker({
                   onClick={addCond}
                   disabled={colsLoading || columns.length === 0}
                 >
-                  <Plus className="mr-1 h-3 w-3" /> 添加条件
+                  <Plus className="mr-1 h-3 w-3" /> {tr("tablePicker.addCond")}
                 </Button>
 
                 {/* WHERE 预览 */}
@@ -1121,7 +1125,7 @@ export default function TablePicker({
                   </div>
                 )}
                 {colsError && (
-                  <div className="text-[11px] text-destructive">列信息加载失败: {colsError}</div>
+                  <div className="text-[11px] text-destructive">{tr("tablePicker.colsLoadFailed", { err: colsError })}</div>
                 )}
               </div>
             )}
@@ -1157,7 +1161,7 @@ export default function TablePicker({
                           setShowColRef(true)
                         }}
                       >
-                        <Plus className="h-3 w-3" /> 插入列
+                        <Plus className="h-3 w-3" /> {tr("tablePicker.insertCol")}
                         {showColRef ? <ChevronUp className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                       </Button>
                       {showColRef && colRefPos && (
@@ -1189,7 +1193,7 @@ export default function TablePicker({
                   )}
                 </div>
                 {colsError && (
-                  <div className="text-[11px] text-destructive">列信息加载失败: {colsError}</div>
+                  <div className="text-[11px] text-destructive">{tr("tablePicker.colsLoadFailed", { err: colsError })}</div>
                 )}
               </div>
             )}
@@ -1198,8 +1202,8 @@ export default function TablePicker({
           </div>
 
           <DialogFooter>
-            <Button variant="ghost" onClick={closeEdit}>取消</Button>
-            <Button onClick={saveEdit}>确定</Button>
+            <Button variant="ghost" onClick={closeEdit}>{tr("common.cancel")}</Button>
+            <Button onClick={saveEdit}>{tr("common.confirm")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

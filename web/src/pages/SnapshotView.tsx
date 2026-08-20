@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Camera, CheckCircle2, ChevronDown, ChevronUp, Database, Loader2, Play, Plus, RotateCcw, ScrollText, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -19,6 +20,7 @@ import type { CompareResult, ConnInfo, Progress, SnapshotCompareOptions, Snapsho
 
 // 快照管理页：列表（左）+ 详情/对比（右），与实时对比并列的一级功能
 export default function SnapshotView() {
+  const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const [snapshots, setSnapshots] = useState<SnapshotInfo[]>([])
@@ -51,9 +53,9 @@ export default function SnapshotView() {
     api
       .listSnapshots()
       .then((list) => setSnapshots(list ?? []))
-      .catch((e: Error) => toast.error(`加载快照失败: ${e.message}`))
+      .catch((e: Error) => toast.error(t("snapshot.loadFailed", { err: e.message })))
       .finally(() => setLoadingList(false))
-  }, [])
+  }, [t])
 
   useEffect(() => {
     loadList()
@@ -76,9 +78,9 @@ export default function SnapshotView() {
     api
       .getSnapshot(id)
       .then(setDetail)
-      .catch((e: Error) => toast.error(`加载快照详情失败: ${e.message}`))
+      .catch((e: Error) => toast.error(t("snapshot.loadDetailFailed", { err: e.message })))
       .finally(() => setLoadingDetail(false))
-  }, [])
+  }, [t])
 
   const connections = useAppStore((s) => s.connections)
 
@@ -167,7 +169,7 @@ export default function SnapshotView() {
 
   const startCompare = useCallback(async () => {
     if (!selectedInfo || !targetConn) {
-      toast.error("请选择目标数据库连接")
+      toast.error(t("snapshot.needTargetConn"))
       return
     }
     setComparing(true)
@@ -188,10 +190,10 @@ export default function SnapshotView() {
       const { taskID } = await api.startSnapshotCompare(opts)
       setRunningTaskID(taskID)
     } catch (e) {
-      toast.error(`启动对比失败: ${(e as Error).message}`)
+      toast.error(t("snapshot.startCompareFailed", { err: (e as Error).message }))
       setComparing(false)
     }
-  }, [selectedInfo, targetConn, dbMapping])
+  }, [selectedInfo, targetConn, dbMapping, t])
 
   const handleDone = useCallback(
     (p: Progress) => {
@@ -201,29 +203,29 @@ export default function SnapshotView() {
         api
           .getSnapshotCompareResult(runningTaskID)
           .then((res) => setReport(res))
-          .catch((e: Error) => toast.error(`读取结果失败: ${e.message}`))
+          .catch((e: Error) => toast.error(t("snapshot.readResultFailed", { err: e.message })))
           .finally(() => setComparing(false))
       } else {
         setComparing(false)
-        if (p.state === "error") toast.error(p.message || "对比失败")
+        if (p.state === "error") toast.error(p.message || t("snapshot.compareFailed"))
       }
     },
-    [runningTaskID],
+    [runningTaskID, t],
   )
 
   const handleDelete = useCallback(async () => {
     if (!selectedInfo) return
-    if (!(await confirm({ title: "删除快照", description: `确认删除快照「${selectedInfo.name}」？此操作不可恢复。`, confirmText: "删除", danger: true }))) return
+    if (!(await confirm({ title: t("snapshot.deleteTitle"), description: t("snapshot.deleteDesc", { name: selectedInfo.name }), confirmText: t("common.delete"), danger: true }))) return
     try {
       await api.deleteSnapshot(selectedInfo.id)
-      toast.success("快照已删除")
+      toast.success(t("snapshot.deleted"))
       setSelectedId(null)
       setDetail(null)
       loadList()
     } catch (e) {
-      toast.error(`删除失败: ${(e as Error).message}`)
+      toast.error(t("snapshot.deleteFailed", { err: (e as Error).message }))
     }
-  }, [selectedInfo, loadList])
+  }, [selectedInfo, loadList, t])
 
   const resetCompare = useCallback(() => {
     setComparing(false)
@@ -236,11 +238,11 @@ export default function SnapshotView() {
     <div className="-m-6 flex h-[calc(100%+3rem)] flex-col">
       <div className="shrink-0 px-6 pb-4 pt-6">
         <PageHeader
-          title="快照管理"
-          description="冻结数据库快照，随时与当前状态对比变化"
+          title={t("snapshot.title")}
+          description={t("snapshot.desc")}
           actions={
             <Button variant="outline" onClick={() => setCreateOpen(true)}>
-              <Plus className="mr-1 h-4 w-4" /> 新建快照
+              <Plus className="mr-1 h-4 w-4" /> {t("snapshot.create")}
             </Button>
           }
         />
@@ -251,7 +253,7 @@ export default function SnapshotView() {
         <Card className="flex min-h-0 w-72 shrink-0 flex-col">
           <div className="border-b p-3">
             <Input
-              placeholder="搜索快照..."
+              placeholder={t("snapshot.searchPlaceholder")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="h-8"
@@ -260,12 +262,12 @@ export default function SnapshotView() {
           <div className="scrollbar-thin min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
             {loadingList && (
               <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> 加载中...
+                <Loader2 className="h-4 w-4 animate-spin" /> {t("common.loading")}
               </div>
             )}
             {!loadingList && filteredSnapshots.length === 0 && (
               <div className="py-10 text-center text-sm text-muted-foreground">
-                {snapshots.length === 0 ? "暂无快照" : "无匹配快照"}
+                {snapshots.length === 0 ? t("snapshot.empty") : t("snapshot.noMatch")}
               </div>
             )}
             {filteredSnapshots.map((s) => (
@@ -289,7 +291,7 @@ export default function SnapshotView() {
                   <span className="truncate">{s.dbNames?.length ? s.dbNames.join(", ") : s.dbName}</span>
                 </div>
                 <div className="mt-1 text-[11px] text-muted-foreground">
-                  {s.tableCount} 表 · {s.createdAt ? new Date(s.createdAt * 1000).toLocaleString() : ""}
+                  {t("snapshot.tableCount", { n: s.tableCount })} · {s.createdAt ? new Date(s.createdAt * 1000).toLocaleString() : ""}
                 </div>
               </button>
             ))}
@@ -316,14 +318,14 @@ export default function SnapshotView() {
                         {detail.connLabel} / {(detail.dbNames?.length ? detail.dbNames.join(", ") : detail.dbName) || "—"}
                       </span>
                       <span>{new Date(detail.createdAt * 1000).toLocaleString()}</span>
-                      <span>{detail.tableCount} 表 · {detail.totalRows.toLocaleString()} 行</span>
+                      <span>{t("snapshot.tableCount", { n: detail.tableCount })} · {t("common.rows", { n: detail.totalRows.toLocaleString() })}</span>
                     </div>
                     {detail.description && (
                       <div className="mt-0.5 text-xs text-muted-foreground">{detail.description}</div>
                     )}
                   </div>
                   <div className="flex shrink-0 gap-2">
-                    <Button variant="ghost" size="icon" onClick={handleDelete} disabled={busy} title="删除快照">
+                    <Button variant="ghost" size="icon" onClick={handleDelete} disabled={busy} title={t("snapshot.deleteTitle")}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
@@ -332,17 +334,17 @@ export default function SnapshotView() {
 
               {/* 对比配置 — Section 分区，与其他页面风格一致 */}
               <div className="shrink-0">
-              <Section title="对比当前数据库" description="将快照结构与当前在线库对比，检查表结构差异与行数变化">
+              <Section title={t("snapshot.compareSection")} description={t("snapshot.compareSectionDesc")}>
                 <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
                   <div className="min-w-[200px] space-y-1">
-                    <label className="text-xs font-medium text-muted-foreground">目标连接</label>
+                    <label className="text-xs font-medium text-muted-foreground">{t("snapshot.targetConn")}</label>
                     <Select value={targetConn} onValueChange={setTargetConn} disabled={busy}>
                       <SelectTrigger className="h-8 text-xs">
-                        <SelectValue placeholder="选择连接..." />
+                        <SelectValue placeholder={t("snapshot.selectConnPlaceholder")} />
                       </SelectTrigger>
                       <SelectContent>
                         {connections.length === 0 && (
-                          <div className="px-2 py-1.5 text-center text-xs text-muted-foreground">暂无连接</div>
+                          <div className="px-2 py-1.5 text-center text-xs text-muted-foreground">{t("snapshot.noConn")}</div>
                         )}
                         {connections.map((c) => (
                           <SelectItem key={c.id} value={c.id}>
@@ -359,7 +361,7 @@ export default function SnapshotView() {
                   {/* 库映射 — 仅多库时展示 */}
                   {(snapshotDatabases.length > 1 || Object.keys(dbMapping).some(k => dbMapping[k] !== k)) && (
                     <div className="min-w-[200px] space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">库映射</label>
+                      <label className="text-xs font-medium text-muted-foreground">{t("compare.dbMapping")}</label>
                       {/* 限高内滚：库多时不撑高对比配置 Section */}
                       <div className="scrollbar-thin max-h-32 space-y-1 overflow-y-auto pr-1">
                       {snapshotDatabases.map((db) => {
@@ -374,7 +376,7 @@ export default function SnapshotView() {
                               disabled={busy}
                             >
                               <SelectTrigger className="h-7 w-36 text-xs">
-                                <SelectValue placeholder="目标库" />
+                                <SelectValue placeholder={t("snapshot.targetDbPlaceholder")} />
                               </SelectTrigger>
                               <SelectContent>
                                 {targetDBOptions.map((d) => (
@@ -392,15 +394,15 @@ export default function SnapshotView() {
                   <div className="ml-auto pb-0.5">
                     <Button onClick={startCompare} disabled={!targetConn || busy} size="sm">
                       {report ? (
-                        <><RotateCcw className="mr-1 h-3.5 w-3.5" /> 重新对比</>
+                        <><RotateCcw className="mr-1 h-3.5 w-3.5" /> {t("snapshot.recompare")}</>
                       ) : (
-                        <><Play className="mr-1 h-3.5 w-3.5" /> 开始对比</>
+                        <><Play className="mr-1 h-3.5 w-3.5" /> {t("compare.start")}</>
                       )}
                     </Button>
                   </div>
                 </div>
                 {!targetConn && detail.connId && (
-                  <p className="mt-2 text-xs text-amber-600">未找到快照来源连接，请重新选择目标连接</p>
+                  <p className="mt-2 text-xs text-amber-600">{t("snapshot.connNotFound")}</p>
                 )}
               </Section>
               </div>
@@ -409,20 +411,20 @@ export default function SnapshotView() {
               {!busy && !report && (
               <section className="flex min-h-0 flex-1 flex-col space-y-3">
                 <div className="shrink-0">
-                  <h3 className="text-sm font-medium">包含的表（{detail.tableCount}）</h3>
+                  <h3 className="text-sm font-medium">{t("snapshot.containsTables", { n: detail.tableCount })}</h3>
                 </div>
                 <div className="shrink-0">
                   {snapshotDatabases.length > 1 && (
                     <p className="mb-1 text-xs text-muted-foreground">
-                      共 {snapshotDatabases.length} 个库
+                      {t("snapshot.dbCount", { n: snapshotDatabases.length })}
                     </p>
                   )}
                   {/* 表头 */}
                   <div className="mb-0.5 grid grid-cols-[minmax(0,2fr)_48px_1fr_64px] gap-x-3 border-b px-1 pb-1 text-xs font-medium text-muted-foreground">
-                    <span>表名</span>
-                    <span>列</span>
-                    <span>主键</span>
-                    <span className="text-right">行数</span>
+                    <span>{t("snapshot.colTable")}</span>
+                    <span>{t("snapshot.colColumns")}</span>
+                    <span>{t("snapshot.colPK")}</span>
+                    <span className="text-right">{t("snapshot.colRows")}</span>
                   </div>
                 </div>
                 <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
@@ -432,7 +434,7 @@ export default function SnapshotView() {
                         <div className="sticky top-0 z-10 mt-1.5 flex items-center gap-1.5 bg-background px-1 py-0.5 text-xs font-medium text-muted-foreground">
                           <Database className="h-3 w-3" />
                           <span className="font-mono">{db.dbName}</span>
-                          <span className="font-normal">（{db.tableCount} 表 · {db.totalRows.toLocaleString()} 行）</span>
+                          <span className="font-normal">（{t("snapshot.tableCount", { n: db.tableCount })} · {t("common.rows", { n: db.totalRows.toLocaleString() })}）</span>
                         </div>
                       )}
                       {db.tables.map((t) => (
@@ -475,14 +477,14 @@ export default function SnapshotView() {
                   {/* 完成后状态条：与实时对比风格一致 */}
                   <div className="flex shrink-0 items-center gap-3 rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-2 text-sm text-green-800 dark:text-green-300">
                     <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
-                    <span className="font-medium">执行完成</span>
+                    <span className="font-medium">{t("compare.done")}</span>
                     <span className="text-xs opacity-80">
-                      共 {report.summary.total} 项 · 一致 {report.summary.matched} · 差异 {report.summary.total - report.summary.matched}
+                      {t("compare.doneSummary", { total: report.summary.total, matched: report.summary.matched, diff: report.summary.total - report.summary.matched })}
                     </span>
                     <div className="ml-auto flex items-center gap-1">
                       {logs.length > 0 && (
                         <Button variant="ghost" size="sm" className="h-7 text-xs text-green-800 hover:bg-green-100 hover:text-green-900" onClick={() => setShowLogs((v) => !v)}>
-                          <ScrollText className="mr-1 h-3.5 w-3.5" /> 执行日志
+                          <ScrollText className="mr-1 h-3.5 w-3.5" /> {t("compare.execLog")}
                           {showLogs ? <ChevronUp className="ml-1 h-3.5 w-3.5" /> : <ChevronDown className="ml-1 h-3.5 w-3.5" />}
                         </Button>
                       )}
@@ -508,16 +510,16 @@ export default function SnapshotView() {
           {!runningTaskID && !report && !detail && !loadingDetail && (
             <Card className="flex flex-col items-center justify-center gap-3 py-20">
               <Camera className="h-12 w-12 text-muted-foreground/40" />
-              <div className="text-sm text-muted-foreground">从左侧选择一个快照查看详情</div>
+              <div className="text-sm text-muted-foreground">{t("snapshot.selectHint")}</div>
               <Button variant="outline" onClick={() => setCreateOpen(true)}>
-                <Plus className="mr-1 h-4 w-4" /> 创建快照
+                <Plus className="mr-1 h-4 w-4" /> {t("snapshot.createHere")}
               </Button>
             </Card>
           )}
 
           {loadingDetail && (
             <div className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> 加载快照详情...
+              <Loader2 className="h-4 w-4 animate-spin" /> {t("snapshot.loadingDetail")}
             </div>
           )}
         </Card>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
-import { Bot, FolderCog, FolderOpen, Globe, KeyRound, Loader2, Monitor, Moon, Plus, RefreshCw, Save, ShieldCheck, Sun, Trash2 } from "lucide-react"
+import { useTranslation } from "react-i18next"
+import { Bot, FolderCog, FolderOpen, Globe, KeyRound, Languages, Loader2, Monitor, Moon, Plus, RefreshCw, Save, ShieldCheck, Sun, Trash2 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -17,28 +18,31 @@ import * as api from "@/api"
 import PageHeader from "@/components/PageHeader"
 import { Section } from "@/components/Section"
 import DirectoryPicker from "@/components/DirectoryPicker"
+import { changeUILang, tKey } from "@/lib/i18n"
+import { SUPPORTED_LANGS } from "@/locales"
 import type { AIConfig, AppConfig, ConfigInfo, DirConfig } from "@/types"
 
-// 六类目录的中文说明与占位符
+// 六类目录的 i18n key（渲染时 t() 翻译）
 const DIR_FIELDS: { key: keyof DirConfig; label: string; desc: string }[] = [
-  { key: "data", label: "配置保存目录", desc: "连接 / 任务 / 历史（SQLite 数据库）" },
-  { key: "tmp", label: "任务临时目录", desc: "任务处理临时文件（zip 解压等，任务结束自动清理）" },
-  { key: "uploads", label: "上传临时目录", desc: "Web 导入文件上传目录" },
-  { key: "exports", label: "导出产物目录", desc: "导出 zip / 目录" },
-  { key: "compares", label: "对比报告目录", desc: "对比报告 JSON" },
-  { key: "snapshots", label: "快照目录", desc: "数据库快照数据" },
+  { key: "data", label: "settings.dirData", desc: "settings.dirDataDesc" },
+  { key: "tmp", label: "settings.dirTmp", desc: "settings.dirTmpDesc" },
+  { key: "uploads", label: "settings.dirUploads", desc: "settings.dirUploadsDesc" },
+  { key: "exports", label: "settings.dirExports", desc: "settings.dirExportsDesc" },
+  { key: "compares", label: "settings.dirCompares", desc: "settings.dirComparesDesc" },
+  { key: "snapshots", label: "settings.dirSnapshots", desc: "settings.dirSnapshotsDesc" },
 ]
 
 // 左侧导航分区：通用 / 安全 / AI / 兼容
 type SettingsTab = "general" | "security" | "ai" | "compat"
 const TABS: { key: SettingsTab; label: string; desc: string; icon: typeof FolderCog }[] = [
-  { key: "general", label: "通用设置", desc: "数据目录", icon: FolderCog },
-  { key: "security", label: "安全访问", desc: "访问来源白名单", icon: ShieldCheck },
-  { key: "ai", label: "AI 助手", desc: "大模型与提示词", icon: Bot },
-  { key: "compat", label: "兼容选项", desc: "排序规则兼容", icon: Globe },
+  { key: "general", label: "settings.general", desc: "settings.generalDesc", icon: FolderCog },
+  { key: "security", label: "settings.security", desc: "settings.securityDesc", icon: ShieldCheck },
+  { key: "ai", label: "settings.ai", desc: "settings.aiDesc", icon: Bot },
+  { key: "compat", label: "settings.compat", desc: "settings.compatDesc", icon: Globe },
 ]
 
 export default function SettingsView() {
+  const { t, i18n } = useTranslation()
   // 主题：浅色 / 深色 / 跟随系统（与 Header 按钮同源，next-themes 持久化）
   const { theme, setTheme } = useTheme()
   const [info, setInfo] = useState<ConfigInfo | null>(null)
@@ -100,7 +104,7 @@ export default function SettingsView() {
     const v = newAllow.trim()
     if (!v) return
     if (config.web.allow.includes(v)) {
-      toast.error("该来源已在白名单中")
+      toast.error(t("settings.whitelistDuplicate"))
       return
     }
     setConfig((c) => (c ? { ...c, web: { ...c.web, allow: [...c.web.allow, v] } } : c))
@@ -122,16 +126,16 @@ export default function SettingsView() {
       toast.success(msg)
       await load()
     } catch (e) {
-      toast.error(`保存失败: ${(e as Error).message}`)
+      toast.error(t("settings.saveFailed", { msg: (e as Error).message }))
     } finally {
       setSaving(false)
     }
   }
 
-  const saveGeneral = () => save("目录配置已保存")
-  const saveSecurity = () => save("白名单已保存")
-  const saveAI = () => save("AI 配置已保存")
-  const saveCompat = () => save("兼容选项已保存")
+  const saveGeneral = () => save(t("settings.dirsSaved"))
+  const saveSecurity = () => save(t("settings.whitelistSaved"))
+  const saveAI = () => save(t("settings.aiSaved"))
+  const saveCompat = () => save(t("settings.compatSaved"))
 
   const TAB_ACTIONS: Record<SettingsTab, { save: () => void }> = {
     general: { save: saveGeneral },
@@ -143,7 +147,7 @@ export default function SettingsView() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
-      <PageHeader title="设置" description="全局配置（config.yaml）" />
+      <PageHeader title={t("settings.title")} description={t("settings.desc")} />
 
       <div className="flex flex-col gap-4 md:flex-row">
         {/* 左侧导航 */}
@@ -158,8 +162,8 @@ export default function SettingsView() {
             >
               <Icon className="h-4 w-4 shrink-0" />
               <span className="min-w-0">
-                <span className="block truncate font-medium">{label}</span>
-                <span className={`block truncate text-xs ${tab === key ? "text-primary-foreground/70" : ""}`}>{desc}</span>
+                <span className="block truncate font-medium">{tKey(label)}</span>
+                <span className={`block truncate text-xs ${tab === key ? "text-primary-foreground/70" : ""}`}>{tKey(desc)}</span>
               </span>
             </button>
           ))}
@@ -171,21 +175,21 @@ export default function SettingsView() {
           <div className="sticky top-0 z-10 flex justify-end border-b bg-background/95 py-2 backdrop-blur">
             <Button onClick={currentAction.save} disabled={saving}>
               {saving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
-              保存设置
+              {t("settings.saveBtn")}
             </Button>
           </div>
 
           {tab === "general" && (
             <div className="space-y-4">
-            <Section title="外观" description="界面主题，即时生效">
+            <Section title={t("settings.appearance")} description={t("settings.appearanceDesc")}>
               <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 text-sm font-medium">
                     {theme === "dark" ? <Moon className="h-4 w-4" /> : theme === "light" ? <Sun className="h-4 w-4" /> : <Monitor className="h-4 w-4" />}
-                    主题
+                    {t("settings.themeLabel")}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    深色模式降低夜间强光刺激；「跟随系统」随操作系统外观自动切换
+                    {t("settings.themeDesc")}
                   </div>
                 </div>
                 <Select value={theme} onValueChange={setTheme}>
@@ -193,15 +197,41 @@ export default function SettingsView() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="light">浅色</SelectItem>
-                    <SelectItem value="dark">深色</SelectItem>
-                    <SelectItem value="system">跟随系统</SelectItem>
+                    <SelectItem value="light">{t("app.light")}</SelectItem>
+                    <SelectItem value="dark">{t("app.dark")}</SelectItem>
+                    <SelectItem value="system">{t("app.system")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </Section>
 
-            <Section title="数据目录" description="六类数据存储目录；留空 = 由数据目录自动派生">
+            <Section title={t("settings.languageSection")} description={t("settings.languageDesc")}>
+              <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Languages className="h-4 w-4" />
+                    {t("settings.languageSection")}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {t("settings.languageDesc")}
+                  </div>
+                </div>
+                <Select value={i18n.language} onValueChange={(v) => changeUILang(v)}>
+                  <SelectTrigger className="h-8 w-32 shrink-0 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SUPPORTED_LANGS.map((l) => (
+                      <SelectItem key={l.code} value={l.code}>
+                        {l.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </Section>
+
+            <Section title={t("settings.dirs")} description={t("settings.dirsDesc")}>
               <div className="space-y-3">
                 {DIR_FIELDS.map(({ key, label, desc }) => {
                   const resolved = info.resolved[key]
@@ -210,20 +240,20 @@ export default function SettingsView() {
                     <div key={key} className="space-y-1">
                       <div className="flex items-center justify-between">
                         <label className="flex items-center gap-2 text-sm font-medium">
-                          {label}
+                          {tKey(label)}
                           {isData && (
                             <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
-                              运行时固定
+                              {t("settings.dirFixed")}
                             </span>
                           )}
                         </label>
-                        <span className="text-xs text-muted-foreground">{desc}</span>
+                        <span className="text-xs text-muted-foreground">{tKey(desc)}</span>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <Input
                           value={isData ? resolved : config.dirs[key]}
                           onChange={isData ? undefined : (e) => updateDir(key, e.target.value)}
-                          placeholder={resolved || "留空 = 自动派生"}
+                          placeholder={resolved || t("settings.dirAutoDerive")}
                           disabled={isData}
                           readOnly={isData}
                           title={resolved}
@@ -235,7 +265,7 @@ export default function SettingsView() {
                             variant="outline"
                             size="icon"
                             className="h-8 w-8 shrink-0"
-                            title="浏览选择文件夹"
+                            title={t("settings.browseDir")}
                             onClick={() => setPickerDir(key)}
                           >
                             <FolderOpen className="h-3.5 w-3.5" />
@@ -248,19 +278,19 @@ export default function SettingsView() {
               </div>
             </Section>
 
-            <Section title="日志" description="全局日志级别（debug 及以上）">
+            <Section title={t("settings.log")} description={t("settings.logDesc")}>
               <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 text-sm font-medium">
-                    调试日志（Debug）
+                    {t("settings.debugLog")}
                     {config.debug && (
                       <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-                        开启
+                        {t("settings.enabled")}
                       </span>
                     )}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    输出 debug 及以上级别的日志（含 AI 请求 / 首字节耗时 / token），便于排查问题；修改后重启服务生效
+                    {t("settings.debugLogDesc")}
                   </div>
                 </div>
                 <Switch
@@ -280,17 +310,17 @@ export default function SettingsView() {
             onSelect={(path) => {
               if (pickerDir) updateDir(pickerDir, path)
               setPickerDir(null)
-              toast.success("目录已选择，点击右上角保存生效")
+              toast.success(t("settings.dirPicked"))
             }}
           />
 
           {tab === "security" && (
-            <Section title="访问来源白名单" description="允许访问 Web 的来源（IP / CIDR / 域名）；留空 = 不限制来源，本机回环始终放行">
+            <Section title={t("settings.whitelist")} description={t("settings.whitelistDesc")}>
               <div className="space-y-2">
                 {config.web.allow.length === 0 ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Globe className="h-4 w-4" />
-                    未配置白名单，当前不限制访问来源
+                    {t("settings.whitelistEmpty")}
                   </div>
                 ) : (
                   <div className="space-y-1.5">
@@ -312,11 +342,11 @@ export default function SettingsView() {
                     value={newAllow}
                     onChange={(e) => setNewAllow(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && addAllow()}
-                    placeholder="如 192.168.1.0/24 或 dbx.example.com"
+                    placeholder={t("settings.whitelistPlaceholder")}
                     className="font-mono text-xs"
                   />
                   <Button variant="outline" onClick={addAllow} disabled={!newAllow.trim()}>
-                    <Plus className="mr-1 h-4 w-4" /> 添加
+                    <Plus className="mr-1 h-4 w-4" /> {t("settings.whitelistAdd")}
                   </Button>
                 </div>
               </div>
@@ -324,18 +354,17 @@ export default function SettingsView() {
           )}
 
           {tab === "ai" && (
-            <Section title="AI 辅助 SQL" description="OpenAI 兼容协议（可对接 OpenAI / DeepSeek / 通义等）">
+            <Section title={t("settings.aiSection")} description={t("settings.aiSectionDesc")}>
               <div className="space-y-4">
                 <div className="flex items-start gap-2 rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
                   <Bot className="mt-0.5 h-4 w-4 shrink-0" />
                   <div>
-                    AI 助手根据当前连接的表结构生成 / 解释 / 修复 / 优化 SQL，生成结果需人工审核后执行。
-                    未填写以下四项必填时，SQL 终端的 AI 助手入口自动隐藏。
+                    {t("settings.aiHint")}
                   </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1 sm:col-span-2">
-                    <label className="text-sm font-medium">Base URL（OpenAI 兼容端点）</label>
+                    <label className="text-sm font-medium">{t("settings.aiBaseUrl")}</label>
                     <Input
                       value={config.ai.baseUrl}
                       onChange={(e) => updateAI({ baseUrl: e.target.value })}
@@ -343,12 +372,12 @@ export default function SettingsView() {
                       className="font-mono text-xs"
                     />
                     <div className="text-xs text-muted-foreground">
-                      填到版本前缀为止（如 https://api.deepseek.com/v1），勿带 /chat/completions 等具体端点
+                      {t("settings.aiBaseUrlHint")}
                     </div>
                   </div>
                   <div className="space-y-1">
                     <label className="flex items-center gap-1 text-sm font-medium">
-                      <KeyRound className="h-3.5 w-3.5" /> API Key
+                      <KeyRound className="h-3.5 w-3.5" /> {t("settings.aiApiKey")}
                     </label>
                     <Input
                       type="password"
@@ -357,10 +386,10 @@ export default function SettingsView() {
                       placeholder="sk-..."
                       className="font-mono text-xs"
                     />
-                    <div className="text-xs text-muted-foreground">回显为掩码；未修改时保存不会覆盖原密钥</div>
+                    <div className="text-xs text-muted-foreground">{t("settings.aiApiKeyHint")}</div>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-sm font-medium">模型</label>
+                    <label className="text-sm font-medium">{t("settings.aiModel")}</label>
                     <Input
                       value={config.ai.model}
                       onChange={(e) => updateAI({ model: e.target.value })}
@@ -369,7 +398,7 @@ export default function SettingsView() {
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-sm font-medium">温度（Temperature）</label>
+                    <label className="text-sm font-medium">{t("settings.aiTemperature")}</label>
                     <Input
                       type="number"
                       min={0}
@@ -377,70 +406,70 @@ export default function SettingsView() {
                       step={0.1}
                       value={config.ai.temperature}
                       onChange={(e) => updateAI({ temperature: Number(e.target.value) })}
-                      placeholder="默认 0.2"
+                      placeholder={t("settings.placeholderDefault", { n: "0.2" })}
                       className="text-xs"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-sm font-medium">最大 Token（单次回复）</label>
+                    <label className="text-sm font-medium">{t("settings.aiMaxTokens")}</label>
                     <Input
                       type="number"
                       min={64}
                       step={64}
                       value={config.ai.maxTokens}
                       onChange={(e) => updateAI({ maxTokens: Number(e.target.value) })}
-                      placeholder="默认 2048"
+                      placeholder={t("settings.placeholderDefault", { n: "2048" })}
                       className="text-xs"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-sm font-medium">请求超时（秒）</label>
+                    <label className="text-sm font-medium">{t("settings.aiTimeout")}</label>
                     <Input
                       type="number"
                       min={5}
                       value={config.ai.timeoutSec}
                       onChange={(e) => updateAI({ timeoutSec: Number(e.target.value) })}
-                      placeholder="默认 60"
+                      placeholder={t("settings.placeholderDefault", { n: "60" })}
                       className="text-xs"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-sm font-medium">表结构注入上限（张）</label>
+                    <label className="text-sm font-medium">{t("settings.aiMaxSchemaTables")}</label>
                     <Input
                       type="number"
                       min={1}
                       value={config.ai.maxSchemaTables}
                       onChange={(e) => updateAI({ maxSchemaTables: Number(e.target.value) })}
-                      placeholder="默认 30"
+                      placeholder={t("settings.placeholderDefault", { n: "30" })}
                       className="text-xs"
                     />
                     <div className="text-xs text-muted-foreground">
-                      注入 AI 上下文的表数量上限；表多时调大，避免模型"看不到"所需表
+                      {t("settings.aiMaxSchemaTablesHint")}
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-sm font-medium">表结构文本上限（字符）</label>
+                    <label className="text-sm font-medium">{t("settings.aiMaxSchemaChars")}</label>
                     <Input
                       type="number"
                       min={1000}
                       step={1000}
                       value={config.ai.maxSchemaChars}
                       onChange={(e) => updateAI({ maxSchemaChars: Number(e.target.value) })}
-                      placeholder="默认 20000"
+                      placeholder={t("settings.placeholderDefault", { n: "20000" })}
                       className="text-xs"
                     />
                     <div className="text-xs text-muted-foreground">
-                      表结构注入文本字符上限（约 5K tokens）；过大可能超出模型上下文窗口
+                      {t("settings.aiMaxSchemaCharsHint")}
                     </div>
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-sm font-medium">System Prompt 模板（可选）</label>
+                  <label className="text-sm font-medium">{t("settings.aiSystemPrompt")}</label>
                   <textarea
                     value={config.ai.systemPrompt}
                     onChange={(e) => updateAI({ systemPrompt: e.target.value })}
                     rows={5}
-                    placeholder="支持 {dialect}（数据库方言）与 {schema}（表结构）占位符；留空使用内置默认模板"
+                    placeholder={t("settings.aiSystemPromptHint")}
                     className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs outline-none focus:ring-1 focus:ring-ring"
                   />
                 </div>
@@ -449,12 +478,12 @@ export default function SettingsView() {
           )}
 
           {tab === "compat" && (
-            <Section title="兼容选项" description="MySQL 8.0 特有排序规则（如 utf8mb4_0900_ai_ci）自动替换为 5.7 兼容版本">
+            <Section title={t("settings.compatSection")} description={t("settings.compatSectionDesc")}>
               <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2.5">
                 <div>
-                  <div className="text-sm font-medium">兼容排序规则</div>
+                  <div className="text-sm font-medium">{t("settings.compatCollation")}</div>
                   <div className="text-xs text-muted-foreground">
-                    全局默认；可在单个导出 / 导入 / 迁移任务中覆盖
+                    {t("settings.compatCollationDesc")}
                   </div>
                 </div>
                 <Switch
@@ -468,7 +497,7 @@ export default function SettingsView() {
           {info.dataDirOverride && (
             <Card className="flex items-start gap-2 p-3 text-xs text-amber-600">
               <RefreshCw className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <div>当前以 --data-dir 启动，data 目录以启动参数为准，config.yaml 中的 dirs.data 不会被使用。</div>
+              <div>{t("settings.dataDirOverride")}</div>
             </Card>
           )}
         </div>

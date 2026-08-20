@@ -9,15 +9,16 @@ import (
 type tracker struct {
 	cb       ProgressFunc
 	p        Progress
+	lang     string // 进度日志语言（引擎文本注册表 key，默认 zh）
 	lastSend time.Time
 	finished bool // 任务已全部完成（含打包等收尾），才允许展示 100%
 }
 
-func newTracker(cb ProgressFunc) *tracker {
+func newTracker(cb ProgressFunc, lang string) *tracker {
 	if cb == nil {
 		cb = func(Progress) {}
 	}
-	return &tracker{cb: cb, p: Progress{State: "running", Logs: []string{}}}
+	return &tracker{cb: cb, lang: lang, p: Progress{State: "running", Logs: []string{}}}
 }
 
 // log 追加日志并立即推送

@@ -29,7 +29,7 @@ type SaveConnReq struct {
 	ID        string             `json:"id"`
 	Name      string             `json:"name" binding:"required"`
 	ShortName string             `json:"shortName"` // 命令行简写
-	Env       string             `json:"env"`        // dev/test/staging/prod
+	Env       string             `json:"env"`       // dev/test/staging/prod
 	Conn      service.DBConnInfo `json:"conn"`
 }
 
@@ -72,7 +72,7 @@ func handleTestConn(svc *service.Service) gin.HandlerFunc {
 		if conn.Type == "" && req.ID != "" {
 			saved, ok := svc.Persist().GetConn(req.ID)
 			if !ok {
-				return nil, cygin.NewError(service.ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("连接配置不存在: %s", req.ID))
+				return nil, cygin.NewError(service.ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("connection not found: %s", req.ID))
 			}
 			conn = saved.Conn
 		}
@@ -128,6 +128,7 @@ type ExportReq struct {
 func handleExport(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req ExportReq) (StartResp, error) {
 		opts := req.Options
+		opts.Lang = cygin.FromCtx(c) // 任务日志语言跟随请求语言（缺省回退 zh）
 		if req.Compress != nil {
 			opts.Compress = *req.Compress
 		} else {
@@ -153,6 +154,7 @@ type DictionaryReq struct {
 func handleDictionary(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req DictionaryReq) (StartResp, error) {
 		opts := req.Options
+		opts.Lang = cygin.FromCtx(c) // 产物文案语言跟随请求语言（缺省回退 zh）
 		if req.Compress != nil {
 			opts.Compress = *req.Compress
 		} else {
@@ -178,6 +180,7 @@ type ImportReq struct {
 func handleImport(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req ImportReq) (StartResp, error) {
 		opts := req.Options
+		opts.Lang = cygin.FromCtx(c) // 任务日志语言跟随请求语言（缺省回退 zh）
 		if req.Backup != nil {
 			opts.Backup = *req.Backup
 		} else {
@@ -206,10 +209,10 @@ func handleImportUpload(svc *service.Service) gin.HandlerFunc {
 		ext := filepath.Ext(lower)
 		// .sql / .zip / .sql.gz（gzip 压缩的 SQL）
 		if ext != ".sql" && ext != ".zip" && !(ext == ".gz" && strings.HasSuffix(lower, ".sql.gz")) {
-			return nil, cygin.NewError(service.ErrFileType, cygin.WithErrPrint(), cygin.WithErrDetailf("仅支持 .sql / .sql.gz / .zip 文件: %s", name))
+			return nil, cygin.NewError(service.ErrFileType, cygin.WithErrPrint(), cygin.WithErrDetailf("only .sql / .sql.gz / .zip files are supported: %s", name))
 		}
 		if req.File.Size > maxUploadSize {
-			return nil, cygin.NewError(service.ErrFileType, cygin.WithErrPrint(), cygin.WithErrDetailf("上传文件超过大小上限 2GB: %s", name))
+			return nil, cygin.NewError(service.ErrFileType, cygin.WithErrPrint(), cygin.WithErrDetailf("file exceeds the 2GB upload size limit: %s", name))
 		}
 		dir := svc.Persist().UploadDir()
 		saveExt := ext
@@ -218,7 +221,7 @@ func handleImportUpload(svc *service.Service) gin.HandlerFunc {
 		}
 		saveTo := filepath.Join(dir, fmt.Sprintf("%d%s", nowMillis(), saveExt))
 		if err := c.SaveUploadedFile(req.File, saveTo); err != nil {
-			return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetailf("保存上传文件失败: %v", err))
+			return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetailf("failed to save uploaded file: %v", err))
 		}
 		// 同时返回原始文件名 name，供前端展示（隐藏服务器存储路径）
 		info, err := engine.InspectImportFile(saveTo)
@@ -252,6 +255,7 @@ type MigrateReq struct {
 func handleMigrate(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req MigrateReq) (StartResp, error) {
 		opts := req.Options
+		opts.Lang = cygin.FromCtx(c) // 任务日志语言跟随请求语言（缺省回退 zh）
 		if req.Backup != nil {
 			opts.Backup = *req.Backup
 		} else {
@@ -275,7 +279,9 @@ type CompareReq struct {
 
 func handleCompare(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req CompareReq) (StartResp, error) {
-		taskID, err := svc.StartCompare(req.Options, req.TaskConfigID)
+		opts := req.Options
+		opts.Lang = cygin.FromCtx(c) // 任务日志语言跟随请求语言（缺省回退 zh）
+		taskID, err := svc.StartCompare(opts, req.TaskConfigID)
 		if err != nil {
 			return StartResp{}, err
 		}
@@ -330,7 +336,7 @@ func handleGetTask(svc *service.Service) gin.HandlerFunc {
 func handleUpdateTask(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req service.TaskConfig) (any, error) {
 		if req.ID == "" {
-			return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少任务 ID"))
+			return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("missing task ID"))
 		}
 		if err := svc.SaveTask(&req); err != nil {
 			return nil, err
@@ -415,7 +421,7 @@ type CreateSnapshotReq struct {
 func handleCreateSnapshot(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req CreateSnapshotReq) (any, error) {
 		ctx := context.Background()
-		snapshot, err := svc.CreateSnapshot(ctx, req.ConnID, req.DBNames, req.Name, req.Description, req.IncludeSamples, req.SampleLimit, nil)
+		snapshot, err := svc.CreateSnapshot(ctx, req.ConnID, req.DBNames, req.Name, req.Description, req.IncludeSamples, req.SampleLimit, cygin.FromCtx(c), nil)
 		if err != nil {
 			return nil, err
 		}
@@ -454,7 +460,9 @@ type SnapshotCompareReq struct {
 
 func handleSnapshotCompare(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req SnapshotCompareReq) (StartResp, error) {
-		taskID, err := svc.StartSnapshotCompare(req.Options, req.TaskConfigID)
+		opts := req.Options
+		opts.Lang = cygin.FromCtx(c) // 任务日志语言跟随请求语言（缺省回退 zh）
+		taskID, err := svc.StartSnapshotCompare(opts, req.TaskConfigID)
 		if err != nil {
 			return StartResp{}, err
 		}

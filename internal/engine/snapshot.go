@@ -66,9 +66,9 @@ func CreateSnapshot(ctx context.Context, conn *DBConnInfo, name, description str
 		Tables:      make([]SnapshotTable, 0, len(tables)),
 	}
 
-	t := newTracker(cb)
+	t := newTracker(cb, opts.Lang)
 	t.p.TotalUnits = len(tables)
-	t.log("开始创建快照: 库 %s, %d 张表", dbName, len(tables))
+	t.log(engineTextsFor(t.lang).snapStart, dbName, len(tables))
 
 	for _, tbl := range tables {
 		if err := ctx.Err(); err != nil {
@@ -79,19 +79,19 @@ func CreateSnapshot(ctx context.Context, conn *DBConnInfo, name, description str
 
 		st, err := buildSnapshotTable(ctx, cli, tbl, opts.IncludeSamples, sampleLimit)
 		if err != nil {
-			t.log("表 %s 快照失败（已跳过）: %v", tbl, err)
+			t.log(engineTextsFor(t.lang).snapFail, tbl, err)
 			t.p.DoneUnits++
 			continue
 		}
 		snap.Tables = append(snap.Tables, *st)
 		snap.TotalRows += st.RowCount
 		t.p.DoneUnits++
-		t.log("表 %s: %d 行, %d 列", tbl, st.RowCount, len(st.Columns))
+		t.log(engineTextsFor(t.lang).snapRow, tbl, st.RowCount, len(st.Columns))
 	}
 
 	snap.TableCount = len(snap.Tables)
 	t.finish()
-	t.log("快照创建完成: %d 张表, 共 %d 行", snap.TableCount, snap.TotalRows)
+	t.log(engineTextsFor(t.lang).snapDone, snap.TableCount, snap.TotalRows)
 	return snap, nil
 }
 

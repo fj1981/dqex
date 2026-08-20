@@ -235,7 +235,7 @@ type TableColumnInfo struct {
 	PrimaryKey    bool   `json:"primaryKey,omitempty"` // 是否主键
 	Default       string `json:"default,omitempty"`    // 默认值
 	AutoIncrement bool   `json:"autoIncrement,omitempty"`
-	Unique        bool   `json:"unique,omitempty"` // 是否唯一约束（非主键）
+	Unique        bool   `json:"unique,omitempty"`  // 是否唯一约束（非主键）
 	Indexed       bool   `json:"indexed,omitempty"` // 是否有普通索引（非主键/非唯一）
 	Comment       string `json:"comment,omitempty"` // 列注释（可能为空）
 }

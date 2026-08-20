@@ -1,3 +1,4 @@
+import i18n from "@/lib/i18n"
 import { post, request } from "@/api"
 import type {
   ColumnFilter,
@@ -136,10 +137,10 @@ export const exportTableExcel = async (req: TableDataRequest, maxRows = 100000):
     try {
       const b = await res.json()
       const detail = (b?.details ?? []).filter(Boolean).join("；")
-      throw new Error(detail || b?.msg || `导出失败 (HTTP ${res.status})`)
+      throw new Error(detail || b?.msg || i18n.t("api.exportFailed", { status: res.status }))
     } catch (e) {
       if (e instanceof Error && e.message) throw e
-      throw new Error(`导出失败 (HTTP ${res.status})`)
+      throw new Error(i18n.t("api.exportFailed", { status: res.status }))
     }
   }
   const blob = await res.blob()

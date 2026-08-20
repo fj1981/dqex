@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { ArrowRight, CheckCircle2, ChevronDown, ChevronUp, MoveRight, Play, ScrollText, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -21,6 +22,7 @@ import TablePicker from "@/components/TablePicker"
 import ColumnMultiSelect, { isTimeColumn, toColumnOptions } from "@/components/ColumnMultiSelect"
 import { CompareReport } from "@/components/CompareReport"
 import { useAppStore } from "@/stores/app"
+import { tKey } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import type {
   CompareDBPair,
@@ -32,13 +34,13 @@ import type {
   TaskConfig,
 } from "@/types"
 
-const STEPS = ["选择源和目标库", "选择表", "设置对比选项", "结果"]
+const STEPS = ["compare.step1", "compare.step2", "compare.step3", "compare.step4"]
 
 // 对比范围：三选一互斥，取代原先两个相互制约的复选框
 const COMPARE_SCOPES = [
-  { key: "both", label: "结构 + 数据", desc: "列结构与数据同时对比（默认）", structureOnly: false, dataOnly: false },
-  { key: "structure", label: "仅结构", desc: "只对比表结构差异，跳过数据", structureOnly: true, dataOnly: false },
-  { key: "data", label: "仅数据", desc: "只对比数据差异，跳过结构", structureOnly: false, dataOnly: true },
+  { key: "both", label: "compare.scopeBoth", desc: "compare.scopeBothDesc", structureOnly: false, dataOnly: false },
+  { key: "structure", label: "compare.scopeStructure", desc: "compare.scopeStructureDesc", structureOnly: true, dataOnly: false },
+  { key: "data", label: "compare.scopeData", desc: "compare.scopeDataDesc", structureOnly: false, dataOnly: true },
 ]
 
 function defaultOptions(): CompareOptions {
@@ -62,6 +64,7 @@ const dbOf = (t: string) => (t.includes(".") ? t.slice(0, t.indexOf(".")) : "")
 
 // 对比页：四步向导（作用域为单个库对，支持表别名配对）
 export default function CompareView() {
+  const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   // 会话内缓存的最近应用配置：挂载时同步初始化，避免空配置闪现后再回填
   const cachedTask = useAppStore((s) => s.lastTasks["compare"])
@@ -194,7 +197,7 @@ export default function CompareView() {
         if (cancelled) return
         console.error("[CompareView] targetDBList error", e)
         setTargetDBOptions([])
-        setTargetDBsError(e.message || "加载目标库列表失败")
+        setTargetDBsError(e.message || t("compare.targetDBListFailed"))
         setTargetDBsLoaded(true)
       })
       .finally(() => {
@@ -280,26 +283,26 @@ export default function CompareView() {
 
   const startRun = async () => {
     if (!opts.sourceConn || !opts.targetConn) {
-      toast.error("请先选择源和目标数据库连接")
+      toast.error(t("compare.needBothConn"))
       setStep(0)
       return
     }
     if (opts.sourceConn === opts.targetConn) {
-      toast.error("源和目标不能是同一个连接")
+      toast.error(t("compare.sameConn"))
       setStep(0)
       return
     }
     // 别名目标重复校验（同一目标表被多个源表映射）
     const seen = new Set<string>()
     for (const a of opts.aliases || []) {
-      const t = a.target.trim().toLowerCase()
-      if (!t) continue
-      if (seen.has(t)) {
-        toast.error(`别名配对重复：多个源表映射到目标表 ${a.target}`)
+      const tname = a.target.trim().toLowerCase()
+      if (!tname) continue
+      if (seen.has(tname)) {
+        toast.error(t("compare.aliasDup", { table: a.target }))
         setStep(2)
         return
       }
-      seen.add(t)
+      seen.add(tname)
     }
     try {
       // 表范围完全由用户勾选决定：未勾选 = 对比库内全部表（后端 nil=全部）；
@@ -322,7 +325,7 @@ export default function CompareView() {
       setStep(3)
       setTimeout(() => useAppStore.getState().loadHistory(), 800)
     } catch (e) {
-      toast.error(`启动失败: ${(e as Error).message}`)
+      toast.error(t("compare.startFailed", { err: (e as Error).message }))
     }
   }
 
@@ -452,8 +455,8 @@ export default function CompareView() {
   return (
     <div className="mx-auto flex h-full max-w-5xl flex-col gap-4">
       <PageHeader
-        title="对比数据库"
-        description="比较两个数据库的表结构与数据差异（小表逐行比较，大表仅比行数）"
+        title={t("compare.title")}
+        description={t("compare.desc")}
         actions={
           <TaskConfigBar
             savedTasks={savedTasks}
@@ -467,30 +470,30 @@ export default function CompareView() {
 
       {/* min-h-0：允许 Card 在 h-full 视口内收缩，报告列表在 Card 内部滚动，避免整页滚动 */}
       <Card className="flex min-h-0 flex-1 flex-col gap-5 bg-gradient-to-br from-muted/50 via-muted/15 to-muted/85 p-5 dark:from-muted/30 dark:via-muted/10 dark:to-muted/55">
-        <StepWizard steps={STEPS} current={step} onStepClick={(i) => !runningTaskID && setStep(i)} />
+        <StepWizard steps={STEPS.map((s) => tKey(s))} current={step} onStepClick={(i) => !runningTaskID && setStep(i)} />
 
         {/* 数据源卡片布局共用 ConnectionPair，各任务页卡片尺寸统一 */}
         {step === 0 && (
           <ConnectionPair
           source={{
-            title: "源数据库",
-            subtitle: "对比基准",
+            title: t("compare.sourceDb"),
+            subtitle: t("compare.sourceDbDesc"),
             value: opts.sourceConn,
             onChange: (id) => set({ sourceConn: id, source: null, databases: [], tables: [], aliases: [] }),
           }}
           target={{
-            title: "目标数据库",
-            subtitle: "与源库比较",
+            title: t("compare.targetDb"),
+            subtitle: t("compare.targetDbDesc"),
             value: opts.targetConn,
             onChange: (id) => set({ targetConn: id, target: null }),
           }}
         >
           {opts.sourceConn && opts.sourceConn === opts.targetConn && (
-            <Hint variant="warning">源和目标不能是同一个连接，请重新选择。</Hint>
+            <Hint variant="warning">{t("compare.sameConnHint")}</Hint>
           )}
           {!!opts.sourceConn && !!opts.targetConn && opts.sourceConn !== opts.targetConn && (
             <Hint>
-              支持勾选多个库进行多库对比；表按名称匹配，不同名的同义表可在下一步配置别名配对。
+              {t("compare.multiDbHint")}
             </Hint>
           )}
           <WizardFooter
@@ -499,7 +502,7 @@ export default function CompareView() {
                 disabled={!opts.sourceConn || !opts.targetConn || opts.sourceConn === opts.targetConn}
                 onClick={() => setStep(1)}
               >
-                下一步 <MoveRight className="ml-1 h-4 w-4" />
+                {t("common.next")} <MoveRight className="ml-1 h-4 w-4" />
               </Button>
             }
           />
@@ -509,7 +512,7 @@ export default function CompareView() {
       {step === 1 && (
         <div className="space-y-4">
           <Hint>
-            勾选要对比的表；仅目标库有的表也可勾选（带标记，对比时报告为「仅目标有」）。勾选库节点将级联选中库下所有表，不勾选任何表则对比库内全部表。
+            {t("compare.hint1")}
           </Hint>
           <TablePicker
             connId={opts.sourceConn}
@@ -529,12 +532,12 @@ export default function CompareView() {
             <Card className="p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <div className="text-sm font-medium">库映射</div>
+                  <div className="text-sm font-medium">{t("compare.dbMapping")}</div>
                   <div className="text-xs text-muted-foreground">
-                    源库 → 目标库（同名默认匹配）
+                    {t("compare.dbMappingDesc")}
                     {remappedCount > 0 && (
                       <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-primary">
-                        已重命名 {remappedCount}
+                        {t("compare.remappedCount", { n: remappedCount })}
                       </span>
                     )}
                   </div>
@@ -544,7 +547,7 @@ export default function CompareView() {
                     <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       className="h-7 pl-7 text-xs"
-                      placeholder="搜索源库…"
+                      placeholder={t("compare.searchSourceDb")}
                       value={dbMapQuery}
                       onChange={(e) => setDbMapQuery(e.target.value)}
                     />
@@ -553,18 +556,18 @@ export default function CompareView() {
               </div>
               <Hint variant={targetDBsError ? "warning" : "info"}>
                 {targetDBsLoading ? (
-                  <>目标连接的库列表加载中…</>
+                  <>{t("compare.targetDBsLoading")}</>
                 ) : targetDBsError ? (
                   <>
-                    目标库列表加载失败：{targetDBsError}。库映射将回退到同名匹配；如需映射到不同名的目标库，请检查目标连接的库访问权限（SHOW DATABASES / pg_database / all_users）后刷新。
+                    {t("compare.targetDBsError", { err: targetDBsError })}
                   </>
                 ) : targetDBsLoaded && targetDBOptions.length === 0 ? (
                   <>
-                    目标连接暂无可枚举的库（可能缺少全局元数据权限），当前将按同名配对；若两侧库名不同，请补全目标连接权限后刷新。
+                    {t("compare.targetDBsEmpty")}
                   </>
                 ) : targetDBOptions.length > 0 ? (
                   <>
-                    已加载 {targetDBOptions.length} 个目标库；下拉里可改成不同名的目标库，已改的会高亮并在结果中以「源库 ↔ 目标库」展示。
+                    {t("compare.targetDBsLoaded", { n: targetDBOptions.length })}
                   </>
                 ) : null}
               </Hint>
@@ -572,15 +575,15 @@ export default function CompareView() {
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-muted/60 text-muted-foreground">
                     <tr>
-                      <th className="w-1/2 px-3 py-1.5 text-left font-medium">源库</th>
-                      <th className="w-1/2 px-3 py-1.5 text-left font-medium">目标库</th>
+                      <th className="w-1/2 px-3 py-1.5 text-left font-medium">{t("compare.colSource")}</th>
+                      <th className="w-1/2 px-3 py-1.5 text-left font-medium">{t("compare.colTarget")}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredDBPairs.length === 0 && (
                       <tr>
                         <td colSpan={2} className="px-3 py-4 text-center text-xs text-muted-foreground">
-                          无匹配的源库
+                          {t("compare.noMatchSource")}
                         </td>
                       </tr>
                     )}
@@ -616,7 +619,7 @@ export default function CompareView() {
                                   remapped ? "border-primary text-primary" : "",
                                 )}
                               >
-                                <SelectValue placeholder="选择目标库" />
+                                <SelectValue placeholder={t("compare.selectTargetDb")} />
                               </SelectTrigger>
                               <SelectContent>
                                 {candidates.map((d) => (
@@ -648,13 +651,13 @@ export default function CompareView() {
             <div className="space-y-5 p-5">
               <div className="grid gap-x-10 gap-y-5 md:grid-cols-2">
                 <div>
-                  <div className="mb-2 text-sm font-medium">对比内容</div>
+                  <div className="mb-2 text-sm font-medium">{t("compare.compareContent")}</div>
                   <div className="flex flex-wrap gap-1.5">
                     {COMPARE_SCOPES.map((s) => (
                       <button
                         key={s.key}
                         type="button"
-                        title={s.desc}
+                        title={tKey(s.desc)}
                         onClick={() => set({ structureOnly: s.structureOnly, dataOnly: s.dataOnly })}
                         className={cn(
                           "flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors",
@@ -669,13 +672,13 @@ export default function CompareView() {
                         >
                           {scopeKey === s.key && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
                         </span>
-                        {s.label}
+                        {tKey(s.label)}
                       </button>
                     ))}
                   </div>
                 </div>
                 <div>
-                  <div className="mb-2 text-sm font-medium">数据阈值</div>
+                  <div className="mb-2 text-sm font-medium">{t("compare.threshold")}</div>
                   <div className="flex h-8 items-center gap-2">
                     <Input
                       type="number"
@@ -683,47 +686,47 @@ export default function CompareView() {
                       value={opts.threshold || 0}
                       onChange={(e) => set({ threshold: Number(e.target.value) })}
                     />
-                    <span className="text-xs text-muted-foreground">行以内逐行比，超出仅比行数</span>
+                    <span className="text-xs text-muted-foreground">{t("compare.thresholdHint")}</span>
                   </div>
                 </div>
                 <div>
-                  <div className="mb-2 text-sm font-medium">忽略列（全局）</div>
+                  <div className="mb-2 text-sm font-medium">{t("compare.ignoreCols")}</div>
                   <div className="flex items-start gap-2">
                     <ColumnMultiSelect
                       className="max-w-72"
                       options={globalColOptions}
                       value={opts.ignoreColumns || []}
                       onChange={(cols) => set({ ignoreColumns: cols })}
-                      placeholder="选择全局忽略列"
+                      placeholder={t("compare.ignoreColsPlaceholder")}
                       loading={colsLoading}
                     />
-                    <span className="mt-1.5 shrink-0 text-xs text-muted-foreground">所有表数据对比时跳过；时间列默认已选</span>
+                    <span className="mt-1.5 shrink-0 text-xs text-muted-foreground">{t("compare.ignoreColsHint")}</span>
                   </div>
                 </div>
                 <div>
-                  <div className="mb-2 text-sm font-medium">结构不一致时</div>
+                  <div className="mb-2 text-sm font-medium">{t("compare.structureDiff")}</div>
                   <label className="flex h-8 cursor-pointer items-center gap-2 text-xs">
                     <Checkbox
                       checked={opts.forceData || false}
                       onCheckedChange={(v) => set({ forceData: v === true })}
                     />
-                    <span>强制对比数据</span>
-                    <span className="text-muted-foreground">默认结构有差异则跳过数据对比</span>
+                    <span>{t("compare.forceData")}</span>
+                    <span className="text-muted-foreground">{t("compare.forceDataHint")}</span>
                   </label>
                 </div>
               </div>
               {/* 全局规则说明单独成行，不再随选项换行漂移 */}
-              <div className="text-xs text-muted-foreground">逐行对比基于两侧公共列；差异样本每侧最多展示 20 行</div>
+              <div className="text-xs text-muted-foreground">{t("compare.rowCompareNote")}</div>
             </div>
 
             <div className="p-5">
               <Section
-                title={`表级配置 · 别名配对 / 忽略列${configuredAliases.length ? ` · 已配置 ${configuredAliases.length} 项` : ""}`}
-                description="源与目标表名不同时指定目标表名（留空按同名匹配）；可为单表设置忽略列，与全局忽略列合并生效"
+                title={t("compare.aliasSectionTitle") + (configuredAliases.length ? t("compare.aliasConfigured", { n: configuredAliases.length }) : "")}
+                description={t("compare.aliasSectionDesc")}
               >
                 {selectedQualifiedTables.length === 0 ? (
                   <div className="text-xs text-muted-foreground">
-                    未勾选表（将对比库内全部表）；如需为特定表配置别名/忽略列，请返回上一步勾选。
+                    {t("compare.noTablesSelected")}
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -733,7 +736,7 @@ export default function CompareView() {
                         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           className="h-8 pl-8 text-xs"
-                          placeholder="搜索表名或别名…"
+                          placeholder={t("compare.searchAlias")}
                           value={aliasQuery}
                           onChange={(e) => setAliasQuery(e.target.value)}
                         />
@@ -743,7 +746,7 @@ export default function CompareView() {
                           checked={aliasOnlyConfigured}
                           onCheckedChange={(v) => setAliasOnlyConfigured(v === true)}
                         />
-                        仅看已配置
+                        {t("compare.onlyConfigured")}
                       </label>
                       <Button
                         variant="ghost"
@@ -752,55 +755,55 @@ export default function CompareView() {
                         disabled={configuredAliases.length === 0}
                         onClick={() => set({ aliases: [] })}
                       >
-                        清空
+                        {t("common.clear")}
                       </Button>
                     </div>
                     {/* 限高内滚：表多时无需翻长页；多库时按库分组展示库名 */}
                     <div className="scrollbar-thin max-h-72 space-y-1.5 overflow-y-auto pr-1">
                       {aliasGroups.length === 0 && (
-                        <div className="py-4 text-center text-xs text-muted-foreground">无匹配的表</div>
+                        <div className="py-4 text-center text-xs text-muted-foreground">{t("compare.noMatchTable")}</div>
                       )}
                       {aliasGroups.map(([db, tables]) => (
                         <div key={db || "default"} className="space-y-1">
                           {db && (
                             <div className="sticky top-0 z-10 bg-muted/50 px-2 py-1 text-xs font-medium text-muted-foreground">
-                              库: {db}
+                              {t("compare.dbPrefix", { db })}
                             </div>
                           )}
-                          {tables.map((t) => (
+                          {tables.map((tbl) => (
                             <div
-                              key={t}
+                              key={tbl}
                               className={cn(
                                 "flex items-center gap-2 rounded-md border px-2.5 py-1.5",
-                                isConfigured(t) ? "border-primary/30 bg-primary/5" : "border-transparent bg-muted/30",
+                                isConfigured(tbl) ? "border-primary/30 bg-primary/5" : "border-transparent bg-muted/30",
                               )}
                             >
                               {/* 固定宽列 + 图标箭头：多行基线对齐，不再依赖文本字符 */}
-                              <span className="w-40 shrink-0 truncate font-mono text-xs" title={t}>
-                                {dbOf(t) ? t : bareName(t)}
+                              <span className="w-40 shrink-0 truncate font-mono text-xs" title={tbl}>
+                                {dbOf(tbl) ? tbl : bareName(tbl)}
                               </span>
                               <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                               <Input
                                 className="h-7 flex-1 text-xs"
                                 list="compare-alias-targets"
-                                placeholder="目标表名（默认同名）"
-                                value={aliasOf(t)}
-                                onChange={(e) => setAlias(t, e.target.value)}
+                                placeholder={t("compare.aliasPlaceholder")}
+                                value={aliasOf(tbl)}
+                                onChange={(e) => setAlias(tbl, e.target.value)}
                               />
                               <ColumnMultiSelect
                                 compact
-                                options={toColumnOptions(tableCols[t] || [])}
-                                value={aliasEntryOf(t)?.ignoreColumns || []}
-                                onChange={(cols) => setTableIgnore(t, cols)}
-                                placeholder="选择该表忽略列"
-                                loading={colsLoading && !tableCols[t]}
+                                options={toColumnOptions(tableCols[tbl] || [])}
+                                value={aliasEntryOf(tbl)?.ignoreColumns || []}
+                                onChange={(cols) => setTableIgnore(tbl, cols)}
+                                placeholder={t("compare.tableIgnorePlaceholder")}
+                                loading={colsLoading && !tableCols[tbl]}
                               />
-                              {isConfigured(t) && (
+                              {isConfigured(tbl) && (
                                 <button
                                   type="button"
                                   className="shrink-0 text-muted-foreground hover:text-foreground"
-                                  title="清除该表的别名与忽略列"
-                                  onClick={() => upsertAlias(t, { target: "", ignoreColumns: [] })}
+                                  title={t("compare.clearAliasTitle")}
+                                  onClick={() => upsertAlias(tbl, { target: "", ignoreColumns: [] })}
                                 >
                                   <X className="h-3.5 w-3.5" />
                                 </button>
@@ -822,7 +825,7 @@ export default function CompareView() {
             onBack={() => setStep(1)}
             next={
               <Button onClick={startRun}>
-                <Play className="mr-1 h-4 w-4" /> 开始对比
+                <Play className="mr-1 h-4 w-4" /> {t("compare.start")}
               </Button>
             }
           />
@@ -835,14 +838,14 @@ export default function CompareView() {
             /* 完成后进度面板压缩为单行状态条，日志可展开，把空间让给报告 */
             <div className="flex items-center gap-3 rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-2 text-sm text-green-800 dark:text-green-300">
               <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
-              <span className="font-medium">执行完成</span>
+              <span className="font-medium">{t("compare.done")}</span>
               <span className="text-xs opacity-80">
-                共 {report.summary.total} 项 · 一致 {report.summary.matched} · 差异 {report.summary.total - report.summary.matched}
+                {t("compare.doneSummary", { total: report.summary.total, matched: report.summary.matched, diff: report.summary.total - report.summary.matched })}
               </span>
               <div className="ml-auto flex items-center gap-1">
                 {logs.length > 0 && (
                   <Button variant="ghost" size="sm" className="h-7 text-xs text-green-800 hover:bg-green-100 hover:text-green-900" onClick={() => setShowLogs((v) => !v)}>
-                    <ScrollText className="mr-1 h-3.5 w-3.5" /> 执行日志
+                    <ScrollText className="mr-1 h-3.5 w-3.5" /> {t("compare.execLog")}
                     {showLogs ? <ChevronUp className="ml-1 h-3.5 w-3.5" /> : <ChevronDown className="ml-1 h-3.5 w-3.5" />}
                   </Button>
                 )}

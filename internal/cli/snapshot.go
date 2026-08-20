@@ -119,7 +119,7 @@ func cliSnapshotCreate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	dbNames := splitCSV(snapCreateDBs)
-	snap, err := svc.CreateSnapshot(ctx, snapCreateConn, dbNames, snapCreateName, snapCreateDesc, snapCreateSamples, snapCreateSampleLimit, cb)
+	snap, err := svc.CreateSnapshot(ctx, snapCreateConn, dbNames, snapCreateName, snapCreateDesc, snapCreateSamples, snapCreateSampleLimit, cliLang(), cb)
 	if err != nil {
 		return err
 	}
@@ -132,14 +132,15 @@ func cliSnapshotCreate(cmd *cobra.Command, args []string) error {
 		}
 		dbLabel = strings.Join(names, ", ")
 	}
-	fmt.Printf("\n%s 快照创建成功\n", green("✓"))
-	fmt.Printf("  ID:       %s\n", dim(snap.ID))
-	fmt.Printf("  名称:     %s\n", snap.Name)
-	fmt.Printf("  数据库:   %s (%s)\n", dbLabel, snap.DBType)
-	fmt.Printf("  表数量:   %d\n", snap.TableCount)
-	fmt.Printf("  总行数:   %s\n", humanRows(snap.TotalRows))
+	txt := cliTextsFor(cliLang())
+	printf(txt.snapCreated+"\n", green("✓"))
+	printf(txt.snapID+"\n", dim(snap.ID))
+	printf(txt.snapName+"\n", snap.Name)
+	printf(txt.snapDBs+"\n", dbLabel, snap.DBType)
+	printf(txt.snapTables+"\n", snap.TableCount)
+	printf(txt.snapRows+"\n", humanRows(snap.TotalRows))
 	if snap.Description != "" {
-		fmt.Printf("  备注:     %s\n", snap.Description)
+		printf(txt.snapDesc+"\n", snap.Description)
 	}
 	return nil
 }
@@ -151,21 +152,23 @@ func cliSnapshotList(cmd *cobra.Command, args []string) error {
 	}
 	infos := svc.ListSnapshots()
 	if len(infos) == 0 {
-		fmt.Println("暂无快照")
+		fmt.Println(cliTextsFor(cliLang()).snapNone)
 		return nil
 	}
-	fmt.Printf("%s 共 %d 个快照\n\n", bold("快照列表"), len(infos))
+	txt := cliTextsFor(cliLang())
+	printf(txt.snapListTitle+"\n\n", bold(txt.snapListWord), len(infos))
 	for _, info := range infos {
 		dbs := info.DBName
 		if len(info.DBNames) > 0 {
 			dbs = strings.Join(info.DBNames, ", ")
 		}
-		fmt.Printf("  %s  %s\n", bold(info.ID), green(info.Name))
-		fmt.Printf("     %s | %s | %d表 %s行 | %s\n",
-			dim(dbs), dim(info.DBType), info.TableCount,
-			humanRows(info.TotalRows), time.Unix(info.CreatedAt, 0).Format("2006-01-02 15:04"))
+		printf("  %s  %s\n", bold(info.ID), green(info.Name))
+		printf("     %s | %s | %s | %s\n",
+			dim(dbs), dim(info.DBType),
+			sprintf(txt.snapTableUnit, info.TableCount, humanRows(info.TotalRows)),
+			time.Unix(info.CreatedAt, 0).Format("2006-01-02 15:04"))
 		if info.Description != "" {
-			fmt.Printf("     备注: %s\n", dim(info.Description))
+			printf("     %s: %s\n", dim(txt.snapDesc), dim(info.Description))
 		}
 	}
 	return nil
@@ -180,9 +183,10 @@ func cliSnapshotShow(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s %s\n", bold("快照详情"), green(snap.Name))
-	fmt.Printf("  ID:       %s\n", dim(snap.ID))
-	fmt.Printf("  连接:     %s\n", snap.ConnLabel)
+	printf("%s %s\n", bold(cliTextsFor(cliLang()).snapDetailTitle), green(snap.Name))
+	printf("%s\n", dim(snap.ID))
+	txt := cliTextsFor(cliLang())
+	printf(txt.snapConn+"\n", snap.ConnLabel)
 	dbs := snap.Databases
 	if len(dbs) == 0 && snap.DBName != "" {
 		dbs = []engine.SnapshotDatabase{{DBName: snap.DBName, TableCount: snap.TableCount, TotalRows: snap.TotalRows, Tables: snap.Tables}}
@@ -194,21 +198,21 @@ func cliSnapshotShow(cmd *cobra.Command, args []string) error {
 		}
 		dbLabel += d.DBName
 	}
-	fmt.Printf("  数据库:   %s (%s)\n", dbLabel, snap.DBType)
-	fmt.Printf("  创建时间: %s\n", time.Unix(snap.CreatedAt, 0).Format("2006-01-02 15:04:05"))
-	fmt.Printf("  表数量:   %d\n", snap.TableCount)
-	fmt.Printf("  总行数:   %s\n", humanRows(snap.TotalRows))
+	printf(txt.snapDBs+"\n", dbLabel, snap.DBType)
+	printf(txt.snapCreatedAt+"\n", time.Unix(snap.CreatedAt, 0).Format("2006-01-02 15:04:05"))
+	printf(txt.snapTables+"\n", snap.TableCount)
+	printf(txt.snapRows+"\n", humanRows(snap.TotalRows))
 	if snap.Description != "" {
-		fmt.Printf("  备注:     %s\n", snap.Description)
+		printf(txt.snapDesc+"\n", snap.Description)
 	}
 	for _, d := range dbs {
-		fmt.Printf("\n%s %s（%d表 %s行）\n", bold("库"), bold(d.DBName), d.TableCount, humanRows(d.TotalRows))
+		printf(txt.snapDBLine+"\n", bold(txt.snapDBWord), bold(d.DBName), d.TableCount, humanRows(d.TotalRows))
 		for _, st := range d.Tables {
 			pkInfo := ""
 			if len(st.PrimaryKey) > 0 {
-				pkInfo = fmt.Sprintf(", 主键: %v", st.PrimaryKey)
+				pkInfo = sprintf(txt.snapPK, st.PrimaryKey)
 			}
-			fmt.Printf("  %-30s %d列 %s行%s\n", st.Name, len(st.Columns), humanRows(st.RowCount), dim(pkInfo))
+			printf(txt.snapTableLine+"\n", st.Name, len(st.Columns), humanRows(st.RowCount), dim(pkInfo))
 		}
 	}
 	return nil
@@ -222,7 +226,7 @@ func cliSnapshotDelete(cmd *cobra.Command, args []string) error {
 	if err := svc.DeleteSnapshot(snapDeleteID); err != nil {
 		return err
 	}
-	fmt.Printf("%s 快照 %s 已删除\n", green("✓"), dim(snapDeleteID))
+	printf(cliTextsFor(cliLang()).snapDeleted+"\n", green("✓"), dim(snapDeleteID))
 	return nil
 }
 
@@ -246,6 +250,7 @@ func cliSnapshotCompare(cmd *cobra.Command, args []string) error {
 		TargetConn: snapCompareTargetConn,
 		Target:     target,
 		DBMapping:  dbMapping,
+		Lang:       cliLang(),
 	}
 
 	cb, _ := cliProgress()
@@ -257,49 +262,49 @@ func cliSnapshotCompare(cmd *cobra.Command, args []string) error {
 	}
 
 	sm := result.Summary
-	fmt.Printf("\n%s 快照对比完成\n", green("✓"))
-	fmt.Printf("  快照: %s (%s)\n", snap.Name, time.Unix(snap.CreatedAt, 0).Format("2006-01-02 15:04"))
-	fmt.Printf("  对比: %s (当前)\n", snapCompareTargetConn)
-	fmt.Printf("  结果: 共%d项, 一致%d, 结构差异%d, 数据差异%d\n",
+	printf("\n%s 快照对比完成\n", green("✓"))
+	printf("  快照: %s (%s)\n", snap.Name, time.Unix(snap.CreatedAt, 0).Format("2006-01-02 15:04"))
+	printf("  对比: %s (当前)\n", snapCompareTargetConn)
+	printf("  结果: 共%d项, 一致%d, 结构差异%d, 数据差异%d\n",
 		sm.Total, sm.Matched, sm.StructureDiff, sm.DataDiff)
 
 	// 输出差异明细（按库分组）
-	fmt.Printf("\n%s\n", bold("差异明细:"))
+	printf("\n%s\n", bold("差异明细:"))
 	hasDiff := false
 	for _, db := range result.Databases {
-		fmt.Printf("\n%s %s ↔ %s\n", bold("库"), bold(db.SourceDB), bold(db.TargetDB))
+		printf("\n%s %s ↔ %s\n", bold("库"), bold(db.SourceDB), bold(db.TargetDB))
 		dbHasDiff := false
 		for _, tr := range db.Tables {
 			if tr.Status != "both" {
 				hasDiff = true
 				dbHasDiff = true
 				if tr.Status == "source_only" {
-					fmt.Printf("  %s %s\n", yellow("−"), dim(tr.Name+" (仅快照有)"))
+					printf("  %s %s\n", yellow("−"), dim(tr.Name+" (仅快照有)"))
 				} else {
-					fmt.Printf("  %s %s\n", yellow("+"), dim(tr.Name+" (仅当前库有)"))
+					printf("  %s %s\n", yellow("+"), dim(tr.Name+" (仅当前库有)"))
 				}
 				continue
 			}
 			if tr.Columns != nil && !tr.Columns.Matched {
 				hasDiff = true
 				dbHasDiff = true
-				fmt.Printf("  %s %s 结构差异 (+%d -%d ±%d)\n",
+				printf("  %s %s 结构差异 (+%d -%d ±%d)\n",
 					red("✗"), tr.Name,
 					len(tr.Columns.SourceOnly), len(tr.Columns.TargetOnly), len(tr.Columns.Different))
 			}
 			if tr.Data != nil && !tr.Data.Equal && tr.Data.Mode != "skipped" {
 				hasDiff = true
 				dbHasDiff = true
-				fmt.Printf("  %s %s 数据差异 (快照%d → 当前%d)\n",
+				printf("  %s %s 数据差异 (快照%d → 当前%d)\n",
 					red("✗"), tr.Name, tr.Data.SourceRows, tr.Data.TargetRows)
 			}
 		}
 		if !dbHasDiff {
-			fmt.Printf("  %s 无差异\n", green("✓"))
+			printf("  %s 无差异\n", green("✓"))
 		}
 	}
 	if !hasDiff {
-		fmt.Printf("  %s 无差异\n", green("✓"))
+		printf("  %s 无差异\n", green("✓"))
 	}
 
 	if snapCompareOutput != "" {
@@ -307,7 +312,7 @@ func cliSnapshotCompare(cmd *cobra.Command, args []string) error {
 		if err := os.WriteFile(snapCompareOutput, data, 0o644); err != nil {
 			return fmt.Errorf("保存对比报告失败: %w", err)
 		}
-		fmt.Printf("\n对比报告已保存: %s\n", snapCompareOutput)
+		printf("\n对比报告已保存: %s\n", snapCompareOutput)
 	}
 
 	_ = taskID

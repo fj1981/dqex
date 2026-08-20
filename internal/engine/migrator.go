@@ -24,7 +24,7 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 	if opts.Source == nil || opts.Target == nil {
 		return nil, fmt.Errorf("未提供源或目标数据库连接")
 	}
-	t := newTracker(cb)
+	t := newTracker(cb, opts.Lang)
 
 	sourceCli, err := Connect(*opts.Source)
 	if err != nil {
@@ -60,11 +60,13 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 	}
 
 	t.p.TotalUnits = len(tables)
-	modeDesc := "同类型迁移"
+	modeDesc := engineTextsFor(t.lang).modeSame
 	if crossType {
-		modeDesc = fmt.Sprintf("跨类型迁移(%s → %s)", sourceCli.DBType(), targetCli.DBType())
+		modeDesc = fmt.Sprintf(engineTextsFor(t.lang).modeCross, sourceCli.DBType(), targetCli.DBType())
+	} else {
+		modeDesc = engineTextsFor(t.lang).modeSame
 	}
-	t.log("开始%s: %d 张表, 重置模式=%s", modeDesc, len(tables), resetDesc(opts.ResetMode))
+	t.log(engineTextsFor(t.lang).migStart, modeDesc, len(tables), resetDesc(opts.ResetMode, t.lang))
 
 	batchSize := opts.BatchSize
 	if batchSize <= 0 {
@@ -103,7 +105,7 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 				if _, err := targetCli.DirectExecute(ddl); err != nil {
 					return nil, fmt.Errorf("创建目标表 %s 失败: %w", table, err)
 				}
-				t.log("已创建目标表 %s", table)
+				t.log(engineTextsFor(t.lang).migCreate, table)
 			}
 		}
 
@@ -118,7 +120,7 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 		}
 		totalRows += rows
 		t.p.DoneUnits++
-		t.log("表 %s 迁移完成 (%d 行)", table, rows)
+		t.log(engineTextsFor(t.lang).migTableDone, table, rows)
 	}
 
 	// 5. 对象迁移（仅同类型且非 DataOnly：视图/函数/存储过程；触发器已随建表语句迁移）
@@ -129,12 +131,12 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 	// 6. 成功后清理备份表
 	for _, table := range backedUp {
 		if err := dropBackupTable(targetCli, table); err != nil {
-			t.log("清理备份表失败（可忽略）: %v", err)
+			t.log(engineTextsFor(t.lang).migCleanFail, err)
 		}
 	}
 
 	t.finish()
-	t.log("迁移完成: %d 张表, %d 行", len(tables), totalRows)
+	t.log(engineTextsFor(t.lang).migDone, len(tables), totalRows)
 	return &MigrateResult{TotalTables: len(tables), TotalRows: totalRows}, nil
 }
 
@@ -199,25 +201,25 @@ func migrateDBObjects(ctx context.Context, sourceCli, targetCli *cydb.DBCli, db,
 		t.emit(true)
 		for _, name := range names {
 			if err := ctx.Err(); err != nil {
-				t.log("任务已取消，跳过剩余对象迁移")
+				t.log("%s", engineTextsFor(t.lang).migCancel)
 				return
 			}
 			t.p.CurrentTable = db + "." + dirName + "/" + name
 			t.emit(true)
 			ddl, err := objectDDL(sourceCli, kind, name)
 			if err != nil {
-				t.log("获取%s %s.%s 失败（已跳过）: %v", dirName, db, name, err)
+				t.log(engineTextsFor(t.lang).migObjFail, dirName, db, name, err)
 				t.p.DoneUnits++
 				continue
 			}
 			// 与导入链路一致：执行规范化终止后的完整 DDL（存储过程/PL-SQL 块体内含分号，按单条语句直接执行）
 			if _, err := targetCli.DirectExecute(terminateSQL(ddl)); err != nil {
-				t.log("目标库执行%s %s.%s 失败（已跳过）: %v", dirName, db, name, err)
+				t.log(engineTextsFor(t.lang).migObjExecFail, dirName, db, name, err)
 				t.p.DoneUnits++
 				continue
 			}
 			t.p.DoneUnits++
-			t.log("%s.%s/%s 迁移完成", db, dirName, name)
+			t.log(engineTextsFor(t.lang).migObjDone, db, dirName, name)
 		}
 	}
 }

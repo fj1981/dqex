@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { HashRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 import { useTheme } from "next-themes"
 import {
   ArrowLeftRight,
@@ -11,6 +12,7 @@ import {
   FileDown,
   FileUp,
   FolderOpen,
+  Globe,
   HelpCircle,
   Info,
   Monitor,
@@ -60,7 +62,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
-  SQL_EXEC_MODE_LABEL,
   TASK_TYPE_LABEL,
   type SQLAuditEntry,
   type SQLExecMode,
@@ -69,50 +70,54 @@ import {
 } from "@/types"
 import { cn, formatTime, shortPaths } from "@/lib/utils"
 import { defaultFavoriteTitle } from "@/lib/sql"
+import { changeUILang, tKey } from "@/lib/i18n"
+import { SUPPORTED_LANGS } from "@/locales"
 
 const NAV = [
-  { path: "/query", label: "工作台", desc: "SQL · 对象 · 表数据", icon: Terminal },
-  { path: "/export", label: "导出", desc: "数据库 → 文件", icon: FileDown },
-  { path: "/import", label: "导入", desc: "文件 → 数据库", icon: FileUp },
-  { path: "/migrate", label: "迁移", desc: "数据库 → 数据库", icon: ArrowLeftRight },
-  { path: "/compare", label: "对比", desc: "数据库 ↔ 数据库", icon: Scale },
-  { path: "/snapshots", label: "快照", desc: "数据库快照 ↔ 对比", icon: Camera },
-  { path: "/dictionary", label: "数据字典", desc: "结构 → Excel", icon: BookOpenText },
+  { path: "/query", labelKey: "nav.query", descKey: "nav.queryDesc", icon: Terminal },
+  { path: "/export", labelKey: "nav.export", descKey: "nav.exportDesc", icon: FileDown },
+  { path: "/import", labelKey: "nav.import", descKey: "nav.importDesc", icon: FileUp },
+  { path: "/migrate", labelKey: "nav.migrate", descKey: "nav.migrateDesc", icon: ArrowLeftRight },
+  { path: "/compare", labelKey: "nav.compare", descKey: "nav.compareDesc", icon: Scale },
+  { path: "/snapshots", labelKey: "nav.snapshots", descKey: "nav.snapshotsDesc", icon: Camera },
+  { path: "/dictionary", labelKey: "nav.dictionary", descKey: "nav.dictionaryDesc", icon: BookOpenText },
 ]
 
-// 历史状态样式：底色胶囊 + 状态圆点，强化状态辨识度
-const STATUS_META: Record<string, { label: string; cls: string; dot: string }> = {
-  done: { label: "成功", cls: "bg-green-500/10 text-green-700 dark:text-green-400", dot: "bg-green-600" },
-  error: { label: "失败", cls: "bg-red-500/10 text-destructive", dot: "bg-destructive" },
-  running: { label: "运行中", cls: "bg-blue-500/10 text-blue-600 dark:text-blue-400", dot: "animate-pulse bg-blue-600" },
-  cancelled: { label: "已取消", cls: "bg-muted text-muted-foreground", dot: "bg-muted-foreground" },
+// 历史状态样式：底色胶囊 + 状态圆点，强化状态辨识度（labelKey 见 locales: app.status.*）
+const STATUS_META: Record<string, { labelKey: string; cls: string; dot: string }> = {
+  done: { labelKey: "app.status.done", cls: "bg-green-500/10 text-green-700 dark:text-green-400", dot: "bg-green-600" },
+  error: { labelKey: "app.status.error", cls: "bg-red-500/10 text-destructive", dot: "bg-destructive" },
+  running: { labelKey: "app.status.running", cls: "bg-blue-500/10 text-blue-600 dark:text-blue-400", dot: "animate-pulse bg-blue-600" },
+  cancelled: { labelKey: "app.status.cancelled", cls: "bg-muted text-muted-foreground", dot: "bg-muted-foreground" },
 }
 
-const MODE_META: Record<SQLExecMode, { label: string; icon: typeof ShieldCheck; cls: string }> = {
-  transform: { label: "规范执行", icon: ShieldCheck, cls: "text-blue-600" },
-  raw: { label: "原样执行", icon: Zap, cls: "text-amber-600" },
+const MODE_META: Record<SQLExecMode, { labelKey: string; icon: typeof ShieldCheck; cls: string }> = {
+  transform: { labelKey: "app.execMode.transform", icon: ShieldCheck, cls: "text-blue-600" },
+  raw: { labelKey: "app.execMode.raw", icon: Zap, cls: "text-amber-600" },
 }
 
 function ModeBadge({ mode }: { mode: SQLExecMode }) {
+  const { t } = useTranslation()
   const meta = MODE_META[mode]
   const Icon = meta.icon
   return (
-    <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground" title={meta.label}>
+    <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground" title={tKey(meta.labelKey)}>
       <Icon className={cn("h-3.5 w-3.5 shrink-0", meta.cls)} strokeWidth={1.5} />
     </span>
   )
 }
 
 function TopNav() {
+  const { t } = useTranslation()
   return (
     // 顶部横向菜单：随容器水平滚动，窄屏不换行
     <nav className="scrollbar-thin flex min-w-0 flex-1 items-center gap-1 self-stretch overflow-x-auto">
-      {NAV.map(({ path, label, desc, icon: Icon }) => (
+      {NAV.map(({ path, labelKey, descKey, icon: Icon }) => (
         <NavLink
           key={path}
           to={path}
           end={path === "/"}
-          title={desc}
+          title={tKey(descKey)}
           className={({ isActive }) =>
             cn(
               "group relative flex h-full shrink-0 items-center gap-2 px-3 transition-colors",
@@ -125,7 +130,7 @@ function TopNav() {
           {({ isActive }) => (
             <>
               <Icon className="h-4 w-4 shrink-0" />
-              <span className="text-sm font-medium">{label}</span>
+              <span className="text-sm font-medium">{tKey(labelKey)}</span>
               {isActive && (
                 <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-primary" />
               )}
@@ -158,6 +163,7 @@ const PATH_BY_TYPE: Record<string, string> = {
 }
 
 function RightPanel() {
+  const { t } = useTranslation()
   const { panelOpen, togglePanel, connections, history, openDrawer, loadConnections, loadHistory } = useAppStore()
   const location = useLocation()
   const navigate = useNavigate()
@@ -208,7 +214,7 @@ function RightPanel() {
   }
 
   const delRecord = async (taskID: string) => {
-    if (!(await confirm({ title: "删除执行记录", description: "确定删除这条执行记录吗？（会同步删除其导出/对比产物文件）", confirmText: "删除", danger: true }))) return
+    if (!(await confirm({ title: t("app.deleteRecordTitle"), description: t("app.deleteRecordDesc"), confirmText: t("common.delete"), danger: true }))) return
     try {
       await api.deleteHistory(taskID)
       loadHistory()
@@ -228,7 +234,7 @@ function RightPanel() {
         <aside className="absolute inset-y-0 right-0 z-30 flex w-72 max-w-[calc(100%-1rem)] shrink-0 flex-col border-l bg-background shadow-xl lg:static lg:z-auto lg:max-w-none lg:bg-background lg:shadow-none">
       <div className="flex items-center justify-between px-3 py-2 pr-3">
         <span className="text-xs font-medium text-muted-foreground">
-          数据库连接{connections.length > 0 && <span className="ml-1 tabular-nums">({connections.length})</span>}
+          {t("app.connections")}{connections.length > 0 && <span className="ml-1 tabular-nums">({connections.length})</span>}
         </span>
       </div>
       {/* 连接列表限高 40% 独立滚动：连接再多也不会挤压下方操作历史；
@@ -236,13 +242,13 @@ function RightPanel() {
       <div className="scrollbar-thin max-h-[40%] overflow-y-auto">
         <div className="px-3">
           {connections.length === 0 && (
-            <div className="py-4 text-center text-xs text-muted-foreground">暂无连接，点击下方按钮新建</div>
+            <div className="py-4 text-center text-xs text-muted-foreground">{t("app.noConnections")}</div>
           )}
           {connections.map((c) => (
             <button
               key={c.id}
               type="button"
-              title={`${c.conn.Host}:${c.conn.Port} · 点击编辑连接`}
+              title={`${c.conn.Host}:${c.conn.Port} · ${t("app.editConnection")}`}
               className="mb-1 w-full rounded-md border bg-muted/20 px-2.5 py-1.5 text-left text-xs transition-colors hover:border-primary/40 hover:shadow-sm"
               onClick={() => openDrawer(c)}
             >
@@ -262,7 +268,7 @@ function RightPanel() {
       </div>
       <div className="px-3 py-2">
         <Button variant="outline" size="sm" className="w-full" onClick={() => openDrawer()}>
-          <Plus className="mr-1 h-4 w-4" /> 新建连接
+          <Plus className="mr-1 h-4 w-4" /> {t("app.newConnection")}
         </Button>
       </div>
 
@@ -280,19 +286,19 @@ function RightPanel() {
           onAddFavorite={async (sql, db, mode) => {
             // 弹窗预填默认标题，用户可修改后回车快速保存
             const title = await prompt({
-              title: "收藏 SQL",
-              description: "为这条 SQL 起个名字，方便日后查找回填",
+              title: t("app.favoriteSQL"),
+              description: t("app.favoriteSQLDesc"),
               defaultValue: defaultFavoriteTitle(sql),
-              placeholder: "如：每日活跃用户统计",
-              confirmText: "收藏",
-              required: "标题不能为空",
+              placeholder: t("app.favoritePlaceholder"),
+              confirmText: t("app.favorite"),
+              required: t("common.titleCannotBeEmpty"),
             })
             if (title == null) return
             try {
               await addFavorite(queryConnId, sql, db, mode, title)
-              toast.success("已收藏")
+              toast.success(t("app.favorited"))
             } catch (e) {
-              toast.error(`收藏失败: ${(e as Error).message}`)
+              toast.error(t("app.favoriteFailed", { msg: (e as Error).message }))
             }
           }}
           onDeleteFavorite={(id) => removeFavorite(id)}
@@ -301,7 +307,7 @@ function RightPanel() {
       ) : (
         <>
           <div className="px-3 py-2 text-xs font-medium text-muted-foreground">
-            {filterType ? `${TASK_TYPE_LABEL[filterType] || filterType}历史` : "操作历史"}
+            {filterType ? t("app.historyOfType", { type: tKey(TASK_TYPE_LABEL[filterType] || filterType) }) : t("app.history")}
             {records.length > 0 && <span className="ml-1 tabular-nums">({records.length})</span>}
           </div>
           {/* 用普通滚动容器而非 ScrollArea：radix viewport 内部的 display:table 包裹层会被 nowrap 内容撑宽，
@@ -309,7 +315,7 @@ function RightPanel() {
           <div className="scrollbar-thin flex-1 overflow-y-auto px-3 pb-3">
             {records.length === 0 && (
               <div className="py-4 text-center text-xs text-muted-foreground">
-                {filterType ? "该类型暂无执行记录" : "暂无执行记录"}
+                {filterType ? t("app.noHistoryOfType") : t("app.noHistory")}
               </div>
             )}
             {records.map((h) => {
@@ -319,7 +325,7 @@ function RightPanel() {
                   key={h.id}
                   role="button"
                   tabIndex={0}
-                  title="点击查看执行详情"
+                  title={t("app.viewDetail")}
                   className="group mb-1.5 min-w-0 cursor-pointer overflow-hidden rounded-md border bg-muted/20 px-2.5 py-1.5 text-xs transition-colors hover:border-primary/40 hover:shadow-sm"
                   onClick={() => navigate(`${PATH_BY_TYPE[h.taskType] || "/"}?running=${h.id}`)}
                   onKeyDown={(e) => e.key === "Enter" && navigate(`${PATH_BY_TYPE[h.taskType] || "/"}?running=${h.id}`)}
@@ -327,11 +333,11 @@ function RightPanel() {
                   <div className="flex items-center justify-between">
                     {/* 类型过滤下全部同类，省略类型名；全部视图保留以区分 */}
                     {!filterType && (
-                      <span className="text-sm font-medium">{TASK_TYPE_LABEL[h.taskType] || h.taskType}</span>
+                      <span className="text-sm font-medium">{tKey(TASK_TYPE_LABEL[h.taskType] || h.taskType)}</span>
                     )}
                     <span className={cn("flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium", s.cls)}>
                       <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
-                      {s.label}
+                      {tKey(s.labelKey)}
                     </span>
                   </div>
                   {/* 操作目标（环境 + 对象）：固定单行截断，悬停 title 查看完整内容 */}
@@ -356,7 +362,7 @@ function RightPanel() {
                           variant="ghost"
                           size="icon"
                           className="h-5 w-5 text-muted-foreground hover:text-foreground"
-                          title="在文件管理器中定位导出文件"
+                          title={t("app.locateExport")}
                           onClick={(e) => {
                             e.stopPropagation()
                             openDir(h.id)
@@ -370,7 +376,7 @@ function RightPanel() {
                           variant="ghost"
                           size="icon"
                           className="h-5 w-5 text-muted-foreground hover:text-foreground"
-                          title="在文件管理器中定位数据字典文件"
+                          title={t("app.locateDictionary")}
                           onClick={(e) => {
                             e.stopPropagation()
                             openDir(h.id)
@@ -384,7 +390,7 @@ function RightPanel() {
                           variant="ghost"
                           size="icon"
                           className="h-5 w-5 text-muted-foreground hover:text-destructive"
-                          title="删除记录"
+                          title={t("app.deleteRecord")}
                           onClick={(e) => {
                             e.stopPropagation()
                             delRecord(h.id)
@@ -439,14 +445,15 @@ function SQLHistoryPanel({
   onRenameFavorite: (id: string, title: string) => Promise<void>
 }) {
   const [tab, setTab] = useState<"history" | "favorite" | "audit">("history")
+  const { t } = useTranslation()
 
   const clear = async () => {
-    if (!(await confirm({ title: "清空 SQL 历史", description: "确认清空当前连接的全部 SQL 执行历史？", confirmText: "清空", danger: true }))) return
+    if (!(await confirm({ title: t("app.clearHistoryTitle"), description: t("app.clearHistoryDesc"), confirmText: t("common.delete"), danger: true }))) return
     try {
       await onClear()
-      toast.success("SQL 历史已清空")
+      toast.success(t("app.historyCleared"))
     } catch (e) {
-      toast.error(`清空失败: ${(e as Error).message}`)
+      toast.error(t("app.clearFailedMsg", { msg: (e as Error).message }))
     }
   }
 
@@ -456,13 +463,13 @@ function SQLHistoryPanel({
         <Tabs value={tab} onValueChange={(v) => setTab(v as "history" | "favorite" | "audit")}>
           <TabsList className="w-full">
             <TabsTrigger value="history" className="w-1/3 shrink-0 truncate text-xs">
-              历史{items.length > 0 && <span className="ml-1 tabular-nums">({items.length})</span>}
+              {t("app.tabHistory")}{items.length > 0 && <span className="ml-1 tabular-nums">({items.length})</span>}
             </TabsTrigger>
             <TabsTrigger value="favorite" className="w-1/3 shrink-0 truncate text-xs">
-              收藏{favorites.length > 0 && <span className="ml-1 tabular-nums">({favorites.length})</span>}
+              {t("app.tabFavorite")}{favorites.length > 0 && <span className="ml-1 tabular-nums">({favorites.length})</span>}
             </TabsTrigger>
             <TabsTrigger value="audit" className="w-1/3 shrink-0 truncate text-xs">
-              审计{auditItems.length > 0 && <span className="ml-1 tabular-nums">({auditItems.length})</span>}
+              {t("app.tabAudit")}{auditItems.length > 0 && <span className="ml-1 tabular-nums">({auditItems.length})</span>}
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -476,7 +483,7 @@ function SQLHistoryPanel({
                 variant="ghost"
                 size="icon"
                 className="h-5 w-5 text-muted-foreground hover:text-destructive"
-                title="清空 SQL 历史"
+                title={t("app.clearHistoryTitle")}
                 onClick={clear}
               >
                 <Trash2 className="h-3 w-3" />
@@ -485,9 +492,9 @@ function SQLHistoryPanel({
           </div>
           <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 pb-3">
             {!connId ? (
-              <div className="py-4 text-center text-xs text-muted-foreground">请先在查询页选择数据库连接</div>
+              <div className="py-4 text-center text-xs text-muted-foreground">{t("app.needConn")}</div>
             ) : items.length === 0 ? (
-              <div className="py-4 text-center text-xs text-muted-foreground">暂无 SQL 执行记录</div>
+              <div className="py-4 text-center text-xs text-muted-foreground">{t("app.noSQLHistory")}</div>
             ) : (
               items.map((h) => (
                 <HistoryOrFavoriteCard
@@ -497,13 +504,13 @@ function SQLHistoryPanel({
                   badges={
                     <>
                       {h.isWrite && (
-                        <span className="rounded bg-destructive/10 px-1 py-px text-[10px] font-medium text-destructive">写</span>
+                        <span className="rounded bg-destructive/10 px-1 py-px text-[10px] font-medium text-destructive">{t("app.badgeWrite")}</span>
                       )}
                       {h.db && <span className="rounded bg-muted px-1 py-px text-[10px] text-muted-foreground">{h.db}</span>}
                       {h.mode && <ModeBadge mode={h.mode} />}
                     </>
                   }
-                  timeText={`${h.status === "ok" ? (h.isWrite ? `影响 ${h.rowCount} 行` : `${h.rowCount} 行 · ${h.elapsedMs}ms`) : h.error || "执行失败"}`}
+                  timeText={`${h.status === "ok" ? (h.isWrite ? t("common.affectedRows", { n: h.rowCount }) : t("common.rowsWithMs", { n: h.rowCount, ms: h.elapsedMs })) : h.error || t("common.execFailed")}`}
                   onRefill={(action) => onRefill(h.sql, h.db, h.mode, action)}
                   onFavorite={() => onAddFavorite(h.sql, h.db, h.mode)}
                 />
@@ -530,12 +537,12 @@ function SQLHistoryPanel({
 // 回填动作菜单：与 AI 面板完全一致，降低学习成本。仅「全部替换」还原 db/mode 上下文。
 const REFILL_ACTIONS: {
   value: "replace_all" | "replace_selection" | "insert_cursor" | "append"
-  label: string
+  labelKey: string
 }[] = [
-  { value: "replace_all", label: "全替换" },
-  { value: "insert_cursor", label: "插光标" },
-  { value: "append", label: "追末尾" },
-  { value: "replace_selection", label: "换所选" },
+  { value: "replace_all", labelKey: "app.refill.replaceAll" },
+  { value: "insert_cursor", labelKey: "app.refill.insertCursor" },
+  { value: "append", labelKey: "app.refill.append" },
+  { value: "replace_selection", labelKey: "app.refill.replaceSelection" },
 ]
 
 // 历史/收藏通用卡片：点击展开「回填方式」菜单；hover 出收藏按钮。
@@ -559,12 +566,13 @@ function HistoryOrFavoriteCard({
   onDelete?: () => void
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const { t } = useTranslation()
 
   return (
     <div
       role="button"
       tabIndex={0}
-      title="点击选择回填方式"
+      title={t("app.chooseRefill")}
       className="group mb-1.5 min-w-0 cursor-pointer overflow-hidden rounded-md border bg-muted/20 px-2.5 py-1.5 text-xs transition-colors hover:border-primary/40 hover:shadow-sm"
       onClick={() => setMenuOpen((v) => !v)}
       onKeyDown={(e) => e.key === "Enter" && setMenuOpen((v) => !v)}
@@ -581,7 +589,7 @@ function HistoryOrFavoriteCard({
                 <button
                   type="button"
                   className="flex h-5 w-5 items-center justify-center rounded text-amber-500 hover:bg-amber-100 hover:text-amber-600 dark:hover:bg-amber-500/15"
-                  title="收藏"
+                  title={t("app.favorite")}
                   onClick={(e) => {
                     e.stopPropagation()
                     onFavorite()
@@ -594,7 +602,7 @@ function HistoryOrFavoriteCard({
                 <button
                   type="button"
                   className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  title="删除"
+                  title={t("common.delete")}
                   onClick={(e) => {
                     e.stopPropagation()
                     onDelete()
@@ -622,7 +630,7 @@ function HistoryOrFavoriteCard({
                 setMenuOpen(false)
               }}
             >
-              {a.label}
+              {tKey(a.labelKey)}
             </button>
           ))}
         </div>
@@ -649,6 +657,7 @@ function FavoriteList({
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
+  const { t } = useTranslation()
   // 连接 id → 友好名称映射：让收藏来源标记显示连接名而非内部 id
   const connections = useAppStore((s) => s.connections)
   const connName = useMemo(() => {
@@ -664,13 +673,13 @@ function FavoriteList({
   }
   const commitRename = async () => {
     const id = editingId
-    const t = draft.trim()
+    const title = draft.trim()
     setEditingId(null)
-    if (id && t) {
+    if (id && title) {
       try {
-        await onRename(id, t)
+        await onRename(id, title)
       } catch (e) {
-        toast.error(`重命名失败: ${(e as Error).message}`)
+        toast.error(t("app.renameFailed", { msg: (e as Error).message }))
       }
     }
   }
@@ -680,16 +689,16 @@ function FavoriteList({
     const connDiff = connId && f.connId && f.connId !== connId
     const dbDiff = f.db && currentDb && f.db !== currentDb
     const cName = connLabel(f.connId)
-    if (connDiff && dbDiff) return `收藏来自连接「${cName}」· 库「${f.db}」，与当前不一致`
-    if (connDiff) return `收藏来自连接「${cName}」，与当前不一致`
-    if (dbDiff) return `收藏库「${f.db}」与当前库「${currentDb}」不一致`
+    if (connDiff && dbDiff) return t("app.favMismatchConnDb", { conn: cName, db: f.db })
+    if (connDiff) return t("app.favMismatchConn", { conn: cName })
+    if (dbDiff) return t("app.favMismatchDb", { db: f.db, current: currentDb })
     return null
   }
 
   return (
     <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 pb-3">
       {favorites.length === 0 ? (
-        <div className="py-4 text-center text-xs text-muted-foreground">暂无收藏（可在历史中或编辑器工具栏添加）</div>
+        <div className="py-4 text-center text-xs text-muted-foreground">{t("app.noFavorites")}</div>
       ) : (
         favorites.map((f) => {
           const hint = mismatchHint(f)
@@ -711,7 +720,7 @@ function FavoriteList({
                 ) : (
                   <span
                     className="min-w-0 flex-1 cursor-text truncate font-medium text-foreground/90"
-                    title="双击重命名"
+                    title={t("app.dblclickRename")}
                     onDoubleClick={() => startRename(f)}
                   >
                     {f.title}
@@ -721,13 +730,13 @@ function FavoriteList({
                   <button
                     type="button"
                     className="flex h-4 w-4 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    title="删除（不可恢复）"
+                    title={t("app.deleteIrreversible")}
                     onClick={async () => {
-                      if (!(await confirm({ title: "删除收藏", description: `确认删除收藏「${f.title}」？此操作不可恢复`, confirmText: "删除", danger: true }))) return
+                      if (!(await confirm({ title: t("app.deleteFavoriteTitle"), description: t("app.deleteFavoriteDesc", { title: f.title }), confirmText: t("common.delete"), danger: true }))) return
                       try {
                         await onDelete(f.id)
                       } catch (e) {
-                        toast.error(`删除失败: ${(e as Error).message}`)
+                        toast.error(t("app.deleteFailed", { msg: (e as Error).message }))
                       }
                     }}
                   >
@@ -738,7 +747,7 @@ function FavoriteList({
               <div
                 role="button"
                 tabIndex={0}
-                title="点击选择回填方式"
+                title={t("app.chooseRefill")}
                 className="mt-0.5 cursor-pointer"
                 onClick={(e) => {
                   const menu = (e.currentTarget.querySelector("[data-refill-menu]") as HTMLElement) || null
@@ -748,8 +757,8 @@ function FavoriteList({
                 <div className="line-clamp-2 break-all font-mono text-[11px] leading-4 text-foreground/80">{f.sql}</div>
                 <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[10px] text-muted-foreground">
                   {/* 来源标记：来自哪个连接/库（全局共享，跨连接可见） */}
-                  {f.connId && <span className="rounded bg-muted px-1 py-px">连接 {connLabel(f.connId)}</span>}
-                  {f.db && <span className="rounded bg-muted px-1 py-px">库 {f.db}</span>}
+                  {f.connId && <span className="rounded bg-muted px-1 py-px">{t("app.fromConn", { name: connLabel(f.connId) })}</span>}
+                  {f.db && <span className="rounded bg-muted px-1 py-px">{t("app.fromDb", { db: f.db })}</span>}
                   {f.mode && <ModeBadge mode={f.mode} />}
                 </div>
                 {hint && <div className="mt-0.5 text-[10px] text-amber-600">⚠ {hint}</div>}
@@ -762,14 +771,14 @@ function FavoriteList({
                       onClick={(ev) => {
                         ev.stopPropagation()
                         if (hint && a.value === "replace_all") {
-                          toast.warning(`${hint}；「全部替换」将切换至收藏的库与执行模式，请确认目标正确`)
+                          toast.warning(`${hint}；${t("app.replaceAllWarn")}`)
                         } else if (hint) {
                           toast.warning(hint)
                         }
                         onRefill(f, a.value)
                       }}
                     >
-                      {a.label}
+                      {tKey(a.labelKey)}
                     </button>
                   ))}
                 </div>
@@ -784,10 +793,11 @@ function FavoriteList({
 
 // 审计面板：只读展示，含来源标记（手写/对象树/单元格编辑）
 function AuditList({ connId, items }: { connId: string; items: SQLAuditEntry[] }) {
-  const SOURCE_LABEL: Record<string, { text: string; cls: string }> = {
-    manual: { text: "手写", cls: "bg-primary/10 text-primary" },
-    tree: { text: "浏览", cls: "bg-muted text-muted-foreground" },
-    cell: { text: "编辑", cls: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
+  const { t } = useTranslation()
+  const SOURCE_LABEL: Record<string, { labelKey: string; cls: string }> = {
+    manual: { labelKey: "app.sourceManual", cls: "bg-primary/10 text-primary" },
+    tree: { labelKey: "app.sourceTree", cls: "bg-muted text-muted-foreground" },
+    cell: { labelKey: "common.edit", cls: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
   }
 
   const renderValue = (v: unknown): string => {
@@ -800,13 +810,13 @@ function AuditList({ connId, items }: { connId: string; items: SQLAuditEntry[] }
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-1 px-3 py-1 text-[10px] text-muted-foreground">
         <ScrollText className="h-3 w-3" />
-        审计仅记录、不可删除
+        {t("app.auditReadonly")}
       </div>
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 pb-3">
         {!connId ? (
-          <div className="py-4 text-center text-xs text-muted-foreground">请先在查询页选择数据库连接</div>
+          <div className="py-4 text-center text-xs text-muted-foreground">{t("app.needConn")}</div>
         ) : items.length === 0 ? (
-          <div className="py-4 text-center text-xs text-muted-foreground">暂无审计记录</div>
+          <div className="py-4 text-center text-xs text-muted-foreground">{t("app.noAudit")}</div>
         ) : (
           items.map((a) => {
             const src = SOURCE_LABEL[a.source] || SOURCE_LABEL.manual
@@ -823,9 +833,9 @@ function AuditList({ connId, items }: { connId: string; items: SQLAuditEntry[] }
                         a.status === "error" ? "bg-destructive" : "bg-green-600",
                       )}
                     />
-                    <span className={cn("rounded px-1 py-px text-[10px] font-medium", src.cls)}>{src.text}</span>
+                    <span className={cn("rounded px-1 py-px text-[10px] font-medium", src.cls)}>{tKey(src.labelKey)}</span>
                     {a.isWrite && (
-                      <span className="rounded bg-destructive/10 px-1 py-px text-[10px] font-medium text-destructive">写</span>
+                      <span className="rounded bg-destructive/10 px-1 py-px text-[10px] font-medium text-destructive">{t("app.badgeWrite")}</span>
                     )}
                     {a.db && <span className="rounded bg-muted px-1 py-px text-[10px] text-muted-foreground">{a.db}</span>}
                   </span>
@@ -838,18 +848,18 @@ function AuditList({ connId, items }: { connId: string; items: SQLAuditEntry[] }
                 {a.source === "cell" && a.table ? (
                   <div className="mt-1 space-y-0.5 font-mono text-[11px] leading-4 text-muted-foreground">
                     <div>
-                      <span className="text-muted-foreground">表 </span>
+                      <span className="text-muted-foreground">{t("app.fieldTable")}</span>
                       {a.table}
-                      <span className="text-muted-foreground"> . 列 </span>
+                      <span className="text-muted-foreground">{t("app.fieldColumn")}</span>
                       {a.column}
                     </div>
                     <div className="break-all">
-                      <span className="text-muted-foreground">值 </span>
+                      <span className="text-muted-foreground">{t("app.fieldValue")}</span>
                       <span className="text-foreground">{renderValue(a.newValue)}</span>
                     </div>
                     {a.pkColumns && a.pkColumns.length > 0 && (
                       <div className="break-all">
-                        <span className="text-muted-foreground">条件 </span>
+                        <span className="text-muted-foreground">{t("app.fieldWhere")}</span>
                         {a.pkColumns.map((pk, i) => (
                           <span key={i}>
                             {i > 0 && " AND "}
@@ -869,9 +879,9 @@ function AuditList({ connId, items }: { connId: string; items: SQLAuditEntry[] }
                   <span className="tabular-nums">
                     {a.status === "ok"
                       ? a.isWrite
-                        ? `影响 ${a.rowCount} 行`
-                        : `${a.rowCount} 行 · ${a.elapsedMs}ms`
-                      : a.error || "执行失败"}
+                        ? t("common.affectedRows", { n: a.rowCount })
+                        : t("common.rowsWithMs", { n: a.rowCount, ms: a.elapsedMs })
+                      : a.error || t("common.execFailed")}
                   </span>
                   {a.mode && <ModeBadge mode={a.mode} />}
                 </div>
@@ -887,6 +897,7 @@ function AuditList({ connId, items }: { connId: string; items: SQLAuditEntry[] }
 function Layout() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { t, i18n } = useTranslation()
   const setPanelOpen = useAppStore((s) => s.setPanelOpen)
   const panelOpen = useAppStore((s) => s.panelOpen)
   const togglePanel = useAppStore((s) => s.togglePanel)
@@ -915,14 +926,14 @@ function Layout() {
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <Database className="h-4 w-4" />
           </span>
-          <span className="font-medium">数据库工作台</span>
+          <span className="font-medium">{t("app.title")}</span>
         </div>
         <TopNav />
         <Button
           variant="ghost"
           size="icon"
           className="h-8 w-8 shrink-0"
-          title="任务列表"
+          title={t("app.tasks")}
           onClick={() => navigate("/tasks")}
         >
           <ClipboardList className={cn("h-4 w-4", location.pathname === "/tasks" ? "text-primary" : "text-muted-foreground")} />
@@ -930,27 +941,43 @@ function Layout() {
         {/* 主题切换：浅色 / 深色 / 跟随系统（全局入口） */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" title="切换主题">
+            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" title={t("app.theme")}>
               {theme === "dark" ? <Moon className="h-4 w-4 text-muted-foreground" /> : theme === "light" ? <Sun className="h-4 w-4 text-muted-foreground" /> : <Monitor className="h-4 w-4 text-muted-foreground" />}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => setTheme("light")}>
-              <Sun className="mr-2 h-3.5 w-3.5" /> 浅色
+              <Sun className="mr-2 h-3.5 w-3.5" /> {t("app.light")}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setTheme("dark")}>
-              <Moon className="mr-2 h-3.5 w-3.5" /> 深色
+              <Moon className="mr-2 h-3.5 w-3.5" /> {t("app.dark")}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setTheme("system")}>
-              <Monitor className="mr-2 h-3.5 w-3.5" /> 跟随系统
+              <Monitor className="mr-2 h-3.5 w-3.5" /> {t("app.system")}
             </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {/* 语言切换：中文 / English（与设置页同源，localStorage 持久化） */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" title={t("app.language")}>
+              <Globe className="h-4 w-4 text-muted-foreground" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {SUPPORTED_LANGS.map((l) => (
+              <DropdownMenuItem key={l.code} onClick={() => changeUILang(l.code)}>
+                <span className={cn("mr-2 inline-block h-3.5 w-3.5", i18n.language === l.code ? "text-primary" : "text-muted-foreground/40")}>●</span>
+                {l.label}
+              </DropdownMenuItem>
+            ))}
           </DropdownMenuContent>
         </DropdownMenu>
         <Button
           variant="ghost"
           size="icon"
           className="h-8 w-8 shrink-0"
-          title="设置"
+          title={t("app.settings")}
           onClick={() => navigate("/settings")}
         >
           <Settings className={cn("h-4 w-4", location.pathname === "/settings" ? "text-primary" : "text-muted-foreground")} />
@@ -962,7 +989,7 @@ function Layout() {
               variant="ghost"
               size="icon"
               className="h-8 w-8 shrink-0"
-              title="帮助与关于"
+              title={t("app.helpAbout")}
             >
               <HelpCircle className="h-4 w-4 text-muted-foreground" />
             </Button>
@@ -970,12 +997,12 @@ function Layout() {
           <DropdownMenuContent align="end" className="w-40">
             <DropdownMenuItem onSelect={() => setHelpOpen(true)}>
               <BookOpenText className="h-4 w-4 text-muted-foreground" />
-              使用说明
+              {t("app.help")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => setAboutOpen(true)}>
               <Info className="h-4 w-4 text-muted-foreground" />
-              关于
+              {t("app.about")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -1004,7 +1031,7 @@ function Layout() {
             variant="outline"
             size="icon"
             className="absolute right-2 top-1 z-40 h-7 w-7 rounded-full bg-background shadow-sm"
-            title={panelOpen ? "收起面板" : "展开面板"}
+            title={panelOpen ? t("app.panelOpen") : t("app.panelClose")}
             onClick={togglePanel}
           >
             {panelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}

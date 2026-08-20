@@ -37,15 +37,16 @@ var urlCmd = &cobra.Command{
 			return nil
 		}
 		url := "http://" + info.Addr + "/"
+		txt := cliTextsFor(cliLang())
 		if info.Token != "" {
 			url += "?token=" + info.Token
 			if info.IssuedAt > 0 && time.Now().After(expireAt) {
-				fmt.Println("⚠️  令牌已过期（签发给 24 小时有效期），请重启 Web 服务刷新后重新执行 dbx url")
+				fmt.Println(txt.urlTokenExpired)
 			} else if info.IssuedAt > 0 {
-				fmt.Printf("令牌有效期至 %s\n", expireAt.Format("2006-01-02 15:04:05"))
+				printf(txt.urlExpireAt+"\n", expireAt.Format("2006-01-02 15:04:05"))
 			}
 		} else {
-			fmt.Println("提示: 上次启动禁用了认证（--no-auth），链接不带 token")
+			fmt.Println(txt.urlNoAuth)
 		}
 		fmt.Println(url)
 		return nil

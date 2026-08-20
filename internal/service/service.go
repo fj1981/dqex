@@ -104,26 +104,26 @@ func validShortName(s string) bool {
 func (s *Service) AddConnection(rec ConnRecord) (ConnRecord, error) {
 	rec.Name = strings.TrimSpace(rec.Name)
 	if !validName(rec.Name) {
-		return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("连接名称不能为空，且不能包含空格或控制字符"))
+		return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("connection name cannot be empty or contain spaces/control characters"))
 	}
 	rec.ShortName = strings.TrimSpace(rec.ShortName)
 	if rec.ShortName != "" {
 		if !validShortName(rec.ShortName) {
-			return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("短名仅允许字母、数字、连字符、下划线，长度 1-32"))
+			return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("short name: only letters, digits, hyphens and underscores, 1-32 chars"))
 		}
 		// 短名唯一性校验：新建或更新时不能与其他连接重复
 		conns := s.persist.LoadConns()
 		for _, existing := range conns {
 			if existing.ShortName == rec.ShortName && existing.ID != rec.ID {
-				return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("短名已存在: %s", rec.ShortName))
+				return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("short name already exists: %s", rec.ShortName))
 			}
 		}
 	}
 	if rec.Conn.Type == "" {
-		return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("数据库类型不能为空"))
+		return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("database type cannot be empty"))
 	}
 	if _, ok := SupportedDBTypes[rec.Conn.Type]; !ok {
-		return rec, cygin.NewError(ErrUnsupportedType, cygin.WithErrPrint(), cygin.WithErrDetailf("不支持的数据库类型: %s", rec.Conn.Type))
+		return rec, cygin.NewError(ErrUnsupportedType, cygin.WithErrPrint(), cygin.WithErrDetailf("unsupported database type: %s", rec.Conn.Type))
 	}
 	saved, err := s.persist.SaveConn(rec)
 	if err != nil {
@@ -208,11 +208,11 @@ func (s *Service) resolveConn(key string, inline *DBConnInfo) (*DBConnInfo, erro
 		return inline, nil
 	}
 	if key == "" {
-		return nil, cygin.NewError(ErrConnNotSpecified, cygin.WithErrPrint(), cygin.WithErrDetailf("未指定数据库连接"))
+		return nil, cygin.NewError(ErrConnNotSpecified, cygin.WithErrPrint(), cygin.WithErrDetailf("database connection not specified"))
 	}
 	rec, ok := s.persist.GetConn(key)
 	if !ok {
-		return nil, cygin.NewError(ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("连接配置不存在: %s", key))
+		return nil, cygin.NewError(ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("connection not found: %s", key))
 	}
 	return &rec.Conn, nil
 }
@@ -323,7 +323,7 @@ func (s *Service) RunCompare(ctx context.Context, opts CompareOptions, cb Progre
 	// 多库对比通过 opts.Databases / opts.DBMapping 指定；单库对比仍需源/目标都选库
 	if len(opts.Databases) == 0 && len(opts.DBMapping) == 0 {
 		if (src.DBName == "" && src.Schema == "") || (target.DBName == "" && target.Schema == "") {
-			return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("请先选择对比的库"))
+			return nil, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("please select a database to compare first"))
 		}
 	}
 	return engine.RunCompare(ctx, opts, cb)
@@ -416,7 +416,7 @@ func (r *TaskRunner) Start(taskID, taskType string, run func(ctx context.Context
 		func() {
 			defer func() {
 				if rec := recover(); rec != nil {
-					err = fmt.Errorf("任务执行异常: %v", rec)
+					err = fmt.Errorf("task execution error: %v", rec)
 					cylog.Errorf("任务执行 panic taskID=%s type=%s: %v", taskID, taskType, rec)
 				}
 			}()
@@ -485,7 +485,7 @@ func (r *TaskRunner) Subscribe(taskID string) (<-chan ProgressInfo, func(), erro
 	defer r.mu.Unlock()
 	t, ok := r.running[taskID]
 	if !ok {
-		return nil, nil, fmt.Errorf("任务不存在或已结束: %s", taskID)
+		return nil, nil, cygin.NewError(ErrTaskNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("task not found or already finished: %s", taskID))
 	}
 	ch := make(chan ProgressInfo, 16)
 	if t.hasLatest {
@@ -507,7 +507,7 @@ func (r *TaskRunner) Cancel(taskID string) error {
 	t, ok := r.running[taskID]
 	r.mu.RUnlock()
 	if !ok {
-		return cygin.NewError(ErrTaskNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("任务不存在: %s", taskID))
+		return cygin.NewError(ErrTaskNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("task not found: %s", taskID))
 	}
 	t.cancel()
 	return nil
@@ -646,7 +646,7 @@ func (s *Service) StartCompare(opts CompareOptions, taskConfigID string) (string
 	opts.Target = target
 	if len(opts.Databases) == 0 && len(opts.DBMapping) == 0 {
 		if (src.DBName == "" && src.Schema == "") || (target.DBName == "" && target.Schema == "") {
-			return "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("请先选择对比的库"))
+			return "", cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("please select a database to compare first"))
 		}
 	}
 	taskID := newTaskID()
@@ -702,7 +702,7 @@ func (s *Service) GetCompareResult(taskID string) (*CompareResult, error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, cygin.NewError(ErrTaskNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("对比结果不存在: %s", taskID))
+		return nil, cygin.NewError(ErrTaskNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("compare result not found: %s", taskID))
 	}
 	var result CompareResult
 	if err := json.Unmarshal(data, &result); err != nil {
@@ -760,10 +760,10 @@ func trimLogs(logs []string) []string {
 // SaveTask 保存任务配置（新增或更新），并标记为最近使用
 func (s *Service) SaveTask(task *TaskConfig) error {
 	if strings.TrimSpace(task.Name) == "" {
-		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("任务名称不能为空"))
+		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("task name cannot be empty"))
 	}
 	if task.Type == "" {
-		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("任务类型不能为空"))
+		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("task type cannot be empty"))
 	}
 	now := time.Now().UnixMilli()
 	if task.ID == "" {
@@ -799,7 +799,7 @@ func (s *Service) ListTasks(taskType string) []TaskConfig {
 func (s *Service) GetTask(id string) (TaskConfig, error) {
 	t, ok := s.persist.GetTask(id)
 	if !ok {
-		return TaskConfig{}, cygin.NewError(ErrTaskNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("任务配置不存在: %s", id))
+		return TaskConfig{}, cygin.NewError(ErrTaskNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("task config not found: %s", id))
 	}
 	return t, nil
 }
@@ -827,31 +827,31 @@ func (s *Service) RunTaskByID(taskID string) (string, error) {
 	switch task.Type {
 	case "export":
 		if task.ExportOpts == nil {
-			return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("任务配置缺少导出选项: %s", task.ID))
+			return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("task config missing export options: %s", task.ID))
 		}
 		return s.StartExport(*task.ExportOpts, task.ID)
 	case "import":
 		if task.ImportOpts == nil {
-			return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("任务配置缺少导入选项: %s", task.ID))
+			return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("task config missing import options: %s", task.ID))
 		}
 		return s.StartImport(*task.ImportOpts, task.ID)
 	case "migrate":
 		if task.MigrateOpts == nil {
-			return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("任务配置缺少迁移选项: %s", task.ID))
+			return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("task config missing migrate options: %s", task.ID))
 		}
 		return s.StartMigrate(*task.MigrateOpts, task.ID)
 	case "compare":
 		if task.CompareOpts == nil {
-			return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("任务配置缺少对比选项: %s", task.ID))
+			return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("task config missing compare options: %s", task.ID))
 		}
 		return s.StartCompare(*task.CompareOpts, task.ID)
 	case "dictionary":
 		if task.DictionaryOpts == nil {
-			return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("任务配置缺少数据字典选项: %s", task.ID))
+			return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("task config missing dictionary options: %s", task.ID))
 		}
 		return s.StartDictionary(*task.DictionaryOpts, task.ID)
 	default:
-		return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("未知任务类型: %s", task.Type))
+		return "", cygin.NewError(ErrTaskInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("unknown task type: %s", task.Type))
 	}
 }
 
@@ -874,7 +874,7 @@ func (s *Service) DeleteHistory(taskID string) error {
 		return err
 	}
 	if rec.Status == "running" {
-		return cygin.NewError(ErrHistoryRunning, cygin.WithErrPrint(), cygin.WithErrDetailf("任务运行中，无法删除记录: %s", taskID))
+		return cygin.NewError(ErrHistoryRunning, cygin.WithErrPrint(), cygin.WithErrDetailf("task is running, cannot delete record: %s", taskID))
 	}
 	if err := s.persist.DeleteHistory(taskID); err != nil {
 		return err

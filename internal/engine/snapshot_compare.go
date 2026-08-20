@@ -51,7 +51,7 @@ func RunSnapshotCompare(ctx context.Context, snapshot *Snapshot, targetConn *DBC
 
 	// 清空表结构元数据缓存
 	cydb.FlushTableInfoCache()
-	t := newTracker(cb)
+	t := newTracker(cb, opts.Lang)
 
 	// 首位库的 pooled 连接用于生成类型归一化器（不参与实际查询；类型归一器只依赖目标连接类型与 DBType）。
 	// 每个库对的实际查询由 loop 里 ConnectPooled 出的绑定库名连接承担。
@@ -93,7 +93,7 @@ func RunSnapshotCompare(ctx context.Context, snapshot *Snapshot, targetConn *DBC
 		result.Summary = mergeSummary(result.Summary, dr.Summary)
 	}
 	t.finish()
-	t.log("快照对比完成（%d 个库）: 共%d项, 一致%d, 仅快照有%d, 仅当前有%d, 结构差异%d, 数据差异%d",
+	t.log(engineTextsFor(t.lang).scmpDone,
 		len(result.Databases), result.Summary.Total, result.Summary.Matched, result.Summary.SourceOnly,
 		result.Summary.TargetOnly, result.Summary.StructureDiff, result.Summary.DataDiff)
 	return result, nil
@@ -171,7 +171,7 @@ func runSnapshotCompareDatabase(ctx context.Context, snapshot *Snapshot, sd Snap
 	}
 
 	t.p.TotalUnits += len(pairs)
-	t.log("开始快照对比库 %s → 当前 %s: %d 组表配对", sd.DBName, dbName, len(pairs))
+	t.log(engineTextsFor(t.lang).scmpStart, sd.DBName, dbName, len(pairs))
 
 	dr := &CompareDatabaseResult{SourceDB: sd.DBName, TargetDB: dbName, Tables: []CompareTableResult{}}
 	for _, p := range pairs {
@@ -198,7 +198,7 @@ func runSnapshotCompareDatabase(ctx context.Context, snapshot *Snapshot, sd Snap
 
 			tgtCols, err := tableColumns(targetCli, p.targetName)
 			if err != nil {
-				t.log("表 %s 结构对比失败（已跳过）: %v", p.name, err)
+				t.log(engineTextsFor(t.lang).scmpStructFail, p.name, err)
 			} else {
 				srcCols := snapshotColumnsToColumnItems(snapTable.Columns)
 				cols := diffColumns(srcCols, tgtCols, nil, normTgt)
@@ -206,14 +206,14 @@ func runSnapshotCompareDatabase(ctx context.Context, snapshot *Snapshot, sd Snap
 
 				structDiff := !cols.Matched
 				if structDiff {
-					tr.Data = &DataDiff{Mode: "skipped", SkippedReason: "结构不一致，已跳过行数对比"}
+					tr.Data = &DataDiff{Mode: "skipped", SkippedReason: engineTextsFor(t.lang).skipStructRows}
 				}
 			}
 
 			if tr.Data == nil {
 				tgtRows, err := countTableRows(targetCli, p.targetName)
 				if err != nil {
-					t.log("表 %s 行数统计失败（已跳过）: %v", p.name, err)
+					t.log(engineTextsFor(t.lang).scmpRowFail, p.name, err)
 				} else {
 					dd := &DataDiff{
 						Mode:       "count",
@@ -222,7 +222,7 @@ func runSnapshotCompareDatabase(ctx context.Context, snapshot *Snapshot, sd Snap
 						Equal:      snapTable.RowCount == tgtRows,
 					}
 					if !dd.Equal {
-						dd.SkippedReason = fmt.Sprintf("行数变化: 快照 %d → 当前 %d", snapTable.RowCount, tgtRows)
+						dd.SkippedReason = fmt.Sprintf(engineTextsFor(t.lang).skipRowChanged, snapTable.RowCount, tgtRows)
 					}
 					tr.Data = dd
 				}
@@ -242,7 +242,7 @@ func runSnapshotCompareDatabase(ctx context.Context, snapshot *Snapshot, sd Snap
 
 		dr.Tables = append(dr.Tables, tr)
 		t.p.DoneUnits++
-		t.log("%s: %s", p.name, tableResultDesc(&tr))
+		t.log("%s: %s", p.name, tableResultDesc(&tr, t.lang))
 	}
 	dr.Summary = buildCompareSummary(dr.Tables)
 	return dr, nil

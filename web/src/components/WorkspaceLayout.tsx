@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels"
-import { AlertCircle, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, FunctionSquare, List, Loader2, Plus, SkipForward, Sparkles, Star, Table2, View, X } from "lucide-react"
+import { useTranslation } from "react-i18next"
+import { AlertCircle, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, FunctionSquare, Lightbulb, List, Loader2, Plus, SkipForward, Sparkles, Star, Table2, View, X } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -26,10 +27,12 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
+import { friendlyDBError } from "@/lib/dbError"
 import { setSqlEditor } from "@/lib/editorRef"
 import { formatEditorSQL, formatSQL } from "@/lib/sqlFormat"
 import { useClickOutside } from "@/lib/useClickOutside"
 import { defaultFavoriteTitle } from "@/lib/sql"
+import { tKey } from "@/lib/i18n"
 import { prompt } from "@/components/ui/alert-dialog"
 import { useQueryStore, type WorkspaceTab } from "@/stores/queryStore"
 import { useObjectTreeStore } from "@/stores/objectTreeStore"
@@ -58,6 +61,7 @@ const splitTableName = (name: string): { head: string; tail: string } => {
 }
 
 export default function WorkspaceLayout() {
+  const { t } = useTranslation()
   const { connections, panelOpen } = useAppStore()
   const {
     tabs,
@@ -172,12 +176,12 @@ export default function WorkspaceLayout() {
   // 连接状态圆点的悬浮文案：状态 + 响应延时
   const statusTitle =
     ping === "checking"
-      ? "连接检测中…"
+      ? t("workspace.connChecking")
       : ping === "ok"
-        ? `连接正常 · ${pingMs} ms（点击重新检测）`
+        ? t("workspace.connOk", { ms: pingMs })
         : ping === "fail"
-          ? "连接不可用（点击重新检测）"
-          : "点击检测连接"
+          ? t("workspace.connFail")
+          : t("workspace.connCheck")
 
   // 连接状态自愈：
   // 1) 首次进入若连接列表已加载、尚未选连接，自动选中第一个（供右侧历史面板感知）；
@@ -195,7 +199,7 @@ export default function WorkspaceLayout() {
       invalidatedRef.current = true
       setConnId("")
       useObjectTreeStore.getState().clear()
-      toast.error("当前连接已失效（可能被删除或重建），请重新选择连接")
+      toast.error(t("workspace.connInvalid"))
       return
     }
     // connId 有效：重置失效标记（用户已手动重选，后续若再次删除可再次触发自愈）
@@ -214,12 +218,12 @@ export default function WorkspaceLayout() {
       const r = await pingConnection(connId)
       setPingMs(r.elapsedMs)
       setPing(r.ok ? "ok" : "fail")
-      if (!r.ok) toast.error(`连接不可用: ${r.error || "未知错误"}`)
+      if (!r.ok) toast.error(t("workspace.connUnavailable", { msg: r.error || t("common.unknown") }))
     } catch (e) {
       setPing("fail")
-      toast.error(`连接检测失败: ${(e as Error).message}`)
+      toast.error(t("workspace.connCheckFail", { msg: (e as Error).message }))
     }
-  }, [connId])
+  }, [connId, t])
 
   // 读取快捷动作（解释/优化）的作用对象 SQL，优先级：
   //   1. 编辑器当前选中部分（有选中）
@@ -245,13 +249,13 @@ export default function WorkspaceLayout() {
     (action: "explain" | "optimize") => {
       const sql = getTargetSql()
       if (!sql) {
-        toast.info("编辑器中没有可用的 SQL")
+        toast.info(t("workspace.noSql"))
         return
       }
       setAiOpen(true)
       setQuickRequest({ action, text: sql })
     },
-    [getTargetSql],
+    [getTargetSql, t],
   )
 
   // 切换激活 tab 时，自动把激活 tab 滚动到视区内（tab 过多时不依赖用户手动横向滚动）
@@ -288,6 +292,8 @@ export default function WorkspaceLayout() {
   const active = tabs.find((t) => t.id === activeId)
   const queryActive = active && active.kind === "query" ? active : null
   const objectActive = active && active.kind === "object" ? active : null
+  // 查询失败错误友好化：识别连接类错误（connection refused 等）时展示中文标题/原因/排查建议
+  const qErr = queryActive?.error ? friendlyDBError(queryActive.error) : null
 
   // 同库去重：当前连接打开的多个对象 tab 若都在同一库，标签省略 [库名] 后缀（完整库名见 hover title），
   // 避免每个 tab 重复携带相同库名；跨库混开时才显示 [库名] 以区分
@@ -343,7 +349,7 @@ export default function WorkspaceLayout() {
               variant="ghost"
               size="icon"
               className="h-7 w-7 text-muted-foreground hover:text-foreground"
-              title="展开对象树"
+              title={t("workspace.expandTree")}
               onClick={() => setTreeCollapsed(false)}
             >
               <ChevronRight className="h-4 w-4" />
@@ -385,13 +391,13 @@ export default function WorkspaceLayout() {
                       <span className="truncate font-medium">{conn.name}</span>
                     </span>
                   ) : (
-                    <span className="text-muted-foreground">选择连接…</span>
+                    <span className="text-muted-foreground">{t("workspace.selectConn")}</span>
                   )}
                 </SelectTrigger>
                 <SelectContent>
                   {connections.length === 0 ? (
                     <div className="px-2 py-4 text-center text-sm text-muted-foreground">
-                      暂无连接，请先在右侧面板「新建连接」
+                      {t("workspace.noConnNew")}
                     </div>
                   ) : (
                     connections.map((c) => (
@@ -413,12 +419,12 @@ export default function WorkspaceLayout() {
                   )}
                 </SelectContent>
               </Select>
-              <span className="shrink-0 text-xs font-medium text-muted-foreground">对象</span>
+              <span className="shrink-0 text-xs font-medium text-muted-foreground">{t("workspace.objects")}</span>
               <Button
                 variant="ghost"
                 size="icon"
                 className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
-                title="折叠对象树"
+                title={t("workspace.collapseTree")}
                 onClick={() => setTreeCollapsed(true)}
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
@@ -440,7 +446,7 @@ export default function WorkspaceLayout() {
                 canScrollLeft ? "hover:bg-accent hover:text-foreground" : "cursor-default opacity-30",
               )}
               disabled={!canScrollLeft}
-              title="向左滚动"
+              title={t("workspace.scrollLeft")}
               onClick={() => scrollTabs(-1)}
             >
               <ChevronLeft className="h-3.5 w-3.5" />
@@ -449,31 +455,31 @@ export default function WorkspaceLayout() {
               ref={tabsScrollRef}
               className="flex min-w-0 items-center gap-1 overflow-x-auto pt-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
-              {tabs.map((t) => (
-                <ContextMenu key={t.id}>
+              {tabs.map((tab) => (
+                <ContextMenu key={tab.id}>
                   <ContextMenuTrigger asChild>
                     <div
-                      ref={t.id === activeId ? activeTabRef : null}
+                      ref={tab.id === activeId ? activeTabRef : null}
                       className={cn(
                         "group flex shrink-0 cursor-pointer items-center gap-1 rounded-t-md border border-b-0 px-2.5 py-1.5 text-xs transition-colors",
-                        t.id === activeId
+                        tab.id === activeId
                           ? "border-border bg-background font-medium text-foreground"
                           : "border-transparent text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground/80",
                       )}
-                      onClick={() => setActiveTab(t.id)}
+                      onClick={() => setActiveTab(tab.id)}
                       // 中键点击关闭（浏览器 tab 行为）
                       onAuxClick={(e) => {
-                        if (e.button === 1) closeTab(t.id)
+                        if (e.button === 1) closeTab(tab.id)
                       }}
                       // 双击重命名（仅 query tab）
                       onDoubleClick={() => {
-                        if (t.kind === "query") {
-                          setRenamingId(t.id)
-                          setRenameValue(t.title)
+                        if (tab.kind === "query") {
+                          setRenamingId(tab.id)
+                          setRenameValue(tab.title)
                         }
                       }}
                     >
-                      {renamingId === t.id ? (
+                      {renamingId === tab.id ? (
                         <input
                           autoFocus
                           className="h-4 w-24 rounded-sm border border-border bg-background px-1 text-xs leading-4 outline-none focus:ring-1 focus:ring-ring"
@@ -481,12 +487,12 @@ export default function WorkspaceLayout() {
                           onChange={(e) => setRenameValue(e.target.value)}
                           onClick={(e) => e.stopPropagation()}
                           onBlur={() => {
-                            renameTab(t.id, renameValue)
+                            renameTab(tab.id, renameValue)
                             setRenamingId(null)
                           }}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
-                              renameTab(t.id, renameValue)
+                              renameTab(tab.id, renameValue)
                               setRenamingId(null)
                             } else if (e.key === "Escape") {
                               setRenamingId(null)
@@ -494,14 +500,14 @@ export default function WorkspaceLayout() {
                           }}
                         />
                       ) : (
-                        renderTabLabel(t)
+                        renderTabLabel(tab)
                       )}
                       <button
                         type="button"
                         className="ml-0.5 rounded p-0.5 text-muted-foreground/50 hover:bg-accent hover:text-foreground"
                         onClick={(e) => {
                           e.stopPropagation()
-                          closeTab(t.id)
+                          closeTab(tab.id)
                         }}
                       >
                         <X className="h-3 w-3" />
@@ -509,29 +515,29 @@ export default function WorkspaceLayout() {
                     </div>
                   </ContextMenuTrigger>
                   <ContextMenuContent>
-                    {t.kind === "query" && (
+                    {tab.kind === "query" && (
                       <>
                         <ContextMenuItem
                           onSelect={() => {
-                            setRenamingId(t.id)
-                            setRenameValue(t.title)
+                            setRenamingId(tab.id)
+                            setRenameValue(tab.title)
                           }}
                         >
-                          重命名
+                          {t("common.rename")}
                         </ContextMenuItem>
                         <ContextMenuSeparator />
                       </>
                     )}
-                    <ContextMenuItem onSelect={() => closeTab(t.id)}>关闭</ContextMenuItem>
-                    <ContextMenuItem onSelect={() => closeOthers(t.id)}>关闭其他</ContextMenuItem>
+                    <ContextMenuItem onSelect={() => closeTab(tab.id)}>{t("common.close")}</ContextMenuItem>
+                    <ContextMenuItem onSelect={() => closeOthers(tab.id)}>{t("workspace.closeOthers")}</ContextMenuItem>
                     <ContextMenuItem
-                      disabled={tabs.findIndex((x) => x.id === t.id) === tabs.length - 1}
-                      onSelect={() => closeRight(t.id)}
+                      disabled={tabs.findIndex((x) => x.id === tab.id) === tabs.length - 1}
+                      onSelect={() => closeRight(tab.id)}
                     >
-                      关闭右侧
+                      {t("workspace.closeRight")}
                     </ContextMenuItem>
                     <ContextMenuSeparator />
-                    <ContextMenuItem onSelect={() => closeAll()}>关闭全部</ContextMenuItem>
+                    <ContextMenuItem onSelect={() => closeAll()}>{t("workspace.closeAll")}</ContextMenuItem>
                   </ContextMenuContent>
                 </ContextMenu>
               ))}
@@ -544,7 +550,7 @@ export default function WorkspaceLayout() {
                 canScrollRight ? "hover:bg-accent hover:text-foreground" : "cursor-default opacity-30",
               )}
               disabled={!canScrollRight}
-              title="向右滚动"
+              title={t("workspace.scrollRight")}
               onClick={() => scrollTabs(1)}
             >
               <ChevronRight className="h-3.5 w-3.5" />
@@ -558,7 +564,7 @@ export default function WorkspaceLayout() {
                   "flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
                   tabListOpen && "bg-accent text-foreground",
                 )}
-                title="列出所有标签页"
+                title={t("workspace.listTabs")}
                 onClick={() => setTabListOpen((v) => !v)}
               >
                 <List className="h-3.5 w-3.5" />
@@ -566,11 +572,11 @@ export default function WorkspaceLayout() {
               {tabListOpen && (
                 <div className="scrollbar-thin absolute right-0 top-full z-50 mt-1 max-h-80 w-64 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
                   <div className="flex items-center justify-between px-2 py-1">
-                    <span className="text-[11px] font-medium text-muted-foreground">标签页</span>
+                    <span className="text-[11px] font-medium text-muted-foreground">{t("workspace.tabs")}</span>
                     <span className="text-[10px] tabular-nums text-muted-foreground">{tabs.length}</span>
                   </div>
                   {tabs.length === 0 ? (
-                    <div className="px-2 py-4 text-center text-xs text-muted-foreground">暂无标签页</div>
+                    <div className="px-2 py-4 text-center text-xs text-muted-foreground">{t("workspace.noTabs")}</div>
                   ) : (
                     tabs.map((t) => (
                       <button
@@ -597,13 +603,13 @@ export default function WorkspaceLayout() {
             {/* 右侧操作按钮组：脱敏 + 新建查询；连接切换已迁到左侧对象树顶部；
                 pr-9 为右上角展开/收起按钮让位（面板收起时才需要） */}
             <div className={cn("ml-auto flex shrink-0 items-center gap-2 py-1 pl-3", !panelOpen && "pr-9")}>
-              <label className="flex h-6 items-center gap-1.5 text-[11px] text-muted-foreground" title="敏感列（password/token/secret 等）结果统一打码">
+              <label className="flex h-6 items-center gap-1.5 text-[11px] text-muted-foreground" title={t("workspace.maskTitle")}>
                 <Switch checked={mask} onCheckedChange={setMask} />
-                脱敏
+                {t("workspace.mask")}
               </label>
 
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => addTab()}>
-                <Plus className="mr-1 h-3.5 w-3.5" /> 新建查询
+                <Plus className="mr-1 h-3.5 w-3.5" /> {t("workspace.newQuery")}
               </Button>
 
               {/* AI 助手开关（配置启用时显示）：纯图标，位于「新建查询」右侧，对应右侧 AI 面板 */}
@@ -613,7 +619,7 @@ export default function WorkspaceLayout() {
                   variant={aiOpen ? "secondary" : "outline"}
                   className={cn("h-7 w-7", aiOpen && "border-violet-500/50 text-violet-600")}
                   onClick={() => setAiOpen((v) => !v)}
-                  title={aiOpen ? "收起 AI 助手" : "打开 AI 助手（生成 / 解释 / 修复 / 优化 SQL）"}
+                  title={aiOpen ? t("workspace.aiCollapse") : t("workspace.aiOpen")}
                 >
                   <Sparkles className="h-3.5 w-3.5" />
                 </Button>
@@ -638,13 +644,13 @@ export default function WorkspaceLayout() {
                       onChange={(sql) => updateTabSql(queryActive.id, sql)}
                       onRun={(selection) => runTab(queryActive.id, selection)}
                       disabled={running}
-                      placeholder="SELECT * FROM 表名;  (Cmd/Ctrl + Enter 执行，选中可仅执行选中部分)"
+                      placeholder={t("workspace.editorPlaceholder")}
                       diffBase={aiPreviewing ? aiPreviewBase : undefined}
                       onApply={() => {
                         // 确认替换：保留当前编辑器内容，退出对比模式
                         setAiPreviewBase("")
                         setAiPreviewing(false)
-                        toast.success("已应用 AI 生成的 SQL")
+                        toast.success(t("workspace.appliedAI"))
                       }}
                       onCancel={() => {
                         // 取消：还原为替换前的原内容
@@ -677,13 +683,13 @@ export default function WorkspaceLayout() {
                       size="sm"
                       variant="ghost"
                       className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
-                      title={hasEditorSelection ? "格式化选中的 SQL" : "格式化 SQL（Shift+Alt+F）"}
+                      title={hasEditorSelection ? t("workspace.formatSelTitle") : t("workspace.formatTitle")}
                       onClick={() => {
                         const ed = sqlEditorRef.current
                         if (ed) formatEditorSQL(ed)
                       }}
                     >
-                      <Braces className="h-3.5 w-3.5" /> 格式化
+                      <Braces className="h-3.5 w-3.5" /> {t("workspace.format")}
                     </Button>
                     {aiStatus?.enabled && (
                       <>
@@ -691,53 +697,53 @@ export default function WorkspaceLayout() {
                           size="sm"
                           variant="ghost"
                           className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
-                          title={hasEditorSelection ? "解释选中的 SQL" : "解释编辑器中的 SQL"}
+                          title={hasEditorSelection ? t("workspace.explainSelTitle") : t("workspace.explainTitle")}
                           onClick={() => triggerQuickAction("explain")}
                         >
-                          <Sparkles className="h-3.5 w-3.5 text-violet-500" /> 解释
+                          <Sparkles className="h-3.5 w-3.5 text-violet-500" /> {t("workspace.explain")}
                         </Button>
                         <Button
                           size="sm"
                           variant="ghost"
                           className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
-                          title={hasEditorSelection ? "优化选中的 SQL" : "优化编辑器中的 SQL"}
+                          title={hasEditorSelection ? t("workspace.optimizeSelTitle") : t("workspace.optimizeTitle")}
                           onClick={() => triggerQuickAction("optimize")}
                         >
-                          <Sparkles className="h-3.5 w-3.5 text-violet-500" /> 优化
+                          <Sparkles className="h-3.5 w-3.5 text-violet-500" /> {t("workspace.optimize")}
                         </Button>
                         {/* 收藏当前 SQL：存入独立收藏表（按连接隔离），与右侧「收藏」Tab 联动 */}
                         <Button
                           size="sm"
                           variant="ghost"
                           className="h-7 gap-1 text-xs text-muted-foreground hover:text-amber-600"
-                          title="收藏当前编辑器 SQL"
+                          title={t("workspace.favoriteSqlTitle")}
                           disabled={!queryActive || !queryActive.sql.trim()}
                           onClick={async () => {
                             if (!queryActive) return
                             const sql = queryActive.sql.trim()
                             if (!sql) {
-                              toast.info("编辑器中没有可用的 SQL")
+                              toast.info(t("workspace.noSql"))
                               return
                             }
                             // 弹窗预填默认标题，用户可修改后回车快速保存
                             const title = await prompt({
-                              title: "收藏 SQL",
-                              description: "为这条 SQL 起个名字，方便日后查找回填",
+                              title: t("app.favoriteSQL"),
+                              description: t("app.favoriteSQLDesc"),
                               defaultValue: defaultFavoriteTitle(sql),
-                              placeholder: "如：每日活跃用户统计",
-                              confirmText: "收藏",
-                              required: "标题不能为空",
+                              placeholder: t("app.favoritePlaceholder"),
+                              confirmText: t("app.favorite"),
+                              required: t("common.titleCannotBeEmpty"),
                             })
                             if (title == null) return
                             try {
                               await addFavorite(connId, sql, queryActive.db, queryActive.mode, title)
-                              toast.success("已收藏")
+                              toast.success(t("app.favorited"))
                             } catch (e) {
-                              toast.error(`收藏失败: ${(e as Error).message}`)
+                              toast.error(t("app.favoriteFailed", { msg: (e as Error).message }))
                             }
                           }}
                         >
-                          <Star className="h-3.5 w-3.5" /> 收藏
+                          <Star className="h-3.5 w-3.5" /> {t("app.favorite")}
                         </Button>
                       </>
                     )}
@@ -746,9 +752,9 @@ export default function WorkspaceLayout() {
                       if (r.error) return null
                       // 行数与耗时统一在结果网格底部展示，这里只保留写操作影响行数与多结果集提示
                       const text = r.isWrite
-                        ? `影响 ${r.affectedRows} 行`
+                        ? t("common.affectedRows", { n: r.affectedRows })
                         : queryActive.results.length > 1
-                          ? `共 ${queryActive.results.length} 个结果集`
+                          ? t("workspace.multiResults", { n: queryActive.results.length })
                           : ""
                       if (!text) return null
                       return (
@@ -762,11 +768,11 @@ export default function WorkspaceLayout() {
                   {/* 右：库选择 + 执行模式 + 执行 */}
                   <div className="flex shrink-0 items-center gap-2">
                     <Select value={queryActive.db} onValueChange={(db) => updateTabDb(queryActive.id, db)}>
-                      <SelectTrigger className="h-7 w-auto min-w-[130px] max-w-[240px] px-2 text-xs" title="目标库">
-                        {queryActive.db || <span className="text-muted-foreground">默认库</span>}
+                      <SelectTrigger className="h-7 w-auto min-w-[130px] max-w-[240px] px-2 text-xs" title={t("workspace.targetDb")}>
+                        {queryActive.db || <span className="text-muted-foreground">{t("workspace.defaultDb")}</span>}
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">默认库</SelectItem>
+                        <SelectItem value="">{t("workspace.defaultDb")}</SelectItem>
                         {dbList.map((db) => (
                           <SelectItem key={db} value={db}>
                             {db}
@@ -780,14 +786,14 @@ export default function WorkspaceLayout() {
                     >
                       <SelectTrigger
                         className="h-7 w-auto min-w-[100px] px-2 text-xs"
-                        title="规范执行 = 系统规范化 SQL 语法，并自动限制最多返回 1000 行；原样执行 = 按你写的原样发库，不限制行数"
+                        title={t("workspace.modeTitle")}
                       >
-                        {SQL_EXEC_MODE_LABEL[queryActive.mode] ?? "规范执行"}
+                        {tKey(SQL_EXEC_MODE_LABEL[queryActive.mode] ?? "app.execMode.transform")}
                       </SelectTrigger>
                       <SelectContent>
                         {(Object.keys(SQL_EXEC_MODE_LABEL) as SQLExecMode[]).map((m) => (
                           <SelectItem key={m} value={m}>
-                            {SQL_EXEC_MODE_LABEL[m]}
+                            {tKey(SQL_EXEC_MODE_LABEL[m])}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -809,7 +815,7 @@ export default function WorkspaceLayout() {
                       <span className="flex w-4 shrink-0 items-center justify-center">
                         {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                       </span>
-                      执行 (⌘⏎)
+                      {t("workspace.run")}
                     </Button>
                   </div>
                 </div>
@@ -827,8 +833,23 @@ export default function WorkspaceLayout() {
                     <div className="flex max-h-full items-start gap-3 overflow-auto rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
                       <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
                       <div className="min-w-0 flex-1">
-                        <div className="font-medium text-destructive">执行失败</div>
-                        <div className="mt-0.5 break-words text-foreground/80">{queryActive.error}</div>
+                        <div className="font-medium text-destructive">{qErr?.title ?? t("common.execFailed")}</div>
+                        {qErr ? (
+                          <>
+                            <div className="mt-0.5 break-words text-foreground/80">{qErr.reason}</div>
+                            {/* 排查建议：可操作的具体步骤，替代笼统的「重试」引导 */}
+                            <ul className="mt-1.5 space-y-0.5">
+                              {qErr.advice.map((a, i) => (
+                                <li key={i} className="flex items-start gap-1.5 text-xs text-foreground/70">
+                                  <Lightbulb className="mt-0.5 h-3 w-3 shrink-0 text-amber-500" />
+                                  <span className="min-w-0 break-words">{a}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </>
+                        ) : (
+                          <div className="mt-0.5 break-words text-foreground/80">{queryActive.error}</div>
+                        )}
                       </div>
                       {/* 一键修复：自动打开 AI 面板并以「修复」动作附带报错信息 + 出错 SQL 触发。
                           作用对象 = 上次实际执行的 SQL（选中执行=选中部分，全文执行=全文），非编辑器全文 */}
@@ -842,12 +863,12 @@ export default function WorkspaceLayout() {
                             const failSql = getTargetSql()
                             setQuickRequest({
                               action: "fix",
-                              text: `以下 SQL 执行报错：\n\n${failSql}\n\n报错信息：\n${queryActive.error}\n\n请修复`,
+                              text: t("workspace.fixPrompt", { sql: failSql, err: queryActive.error }),
                             })
                           }}
                         >
                           <Sparkles className="h-3.5 w-3.5 text-violet-500" />
-                          AI 修复
+                          {t("workspace.aiFix")}
                         </Button>
                       )}
                     </div>
@@ -867,13 +888,13 @@ export default function WorkspaceLayout() {
                                   : "text-muted-foreground hover:bg-muted",
                               )}
                             >
-                              结果 {i + 1}
+                              {t("workspace.resultN", { n: i + 1 })}
                               {r.error ? (
-                                <span className="font-semibold text-destructive"> (错)</span>
+                                <span className="font-semibold text-destructive">{t("workspace.resultError")}</span>
                               ) : r.skipped ? (
-                                <span className="text-muted-foreground"> (未执行)</span>
+                                <span className="text-muted-foreground">{t("workspace.resultSkipped")}</span>
                               ) : r.isWrite ? (
-                                " (写)"
+                                t("workspace.resultWrite")
                               ) : (
                                 ""
                               )}
@@ -887,11 +908,11 @@ export default function WorkspaceLayout() {
                           <>
                             {/* 实际执行 SQL：展示数据库真实收到的语句 */}
                             <div className="flex shrink-0 items-center gap-2 rounded-md border bg-muted/40 px-2.5 py-1.5">
-                              <span className="shrink-0 text-[11px] text-muted-foreground">实际执行</span>
+                              <span className="shrink-0 text-[11px] text-muted-foreground">{t("workspace.actualExec")}</span>
                               <button
                                 type="button"
                                 className="min-w-0 flex-1 cursor-pointer truncate text-left font-mono text-[12px] text-foreground/80 hover:text-foreground hover:underline hover:decoration-dotted"
-                                title="点击查看完整 SQL"
+                                title={t("workspace.viewFullSQL")}
                                 onClick={() => setSqlDetail(r.sql)}
                               >
                                 {r.sql}
@@ -905,7 +926,7 @@ export default function WorkspaceLayout() {
                                 <div className="m-auto flex w-full max-w-2xl items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
                                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
                                   <div className="min-w-0 flex-1">
-                                    <div className="font-medium text-destructive">语句执行失败</div>
+                                    <div className="font-medium text-destructive">{t("workspace.stmtFailed")}</div>
                                     <div className="mt-1 max-h-40 overflow-auto break-words whitespace-pre-wrap rounded bg-muted/50 p-2 font-mono text-[12px] text-foreground/80">
                                       {r.sql}
                                     </div>
@@ -920,12 +941,12 @@ export default function WorkspaceLayout() {
                                         setAiOpen(true)
                                         setQuickRequest({
                                           action: "fix",
-                                          text: `以下 SQL 执行报错：\n\n${r.sql}\n\n报错信息：\n${r.error}\n\n请修复`,
+                                          text: t("workspace.fixPrompt", { sql: r.sql, err: r.error }),
                                         })
                                       }}
                                     >
                                       <Sparkles className="h-3.5 w-3.5 text-violet-500" />
-                                      AI 修复
+                                      {t("workspace.aiFix")}
                                     </Button>
                                   )}
                                 </div>
@@ -938,8 +959,8 @@ export default function WorkspaceLayout() {
                                     <SkipForward className="h-5 w-5 text-muted-foreground" />
                                   </div>
                                   <div className="flex flex-col gap-0.5">
-                                    <span className="text-sm font-medium text-muted-foreground">未执行</span>
-                                    <span className="text-xs text-muted-foreground/70">前面语句执行失败，本语句已跳过</span>
+                                    <span className="text-sm font-medium text-muted-foreground">{t("workspace.notExecuted")}</span>
+                                    <span className="text-xs text-muted-foreground/70">{t("workspace.notExecutedDesc")}</span>
                                   </div>
                                 </div>
                               </div>
@@ -951,17 +972,17 @@ export default function WorkspaceLayout() {
                                     <Check className="h-5 w-5 text-emerald-500" />
                                   </div>
                                   <div className="flex flex-col gap-0.5">
-                                    <span className="text-sm font-medium">执行成功</span>
-                                    <span className="text-xs text-muted-foreground">写语句 · 无结果集</span>
+                                    <span className="text-sm font-medium">{t("workspace.execSuccess")}</span>
+                                    <span className="text-xs text-muted-foreground">{t("workspace.writeNoResult")}</span>
                                   </div>
                                   <div className="h-8 w-px shrink-0 bg-border" />
                                   <div className="flex items-center gap-6">
                                     <div className="flex flex-col gap-0.5">
-                                      <span className="text-[11px] text-muted-foreground">影响行数</span>
+                                      <span className="text-[11px] text-muted-foreground">{t("workspace.affectedRowsLabel")}</span>
                                       <span className="text-sm font-medium tabular-nums">{r.affectedRows}</span>
                                     </div>
                                     <div className="flex flex-col gap-0.5">
-                                      <span className="text-[11px] text-muted-foreground">耗时</span>
+                                      <span className="text-[11px] text-muted-foreground">{t("workspace.elapsedLabel")}</span>
                                       <span className="text-sm font-medium tabular-nums">{r.elapsedMs} ms</span>
                                     </div>
                                   </div>
@@ -980,13 +1001,13 @@ export default function WorkspaceLayout() {
                     <div className="flex h-full flex-col items-center justify-center gap-1.5 text-sm text-muted-foreground">
                       {queryActive.sql.trim() ? (
                         <>
-                          <span>SQL 已保存，查询结果不随刷新保留</span>
+                          <span>{t("workspace.sqlSaved")}</span>
                           <span className="text-xs text-muted-foreground/80">
-                            点击「执行」重新查询即可查看数据
+                            {t("workspace.runAgain")}
                           </span>
                         </>
                       ) : (
-                        <span>编写 SQL 后点击「执行」，或从左侧对象树点击对象查看数据 / 结构 / DDL</span>
+                        <span>{t("workspace.writePrompt")}</span>
                       )}
                     </div>
                   )}
@@ -1048,7 +1069,7 @@ export default function WorkspaceLayout() {
                         }
                         if (!applied) {
                           // 无法定位（光标/选中无效）：回退为追加到末尾，并明确提示，避免静默无响应
-                          toast.info("未获取到编辑器光标位置，已改为追加到末尾")
+                          toast.info(t("workspace.noCursor"))
                           final = base.trim() ? `${base.trim()}\n\n${sql}` : sql
                         }
                         setAiPreviewBase(queryActive.sql)
@@ -1088,7 +1109,7 @@ export default function WorkspaceLayout() {
           ) : (
             /* 无 tab 空状态（切换连接后） */
             <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-              {connId ? "点击「新建查询」或从左侧对象树选择对象" : "请先在上方选择数据库连接"}
+              {connId ? t("workspace.noTabHint") : t("workspace.needConn")}
             </div>
           )}
         </main>
@@ -1098,7 +1119,7 @@ export default function WorkspaceLayout() {
       <Dialog open={sqlDetail !== null} onOpenChange={(v) => !v && setSqlDetail(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>实际执行 SQL</DialogTitle>
+            <DialogTitle>{t("workspace.actualExecTitle")}</DialogTitle>
           </DialogHeader>
           <pre className="h-[50vh] max-h-[60vh] overflow-auto whitespace-pre rounded-md border bg-muted/40 p-3 font-mono text-[12px] leading-5 text-foreground/90">
             {sqlDetailFormatted || sqlDetail}
@@ -1111,10 +1132,10 @@ export default function WorkspaceLayout() {
               onClick={async () => {
                 if (!sqlDetail) return
                 await navigator.clipboard.writeText(sqlDetailFormatted || sqlDetail)
-                toast.success("已复制")
+                toast.success(t("common.copied"))
               }}
             >
-              <Copy className="h-3.5 w-3.5" /> 复制
+              <Copy className="h-3.5 w-3.5" /> {t("common.copy")}
             </Button>
           </div>
         </DialogContent>

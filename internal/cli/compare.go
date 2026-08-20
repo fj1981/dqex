@@ -130,7 +130,7 @@ func cliCompare(cmd *cobra.Command, args []string) error {
 		opts.DBMapping = cfg.DBMap
 	}
 	cb, _ := cliProgress()
-	fmt.Println("开始对比...")
+	fmt.Println(cliTextsFor(cliLang()).startCompare)
 	taskID, _ := f.GetString("task")
 	recordID, result, err := svc.RunCompareRecorded(context.Background(), opts, cb, taskID)
 	if err != nil {
@@ -148,7 +148,7 @@ func cliCompare(cmd *cobra.Command, args []string) error {
 		if err := os.WriteFile(output, data, 0o644); err != nil {
 			return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(err.Error()))
 		}
-		fmt.Printf("报告已保存: %s\n", output)
+		printf(cliTextsFor(cliLang()).savedCompare+"\n", output)
 	}
 	return nil
 }
@@ -246,53 +246,54 @@ func mustGetBool(f interface{ GetBool(string) (bool, error) }, name string) bool
 // printCompareReport 终端输出对比报告：汇总行 + 差异表明细（--all 时输出全部）
 func printCompareReport(result *CompareResult, showAll bool) {
 	s := result.Summary
+	txt := cliTextsFor(cliLang())
 	fmt.Println()
-	fmt.Printf("%s\n", bold(fmt.Sprintf("对比结果: %s ↔ %s", result.Source, result.Target)))
-	fmt.Printf("共 %d 项 | %s %d | %s %d | %s %d | %s %d | %s %d\n",
+	printf("%s\n", bold(sprintf(txt.cmpTitle, result.Source, result.Target)))
+	printf(txt.cmpSummaryLine+"\n",
 		s.Total,
-		"一致", s.Matched,
-		yellow("仅源有"), s.SourceOnly,
-		yellow("仅目标有"), s.TargetOnly,
-		yellow("结构差异"), s.StructureDiff,
-		red("数据差异"), s.DataDiff)
+		txt.cmpMatched, s.Matched,
+		yellow(txt.cmpSrcOnly), s.SourceOnly,
+		yellow(txt.cmpTgtOnly), s.TargetOnly,
+		yellow(txt.cmpStructDiff), s.StructureDiff,
+		red(txt.cmpDataDiff), s.DataDiff)
 
 	fmt.Println()
 	tables := result.Tables
 	if len(result.Databases) > 0 {
-		fmt.Printf("%s\n", bold(fmt.Sprintf("%d 个库参与对比", len(result.Databases))))
+		printf("%s\n", bold(sprintf(txt.cmpDBCount, len(result.Databases))))
 		tables = nil
 		for _, db := range result.Databases {
-			fmt.Printf("\n%s %s ↔ %s（共%d项, 一致%d, 结构差异%d, 数据差异%d）\n",
-				bold("库"), bold(db.SourceDB), bold(db.TargetDB),
+			printf(txt.cmpDBLine+"\n",
+				bold(txt.cmpDBWord), bold(db.SourceDB), bold(db.TargetDB),
 				db.Summary.Total, db.Summary.Matched, db.Summary.StructureDiff, db.Summary.DataDiff)
 			tables = append(tables, db.Tables...)
 		}
 	}
-	fmt.Printf("%s  %s  %s\n", padCell("表", 32), padCell("状态", 8), "差异说明")
-	fmt.Printf("%s  %s  %s\n", strings.Repeat("-", 32), strings.Repeat("-", 8), strings.Repeat("-", 40))
+	printf("%s  %s  %s\n", padCell(txt.cmpColTable, 32), padCell(txt.cmpColStatus, 8), txt.cmpColDetail)
+	printf("%s  %s  %s\n", strings.Repeat("-", 32), strings.Repeat("-", 8), strings.Repeat("-", 40))
 	shown := 0
 	for _, t := range tables {
 		status, detail := cliTableSummary(t)
-		if !showAll && status == "一致" {
+		if !showAll && status == txt.cmpMatched {
 			continue
 		}
 		name := t.Name
 		if dispWidth(name) > 32 {
 			name = truncateCell(name, 32)
 		}
-		fmt.Printf("%s  %s  %s\n", padCell(name, 32), styleStatus(padCell(status, 8)), detail)
+		printf("%s  %s  %s\n", padCell(name, 32), styleStatus(padCell(status, 8)), detail)
 		shown++
 	}
 	if shown == 0 {
-		fmt.Println(green("（无差异）"))
+		fmt.Println(green(txt.cmpNoDiff))
 	} else if !showAll {
-		fmt.Printf("\n%s\n", dim(fmt.Sprintf("仅显示有差异的表（%d）；使用 --all 查看全部 %d 项", shown, s.Total)))
+		printf("\n%s\n", dim(sprintf(txt.cmpDiffOnly, shown, s.Total)))
 	}
 }
 
 // printCompareShowHint 对比完成后提示记录 ID 与回看命令
 func printCompareShowHint(recordID string) {
-	fmt.Printf("\n%s\n", dim(fmt.Sprintf("记录 ID: %s · 查看差异明细: dbx cmp show -i %s [表名]", recordID, recordID)))
+	printf("\n%s\n", dim(sprintf(cliTextsFor(cliLang()).cmpShowHint, recordID, recordID)))
 }
 
 // cliCompareShow 回看历史对比记录：不带表名输出全部表，带表名（--table/-t 或位置参数）输出单表差异明细
@@ -340,61 +341,62 @@ func cliCompareShow(cmd *cobra.Command, args []string) error {
 
 // printTableDetail 单表差异明细：列级结构对照 + 数据差异行样例
 func printTableDetail(t engine.CompareTableResult) {
+	txt := cliTextsFor(cliLang())
 	name := t.Name
 	if t.SourceName != "" && t.TargetName != "" && t.SourceName != t.TargetName {
-		name = fmt.Sprintf("%s（%s ↔ %s）", t.Name, t.SourceName, t.TargetName)
+		name = sprintf(txt.cmpTableAlias, t.Name, t.SourceName, t.TargetName)
 	}
-	fmt.Printf("%s\n", bold("表: "+name))
+	printf("%s\n", bold(sprintf(txt.cmpTableTitle, name)))
 
 	if t.Columns != nil {
-		fmt.Println(bold("\n── 结构 ──"))
+		fmt.Println(bold(txt.cmpStructTitle))
 		if t.Columns.Matched {
-			fmt.Println(green("结构一致"))
+			fmt.Println(green(txt.cmpStructSame))
 		} else {
 			for _, c := range t.Columns.SourceOnly {
-				fmt.Printf("  %s %-30s %s\n", green("+"), c.Name, dim(columnDesc(c)+"  （仅源有）"))
+				printf("  %s %-30s %s\n", green("+"), c.Name, dim(columnDesc(c)+txt.cmpColOnlySrc))
 			}
 			for _, c := range t.Columns.TargetOnly {
-				fmt.Printf("  %s %-30s %s\n", red("-"), c.Name, dim(columnDesc(c)+"  （仅目标有）"))
+				printf("  %s %-30s %s\n", red("-"), c.Name, dim(columnDesc(c)+txt.cmpColOnlyTgt))
 			}
 			for _, d := range t.Columns.Different {
-				fmt.Printf("  %s %-30s 定义不一致\n", yellow("±"), d.Name)
-				fmt.Printf("      源:   %s\n", dim(columnDesc(d.Source)))
-				fmt.Printf("      目标: %s\n", dim(columnDesc(d.Target)))
+				printf("  %s %-30s %s\n", yellow("±"), d.Name, txt.cmpColDiffDef)
+				printf(txt.cmpSrcCol+"\n", dim(columnDesc(d.Source)))
+				printf(txt.cmpTgtCol+"\n", dim(columnDesc(d.Target)))
 			}
 		}
 	}
 
 	if t.Data != nil {
-		fmt.Println(bold("\n── 数据 ──"))
+		fmt.Println(bold(txt.cmpDataTitle))
 		d := t.Data
 		if d.SkippedReason != "" {
-			fmt.Printf("未逐行比较: %s\n", d.SkippedReason)
+			printf(txt.cmpNotCompared+"\n", d.SkippedReason)
 		}
-		fmt.Printf("行数: 源 %d / 目标 %d", d.SourceRows, d.TargetRows)
+		printf(txt.cmpRowsLine, d.SourceRows, d.TargetRows)
 		if len(d.KeyColumns) > 0 {
-			fmt.Printf("%s", dim(fmt.Sprintf("  （按主键 %s 判断有无）", strings.Join(d.KeyColumns, ","))))
+			printf("%s", dim(sprintf(txt.cmpByPK, strings.Join(d.KeyColumns, ","))))
 		} else if d.Mode == "rows" {
-			fmt.Printf("%s", dim("  （无主键，整行对比）"))
+			printf("%s", dim(txt.cmpNoPK))
 		}
 		fmt.Println()
 		switch {
 		case d.Equal:
-			fmt.Println(green("数据一致"))
+			fmt.Println(green(txt.cmpDataSame))
 		case d.Mode == "count":
-			fmt.Println(red("行数不一致（超过阈值，仅比行数；可调大 --threshold 后重跑逐行对比）"))
+			fmt.Println(red(txt.cmpRowsDiff))
 		default:
 			if d.Missing > 0 {
-				fmt.Printf("%s（源有目标无）\n", red(fmt.Sprintf("缺失 %d 行", d.Missing)))
+				printf(txt.cmpMissingSuffix+"\n", red(sprintf(txt.cmpMissingCount, d.Missing)))
 			}
 			if d.Extra > 0 {
-				fmt.Printf("%s（目标有源无）\n", yellow(fmt.Sprintf("多出 %d 行", d.Extra)))
+				printf(txt.cmpExtraSuffix+"\n", yellow(sprintf(txt.cmpExtraCount, d.Extra)))
 			}
 			if d.Changed > 0 {
-				fmt.Printf("%s（主键匹配但内容不同）\n", yellow(fmt.Sprintf("变化 %d 行", d.Changed)))
+				printf(txt.cmpChangedSuffix+"\n", yellow(sprintf(txt.cmpChangedCount, d.Changed)))
 			}
-			printRowSamples("缺失行样例", d.MissingSamples, d.SampleColumns)
-			printRowSamples("多出行样例", d.ExtraSamples, d.SampleColumns)
+			printRowSamples(txt.cmpMissingSamples, d.MissingSamples, d.SampleColumns)
+			printRowSamples(txt.cmpExtraSamples, d.ExtraSamples, d.SampleColumns)
 			printChangedSamples(d.ChangedSamples)
 		}
 	}
@@ -417,13 +419,13 @@ func printRowSamples(title string, rows []map[string]any, cols []string) {
 	if len(rows) == 0 {
 		return
 	}
-	fmt.Printf("%s（%d）:\n", title, len(rows))
+	printf(cliTextsFor(cliLang()).cmpSampleTitle+"\n", title, len(rows))
 	for i, row := range rows {
 		parts := make([]string, 0, len(cols))
 		for _, c := range cols {
-			parts = append(parts, fmt.Sprintf("%s=%v", c, row[c]))
+			parts = append(parts, sprintf("%s=%v", c, row[c]))
 		}
-		fmt.Printf("  %d. %s\n", i+1, strings.Join(parts, "  "))
+		printf("  %d. %s\n", i+1, strings.Join(parts, "  "))
 	}
 }
 
@@ -432,28 +434,29 @@ func printChangedSamples(changed []engine.ChangedRow) {
 	if len(changed) == 0 {
 		return
 	}
-	fmt.Printf("变化行样例（%d）:\n", len(changed))
+	printf(cliTextsFor(cliLang()).cmpChangedSamples+"\n", len(changed))
 	for i, c := range changed {
 		keys := make([]string, 0, len(c.Key))
 		for k, v := range c.Key {
-			keys = append(keys, fmt.Sprintf("%s=%v", k, v))
+			keys = append(keys, sprintf("%s=%v", k, v))
 		}
 		sort.Strings(keys)
-		fmt.Printf("  %d. [%s]\n", i+1, strings.Join(keys, "  "))
+		printf("  %d. [%s]\n", i+1, strings.Join(keys, "  "))
 		for _, d := range c.Diffs {
-			fmt.Printf("     %s: 源=%v  目标=%v\n", d.Column, d.Source, d.Target)
+			printf(cliTextsFor(cliLang()).cmpSampleRow+"\n", d.Column, d.Source, d.Target)
 		}
 	}
 }
 
-// styleStatus 状态着色
+// styleStatus 状态着色（按当前语言的状态词判断）
 func styleStatus(status string) string {
+	txt := cliTextsFor(cliLang())
 	switch strings.TrimSpace(status) {
-	case "一致":
+	case txt.cmpMatched:
 		return green(status)
-	case "有差异":
+	case txt.cmpStatusDiff:
 		return red(status)
-	case "仅源有", "仅目标有":
+	case txt.cmpSrcOnly, txt.cmpTgtOnly:
 		return yellow(status)
 	}
 	return status
@@ -498,46 +501,47 @@ func truncateCell(s string, width int) string {
 
 // cliTableSummary 单表状态与差异说明（与 Web 报告摘要口径一致）
 func cliTableSummary(t engine.CompareTableResult) (string, string) {
+	txt := cliTextsFor(cliLang())
 	switch t.Status {
 	case "source_only":
-		return "仅源有", ""
+		return txt.cmpSrcOnly, ""
 	case "target_only":
-		return "仅目标有", ""
+		return txt.cmpTgtOnly, ""
 	}
 	parts := []string{}
 	if t.Columns != nil {
 		if t.Columns.Matched {
-			parts = append(parts, "结构一致")
+			parts = append(parts, txt.cmpStructSame)
 		} else {
-			parts = append(parts, fmt.Sprintf("结构: +%d -%d ±%d",
+			parts = append(parts, sprintf(txt.cmpStructCounts,
 				len(t.Columns.SourceOnly), len(t.Columns.TargetOnly), len(t.Columns.Different)))
 		}
 	}
 	if t.Data != nil {
 		switch {
 		case t.Data.Mode == "count":
-			parts = append(parts, fmt.Sprintf("行数 %d vs %d", t.Data.SourceRows, t.Data.TargetRows))
+			parts = append(parts, sprintf(txt.cmpRowsCount, t.Data.SourceRows, t.Data.TargetRows))
 		case t.Data.SkippedReason != "":
 			parts = append(parts, t.Data.SkippedReason)
 		case t.Data.Equal:
-			parts = append(parts, fmt.Sprintf("数据一致 (%d行)", t.Data.SourceRows))
+			parts = append(parts, sprintf(txt.cmpDataSameRows, t.Data.SourceRows))
 		default:
 			detail := []string{}
 			if t.Data.Missing > 0 {
-				detail = append(detail, fmt.Sprintf("缺失%d行", t.Data.Missing))
+				detail = append(detail, sprintf(txt.cmpMissingShort, t.Data.Missing))
 			}
 			if t.Data.Extra > 0 {
-				detail = append(detail, fmt.Sprintf("多出%d行", t.Data.Extra))
+				detail = append(detail, sprintf(txt.cmpExtraShort, t.Data.Extra))
 			}
 			if t.Data.Changed > 0 {
-				detail = append(detail, fmt.Sprintf("变化%d行", t.Data.Changed))
+				detail = append(detail, sprintf(txt.cmpChangedShort, t.Data.Changed))
 			}
 			parts = append(parts, strings.Join(detail, "/"))
 		}
 	}
-	status := "一致"
+	status := txt.cmpMatched
 	if (t.Columns != nil && !t.Columns.Matched) || (t.Data != nil && !t.Data.Equal) {
-		status = "有差异"
+		status = txt.cmpStatusDiff
 	}
 	return status, strings.Join(parts, " · ")
 }

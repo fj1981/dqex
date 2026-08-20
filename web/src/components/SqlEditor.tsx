@@ -1,6 +1,7 @@
 import Editor, { DiffEditor, type OnMount } from "@monaco-editor/react"
 import { useMemo, useRef } from "react"
 import { Check, X } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 import { useIsDark } from "@/lib/theme"
 import { monaco } from "@/lib/monaco"
@@ -33,6 +34,7 @@ const FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 // 选中执行（Navicat 式）：有选中文本时只执行选中部分，无选中时执行整个编辑器内容。
 // diffBase 非空时切换为 DiffEditor inline 对比模式 + 右下角悬浮「应用/取消」。
 export default function SqlEditor({ value, onChange, onRun, disabled, className, diffBase, onReady, onSelectionChange, onApply, onCancel }: Props) {
+  const { t } = useTranslation()
   const { KeyCode, KeyMod } = monaco
   const isDark = useIsDark()
   const decoRef = useRef<string[]>([])
@@ -138,20 +140,20 @@ export default function SqlEditor({ value, onChange, onRun, disabled, className,
             type="button"
             onClick={() => onCancel?.()}
             className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted"
-            title="放弃修改，还原为原内容"
+            title={t("sqlEditor.discardChanges")}
           >
             <X className="h-3 w-3" />
-            取消
+            {t("common.cancel")}
           </button>
           <div className="h-4 w-px bg-border" />
           <button
             type="button"
             onClick={() => onApply?.()}
             className="flex items-center gap-1 rounded bg-green-600 px-2 py-1 text-[11px] font-medium text-white transition-colors hover:bg-green-700"
-            title="确认应用修改"
+            title={t("sqlEditor.applyChanges")}
           >
             <Check className="h-3 w-3" />
-            应用
+            {t("sqlEditor.apply")}
           </button>
         </div>
         <DiffEditor
@@ -161,7 +163,7 @@ export default function SqlEditor({ value, onChange, onRun, disabled, className,
           theme={isDark ? "vs-dark" : "vs"}
           options={diffOptions}
           className="sql-diff-inline"
-          loading={<div className="p-3 text-xs text-muted-foreground">加载对比视图…</div>}
+          loading={<div className="p-3 text-xs text-muted-foreground">{t("sqlEditor.loadingDiff")}</div>}
         />
       </div>
     )
@@ -177,7 +179,7 @@ export default function SqlEditor({ value, onChange, onRun, disabled, className,
         onChange={(v) => onChange(v ?? "")}
         onMount={handleMount}
         options={editorOptions}
-        loading={<div className="p-3 text-xs text-muted-foreground">加载编辑器…</div>}
+        loading={<div className="p-3 text-xs text-muted-foreground">{t("sqlEditor.loadingEditor")}</div>}
       />
     </div>
   )

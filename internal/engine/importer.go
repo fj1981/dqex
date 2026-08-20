@@ -185,7 +185,7 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 	if opts.InputPath == "" {
 		return nil, fmt.Errorf("未指定导入文件")
 	}
-	t := newTracker(cb)
+	t := newTracker(cb, opts.Lang)
 
 	ext := strings.ToLower(filepath.Ext(opts.InputPath))
 	var files []importFile
@@ -236,7 +236,7 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 		blockUnits = false
 		t.p.TotalUnits = len(files)
 	}
-	t.log("开始导入: %d 个库", len(files))
+	t.log(engineTextsFor(t.lang).impStart, len(files))
 
 	var totalStmts int64
 	for _, f := range files {
@@ -265,12 +265,12 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 			// 库级单元模式：整库导入完成才计一个单元
 			t.p.DoneUnits++
 		}
-		t.log("库 %s 导入完成 (%d 条语句)", f.db, stmts)
+		t.log(engineTextsFor(t.lang).impDBDone, f.db, stmts)
 		cli.Close()
 	}
 
 	t.finish()
-	t.log("导入完成: %d 个库, %d 条语句", len(files), totalStmts)
+	t.log(engineTextsFor(t.lang).impDone, len(files), totalStmts)
 	return &ImportResult{TotalDatabases: len(files), TotalStmts: totalStmts}, nil
 }
 
@@ -409,8 +409,8 @@ func compatCollationSQL(sql string) string {
 
 // compatCollationReplace MySQL 8.0 特有排序规则 → MySQL 5.7 兼容替代（文本替换用）
 var compatCollationReplace = map[string]string{
-	"utf8mb4_0900_ai_ci":  "utf8mb4_unicode_ci",
-	"utf8mb4_0900_as_ci":  "utf8mb4_unicode_ci",
-	"utf8mb4_0900_as_cs":  "utf8mb4_unicode_ci",
-	"utf8mb4_0900_bin":    "utf8mb4_bin",
+	"utf8mb4_0900_ai_ci": "utf8mb4_unicode_ci",
+	"utf8mb4_0900_as_ci": "utf8mb4_unicode_ci",
+	"utf8mb4_0900_as_cs": "utf8mb4_unicode_ci",
+	"utf8mb4_0900_bin":   "utf8mb4_bin",
 }

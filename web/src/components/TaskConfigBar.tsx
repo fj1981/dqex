@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next"
 import { Bookmark } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -20,6 +21,7 @@ interface Props {
 // 页面头配置条：加载已保存配置下拉（含清空 + 空状态）+ 保存配置按钮
 // 导出/导入/迁移三页通用
 export default function TaskConfigBar({ savedTasks, taskConfigId, onApply, onClear, onSave }: Props) {
+  const { t } = useTranslation()
   return (
     <>
       <Select
@@ -31,14 +33,14 @@ export default function TaskConfigBar({ savedTasks, taskConfigId, onApply, onCle
         }}
       >
         <SelectTrigger className="w-52">
-          <SelectValue placeholder="加载已保存配置..." />
+          <SelectValue placeholder={t("taskBar.loadPlaceholder")} />
         </SelectTrigger>
         <SelectContent>
           {savedTasks.length === 0 && (
-            <div className="px-2 py-3 text-center text-xs text-muted-foreground">暂无已保存配置</div>
+            <div className="px-2 py-3 text-center text-xs text-muted-foreground">{t("taskBar.empty")}</div>
           )}
           {taskConfigId && (
-            <SelectItem value="__clear__" className="text-muted-foreground">✕ 清空已选配置</SelectItem>
+            <SelectItem value="__clear__" className="text-muted-foreground">{t("taskBar.clear")}</SelectItem>
           )}
           {savedTasks.map((t) => (
             <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
@@ -46,7 +48,7 @@ export default function TaskConfigBar({ savedTasks, taskConfigId, onApply, onCle
         </SelectContent>
       </Select>
       <Button variant="outline" onClick={onSave}>
-        <Bookmark className="mr-1 h-4 w-4" /> 保存配置
+        <Bookmark className="mr-1 h-4 w-4" /> {t("taskBar.save")}
       </Button>
     </>
   )

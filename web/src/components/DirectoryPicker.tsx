@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { ChevronRight, Folder, FolderOpen, Home, Loader2, RefreshCw, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -25,6 +26,7 @@ interface Props {
  * 点击子目录行即进入下级；"选择此文件夹"确认当前路径。
  */
 export default function DirectoryPicker({ open, onOpenChange, initialPath, onSelect }: Props) {
+  const { t } = useTranslation()
   const [data, setData] = useState<DirBrowseResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -35,7 +37,7 @@ export default function DirectoryPicker({ open, onOpenChange, initialPath, onSel
     try {
       setData(await browseDirs(path))
     } catch (e) {
-      setError(e instanceof Error ? e.message : "加载目录失败")
+      setError(e instanceof Error ? e.message : t("dirPicker.loadFailed"))
     } finally {
       setLoading(false)
     }
@@ -61,38 +63,38 @@ export default function DirectoryPicker({ open, onOpenChange, initialPath, onSel
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FolderOpen className="h-4 w-4" />
-            选择文件夹
+            {t("dirPicker.title")}
           </DialogTitle>
         </DialogHeader>
 
         {/* 当前路径 + 操作 */}
         <div className="flex items-center gap-1.5">
-          <Button variant="outline" size="sm" className="h-7 shrink-0 px-2" title="回到主目录" onClick={() => load(data?.root)}>
+          <Button variant="outline" size="sm" className="h-7 shrink-0 px-2" title={t("dirPicker.home")} onClick={() => load(data?.root)}>
             <Home className="h-3.5 w-3.5" />
           </Button>
           <Button
             variant="outline"
             size="sm"
             className="h-7 shrink-0 px-2"
-            title="上一级"
+            title={t("dirPicker.up")}
             disabled={!data?.parent || loading}
             onClick={() => data && load(data.parent)}
           >
             <RotateCcw className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="sm" className="h-7 shrink-0 px-2" title="刷新" onClick={() => load(data?.path)}>
+          <Button variant="ghost" size="sm" className="h-7 shrink-0 px-2" title={t("dirPicker.refresh")} onClick={() => load(data?.path)}>
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           </Button>
           <div className="min-w-0 flex-1 truncate rounded-md bg-muted px-2 py-1 font-mono text-xs" title={data?.path}>
-            {display(data?.path) || "加载中…"}
+            {display(data?.path) || t("dirPicker.loading")}
           </div>
         </div>
 
         {data && (
           <p className="text-[11px] text-muted-foreground">
-            仅限浏览主目录
+            {t("dirPicker.scopeHint")}
             <span className="mx-1">·</span>
-            共 {data.entries.length} 个子目录
+            {t("dirPicker.countHint", { n: data.entries.length })}
           </p>
         )}
 
@@ -102,12 +104,12 @@ export default function DirectoryPicker({ open, onOpenChange, initialPath, onSel
             <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center">
               <p className="text-xs text-destructive">{error}</p>
               <Button variant="outline" size="sm" onClick={() => load(data?.path)}>
-                重试
+                {t("dirPicker.retry")}
               </Button>
             </div>
           ) : data?.entries.length === 0 ? (
             <div className="flex h-full items-center justify-center p-4 text-xs text-muted-foreground">
-              此文件夹下没有子目录
+              {t("dirPicker.empty")}
             </div>
           ) : (
             <ul className="p-1">
@@ -131,15 +133,15 @@ export default function DirectoryPicker({ open, onOpenChange, initialPath, onSel
 
         <DialogFooter className="gap-2 sm:justify-between">
           <div className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={data?.path}>
-            选择：{display(data?.path)}
+            {t("dirPicker.choosePrefix", { path: display(data?.path) })}
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button disabled={!data || loading} onClick={() => data && onSelect(data.path)}>
               {loading ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <FolderOpen className="mr-1 h-4 w-4" />}
-              选择此文件夹
+              {t("dirPicker.choose")}
             </Button>
           </div>
         </DialogFooter>

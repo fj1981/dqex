@@ -1,4 +1,5 @@
 import { toast } from "sonner"
+import i18n from "@/lib/i18n"
 import type {
   AIStatus,
   AIUsage,
@@ -47,6 +48,13 @@ function resolveToken(): string {
 
 const authToken = resolveToken()
 
+// ---- 请求语言：统一以 ?lang= query 携带（cygin FromCtx 中 query 优先于 header），
+// EventSource / 下载等无法自定义请求头的场景同样生效 ----
+function withLang(url: string): string {
+  const sep = url.includes("?") ? "&" : "?"
+  return `${url}${sep}lang=${encodeURIComponent(i18n.language)}`
+}
+
 // ---- 401 全局提示：并发请求同时失败时节流，避免刷屏；
 // 调用方可能吞掉异常（静默 catch），此处保证用户始终能看到认证失败原因
 let lastAuthNotify = 0
@@ -60,10 +68,10 @@ function notifyAuthError(msg: string) {
 // ---- fetch 封装（cygin 统一响应 {code,msg,data}，code==0 成功） ----
 
 export async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(withLang(url), {
     ...init,
     headers: {
-      "Accept-Language": "zh",
+      "Accept-Language": i18n.language,
       ...(authToken ? { "X-Auth-Token": authToken } : {}),
       ...(init?.body && !(init.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
       ...init?.headers,
@@ -71,7 +79,7 @@ export async function request<T>(url: string, init?: RequestInit): Promise<T> {
   })
   if (res.status === 401) {
     // 优先展示服务端具体原因（如令牌过期提示重启），解析失败时用默认引导文案
-    let msg = "认证失败：请使用启动时提供的访问链接重新打开"
+    let msg = i18n.t("api.authFailed")
     try {
       const b = await res.json()
       if (b?.msg) msg = b.msg
@@ -85,12 +93,12 @@ export async function request<T>(url: string, init?: RequestInit): Promise<T> {
   try {
     body = await res.json()
   } catch {
-    throw new Error(`请求失败 (HTTP ${res.status})`)
+    throw new Error(i18n.t("api.requestFailedHttp", { status: res.status }))
   }
   if (body.code !== 0) {
     // 优先展示 details 里的具体错误（如数据库错误），msg 作为兜底
     const detail = (body.details ?? []).filter(Boolean).join("；")
-    throw new Error(detail || body.msg || `请求失败 (code=${body.code})`)
+    throw new Error(detail || body.msg || i18n.t("api.requestFailedCode", { code: body.code }))
   }
   return body.data as T
 }
@@ -271,12 +279,12 @@ export function aiChatStream(
     handlers.onError(msg)
   }
   const fuse = setTimeout(() => {
-    finish(`生成超时（${TIMEOUT_MS / 1000} 秒无响应），请重试或检查模型服务`)
+    finish(i18n.t("api.aiTimeout", { sec: TIMEOUT_MS / 1000 }))
     ctrl.abort()
   }, TIMEOUT_MS)
   void (async () => {
     try {
-      const res = await fetch("/api/ai/chat/stream", {
+      const res = await fetch(withLang("/api/ai/chat/stream"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -295,7 +303,7 @@ export function aiChatStream(
         signal: ctrl.signal,
       })
       if (!res.ok || !res.body) {
-        finish(`请求失败 (HTTP ${res.status})`)
+        finish(i18n.t("api.requestFailedHttp", { status: res.status }))
         return
       }
       const reader = res.body.getReader()
@@ -322,7 +330,7 @@ export function aiChatStream(
               handlers.onDone(obj.usage as AIUsage, obj.schemaVerified === true)
             } else if (event === "error") {
               finished = true
-              handlers.onError(String(obj.message ?? "未知错误"))
+              handlers.onError(String(obj.message ?? i18n.t("api.unknownError")))
             }
           } catch {
             // 忽略无法解析的分片
@@ -330,7 +338,7 @@ export function aiChatStream(
         }
       }
       // 连接正常关闭但未收到 done/error：视为异常中断
-      if (!finished) finish("连接意外中断，请重试")
+      if (!finished) finish(i18n.t("api.streamInterrupted"))
     } catch (e) {
       if ((e as Error).name !== "AbortError") handlers.onError((e as Error).message)
     } finally {
@@ -363,8 +371,8 @@ export interface ProgressHandler {
 }
 
 export function subscribeProgress(taskID: string, handler: ProgressHandler): () => void {
-  // EventSource 无法自定义请求头，令牌通过查询参数携带
-  const es = new EventSource(`/api/progress/${encodeURIComponent(taskID)}${authToken ? `?token=${encodeURIComponent(authToken)}` : ""}`)
+  // EventSource 无法自定义请求头，令牌与语言均通过查询参数携带
+  const es = new EventSource(withLang(`/api/progress/${encodeURIComponent(taskID)}${authToken ? `?token=${encodeURIComponent(authToken)}` : ""}`))
   es.addEventListener("progress", (e) => {
     try {
       handler.onProgress(JSON.parse(e.data))
@@ -383,7 +391,7 @@ export function subscribeProgress(taskID: string, handler: ProgressHandler): () 
     if (me.data) {
       handler.onError(String(me.data))
     } else if (es.readyState === EventSource.CLOSED) {
-      handler.onError("连接已断开")
+      handler.onError(i18n.t("api.connClosed"))
     }
     es.close()
   })

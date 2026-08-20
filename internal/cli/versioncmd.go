@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
@@ -17,9 +15,9 @@ var versionCmd = &cobra.Command{
 	Aliases: []string{"v"},
 	Short:   "查看版本号",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("dbx %s\n", Version)
+		printf("dbx %s\n", Version)
 		if BuildTime != "" {
-			fmt.Printf("构建时间: %s\n", BuildTime)
+			printf(cliTextsFor(cliLang()).versionBuildTime+"\n", BuildTime)
 		}
 	},
 }

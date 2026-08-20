@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import { ChevronDown, Search } from "lucide-react"
 import type { TableColumn } from "@/types"
 import { Badge } from "@/components/ui/badge"
@@ -49,8 +50,9 @@ interface Props {
 // 忽略列多选：行内展开式下拉（checkbox 列表 + 搜索 + 时间列快捷勾选），
 // 主键列禁选（引擎要求按主键对齐，忽略主键列无意义）
 export default function ColumnMultiSelect({
-  options, value, onChange, placeholder = "选择忽略列", loading, compact, className,
+  options, value, onChange, placeholder, loading, compact, className,
 }: Props) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const rootRef = useRef<HTMLDivElement>(null)
@@ -91,7 +93,7 @@ export default function ColumnMultiSelect({
         )}
       >
         {value.length === 0 ? (
-          <span className="flex-1 truncate text-muted-foreground">{placeholder}</span>
+          <span className="flex-1 truncate text-muted-foreground">{placeholder ?? t("colSelect.placeholder")}</span>
         ) : (
           <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
             {value.slice(0, 3).map((v) => (
@@ -113,7 +115,7 @@ export default function ColumnMultiSelect({
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜索列名"
+                placeholder={t("colSelect.search")}
                 className="h-7 pl-7 text-xs"
               />
             </div>
@@ -123,7 +125,7 @@ export default function ColumnMultiSelect({
               disabled={timeCols.length === 0}
               className="shrink-0 rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent disabled:opacity-40"
             >
-              勾选时间列（{timeCols.length}）
+              {t("colSelect.checkTimeCols", { n: timeCols.length })}
             </button>
             <button
               type="button"
@@ -131,14 +133,14 @@ export default function ColumnMultiSelect({
               disabled={value.length === 0}
               className="shrink-0 rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent disabled:opacity-40"
             >
-              清空
+              {t("common.clear")}
             </button>
           </div>
           <div className="scrollbar-thin mt-2 max-h-44 overflow-y-auto">
             {loading ? (
-              <div className="py-3 text-center text-[11px] text-muted-foreground">正在加载列信息…</div>
+              <div className="py-3 text-center text-[11px] text-muted-foreground">{t("colSelect.loading")}</div>
             ) : filtered.length === 0 ? (
-              <div className="py-3 text-center text-[11px] text-muted-foreground">{options.length === 0 ? "该表暂无列信息" : "无匹配列"}</div>
+              <div className="py-3 text-center text-[11px] text-muted-foreground">{options.length === 0 ? t("colSelect.noCols") : t("colSelect.noMatch")}</div>
             ) : (
               filtered.map((o) => {
                 const disabled = !!o.primaryKey
@@ -158,10 +160,10 @@ export default function ColumnMultiSelect({
                     />
                     <span className="font-mono text-xs">{o.name}</span>
                     {o.isTime && !disabled && (
-                      <Badge variant="outline" className="px-1 py-0 text-[10px] font-normal text-blue-600">时间</Badge>
+                      <Badge variant="outline" className="px-1 py-0 text-[10px] font-normal text-blue-600">{t("colSelect.time")}</Badge>
                     )}
                     {o.primaryKey && (
-                      <Badge variant="outline" className="px-1 py-0 text-[10px] font-normal">主键·不可忽略</Badge>
+                      <Badge variant="outline" className="px-1 py-0 text-[10px] font-normal">{t("colSelect.pkLocked")}</Badge>
                     )}
                     <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{o.dataType}</span>
                   </label>

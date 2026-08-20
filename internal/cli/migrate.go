@@ -61,7 +61,7 @@ func cliMigrate(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	opts := MigrateOptions{Backup: true}
+	opts := MigrateOptions{Backup: true, Lang: cliLang()}
 	var migCfg *migrateConfig
 	if v, _ := f.GetString("config"); v != "" {
 		cfg, lerr := loadMigrateConfig(v)
@@ -142,7 +142,7 @@ func cliMigrate(cmd *cobra.Command, args []string) error {
 		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少目标连接：配置 target/target_ref 段或 --target-*/--target-conn"))
 	}
 	if opts.ResetMode != ResetNone && !opts.Backup {
-		fmt.Println(yellow("警告: 重置数据且未开启备份，目标表现有数据将无法恢复！"))
+		fmt.Println(yellow(cliTextsFor(cliLang()).warnReset))
 	}
 
 	svc, err := newCliService()
@@ -175,10 +175,10 @@ func cliMigrate(cmd *cobra.Command, args []string) error {
 		opts.Target, opts.TargetConn = conn, ""
 	}
 	cb, _ := cliProgress()
-	fmt.Println("开始迁移...")
+	fmt.Println(cliTextsFor(cliLang()).startMigrate)
 	if err := svc.RunMigrate(context.Background(), opts, cb); err != nil {
 		return err
 	}
-	fmt.Println(green("迁移完成"))
+	fmt.Println(green(cliTextsFor(cliLang()).doneMigrate))
 	return nil
 }

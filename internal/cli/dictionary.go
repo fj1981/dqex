@@ -57,7 +57,7 @@ func cliDictionary(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	opts := DictionaryOptions{Compress: true}
+	opts := DictionaryOptions{Compress: true, Lang: cliLang()}
 	var wantZip string
 	if v, _ := f.GetString("config"); v != "" {
 		cfg, lerr := loadDictionaryConfig(v)
@@ -129,7 +129,7 @@ func cliDictionary(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	cb, _ := cliProgress()
-	fmt.Println("开始生成数据字典...")
+	fmt.Println(cliTextsFor(cliLang()).startDict)
 	outputPath, err := svc.RunDictionary(context.Background(), opts, cb)
 	if err != nil {
 		return err
@@ -140,6 +140,6 @@ func cliDictionary(cmd *cobra.Command, args []string) error {
 			outputPath = wantZip
 		}
 	}
-	fmt.Printf("数据字典生成完成: %s\n", outputPath)
+	printf(cliTextsFor(cliLang()).doneDict+"\n", outputPath)
 	return nil
 }

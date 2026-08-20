@@ -46,19 +46,19 @@ func (c *cliConnConfig) toConn() *DBConnInfo {
 }
 
 type compareConfig struct {
-	Source        *cliConnConfig    `yaml:"source"`
-	Target        *cliConnConfig    `yaml:"target"`
-	SourceRef     string            `yaml:"source_ref"` // 已保存连接（与 source 二选一）
-	TargetRef     string            `yaml:"target_ref"`
-	SourceDB      string            `yaml:"source_database"` // 覆盖源库名（连接未配库时必填）
-	TargetDB      string            `yaml:"target_database"`
-	Databases     []engine.CompareDBPair `yaml:"databases"`    // 多库对比：库对（源库↔目标库）
-	DBMap         map[string]string `yaml:"db_map"`           // 多库对比：源库名→目标库名映射
-	Tables        []string          `yaml:"tables"`         // 空=全部表
-	Aliases       map[string]string `yaml:"aliases"`        // 源表: 目标表
-	Scope         string            `yaml:"scope"`          // both|structure|data，默认 both
-	Threshold     int               `yaml:"threshold"`      // 逐行对比阈值，默认 1000
-	IgnoreColumns []string          `yaml:"ignore_columns"` // 全局忽略列：所有表数据内容对比时跳过（如 created_at/updated_at）
+	Source        *cliConnConfig         `yaml:"source"`
+	Target        *cliConnConfig         `yaml:"target"`
+	SourceRef     string                 `yaml:"source_ref"` // 已保存连接（与 source 二选一）
+	TargetRef     string                 `yaml:"target_ref"`
+	SourceDB      string                 `yaml:"source_database"` // 覆盖源库名（连接未配库时必填）
+	TargetDB      string                 `yaml:"target_database"`
+	Databases     []engine.CompareDBPair `yaml:"databases"`      // 多库对比：库对（源库↔目标库）
+	DBMap         map[string]string      `yaml:"db_map"`         // 多库对比：源库名→目标库名映射
+	Tables        []string               `yaml:"tables"`         // 空=全部表
+	Aliases       map[string]string      `yaml:"aliases"`        // 源表: 目标表
+	Scope         string                 `yaml:"scope"`          // both|structure|data，默认 both
+	Threshold     int                    `yaml:"threshold"`      // 逐行对比阈值，默认 1000
+	IgnoreColumns []string               `yaml:"ignore_columns"` // 全局忽略列：所有表数据内容对比时跳过（如 created_at/updated_at）
 	// TableIgnoreColumns 表级忽略列（源表: 列列表），与全局忽略列合并生效
 	TableIgnoreColumns map[string][]string `yaml:"ignore_columns_by_table"`
 	ForceData          bool                `yaml:"force_data"` // 结构不一致时仍强制对比数据（默认跳过）
@@ -475,7 +475,7 @@ func validResetMode(v string) (ResetMode, error) {
 // compareOptsFromConfig 配置转引擎选项；requireConns=true 时校验连接必须存在（task save 用），
 // false 时允许空配置（命令后续用 flags 补齐）
 func compareOptsFromConfig(cfg *compareConfig, requireConns bool) (CompareOptions, string, error) {
-	opts := CompareOptions{}
+	opts := CompareOptions{Lang: cliLang()}
 	if cfg.Source != nil {
 		opts.Source = cfg.Source.toConn()
 	}
@@ -546,7 +546,7 @@ func splitOutput(v string) (outputDir, wantZip string) {
 }
 
 func exportOptsFromConfig(cfg *exportConfig) (ExportOptions, error) {
-	opts := ExportOptions{Compress: true, SingleTransaction: true}
+	opts := ExportOptions{Compress: true, SingleTransaction: true, Lang: cliLang()}
 	if cfg.Source != nil {
 		opts.Source = cfg.Source.toConn()
 	}
@@ -573,7 +573,7 @@ func exportOptsFromConfig(cfg *exportConfig) (ExportOptions, error) {
 }
 
 func dictionaryOptsFromConfig(cfg *dictionaryConfig) (DictionaryOptions, error) {
-	opts := DictionaryOptions{Compress: true}
+	opts := DictionaryOptions{Compress: true, Lang: cliLang()}
 	if cfg.Source != nil {
 		opts.Source = cfg.Source.toConn()
 	}
@@ -592,7 +592,7 @@ func dictionaryOptsFromConfig(cfg *dictionaryConfig) (DictionaryOptions, error) 
 }
 
 func importOptsFromConfig(cfg *importConfig) (ImportOptions, error) {
-	opts := ImportOptions{Backup: true}
+	opts := ImportOptions{Backup: true, Lang: cliLang()}
 	if cfg.Target != nil {
 		opts.Target = cfg.Target.toConn()
 	}
@@ -614,7 +614,7 @@ func importOptsFromConfig(cfg *importConfig) (ImportOptions, error) {
 }
 
 func migrateOptsFromConfig(cfg *migrateConfig) (MigrateOptions, error) {
-	opts := MigrateOptions{Backup: true}
+	opts := MigrateOptions{Backup: true, Lang: cliLang()}
 	if cfg.Source != nil {
 		opts.Source = cfg.Source.toConn()
 	}

@@ -61,6 +61,15 @@ func writeWebAccessFile(baseDir, addr, token string, issuedAt int64) {
 	}
 }
 
+// cyginMsg 按请求语言（?lang= 优先，其次 Accept-Language）取已注册错误码的消息；
+// 注册表见 internal/service/errors.go，未注册码回退英文。
+func cyginMsg(c *gin.Context, code int) string {
+	if ce, ok := cygin.NewError(code).(*cygin.Error); ok {
+		return ce.Msg(cygin.FromCtx(c))
+	}
+	return "unknown error"
+}
+
 // tokenAuth /api 路由的令牌认证中间件：
 //   - 令牌超过 expireAt 过期：拒绝并提示重启服务刷新（令牌不自动续期）
 //   - 接受 Authorization: Bearer <token>、X-Auth-Token 头或 ?token= 查询参数
@@ -75,11 +84,11 @@ func tokenAuth(token string, expireAt time.Time, limiter *authLimiter) gin.Handl
 		}
 		ip := remoteIP(c).String()
 		if !limiter.allow(ip) {
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"code": http.StatusTooManyRequests, "msg": "认证失败过于频繁，来源已临时锁定，请稍后重试"})
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"code": http.StatusTooManyRequests, "msg": cyginMsg(c, service.ErrRateLimited)})
 			return
 		}
 		if time.Now().After(expireAt) {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": http.StatusUnauthorized, "msg": "访问令牌已过期（有效期 24 小时），请重启 dbx 服务刷新令牌后重新访问"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": http.StatusUnauthorized, "msg": cyginMsg(c, service.ErrTokenExpired)})
 			return
 		}
 		got := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
@@ -95,7 +104,7 @@ func tokenAuth(token string, expireAt time.Time, limiter *authLimiter) gin.Handl
 			return
 		}
 		limiter.fail(ip)
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": http.StatusUnauthorized, "msg": "认证失败：缺少访问令牌或令牌无效"})
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": http.StatusUnauthorized, "msg": cyginMsg(c, service.ErrAuthFailed)})
 	}
 }
 
@@ -118,7 +127,7 @@ func accessControl(f *accessFilter) gin.HandlerFunc {
 		}
 		cylog.Warnf("拒绝白名单外访问: %s %s（来源 %s）", c.Request.Method, c.Request.URL.Path, ip)
 		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": http.StatusForbidden, "msg": "访问被拒绝：当前来源不在允许访问的 IP/域名白名单内"})
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": http.StatusForbidden, "msg": cyginMsg(c, service.ErrAccessDenied)})
 			return
 		}
 		c.AbortWithStatus(http.StatusForbidden)

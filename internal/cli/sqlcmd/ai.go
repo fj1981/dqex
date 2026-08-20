@@ -150,40 +150,11 @@ func (s *session) aiEnsure() error {
 }
 
 // cliAgentSystemPrompt 构建 CLI agent 的 system prompt：库/表名录 + 工具使用约束。
-// 与 Web agent（service.agentSystemPrompt）保持一致：不预注入字段结构，
-// 模型必须经 get_schema 按需查询真实字段，禁止凭想象生成 SQL。
+// 与 Web agent（service.agentSystemPrompt）共用 llm 语言注册表：按 CLI 语言选择
+// 模板（缺失回退 zh），自定义 prompt 原样使用，不预注入字段结构。
 func cliAgentSystemPrompt(cfg service.AIConfig, dialect, target string, tableNames []string) string {
-	const maxListTables = 30
-	var b strings.Builder
-	custom := strings.TrimSpace(cfg.SystemPrompt)
-	if custom != "" {
-		b.WriteString(strings.ReplaceAll(custom, "{dialect}", dialect))
-		b.WriteString("\n\n")
-	} else {
-		fmt.Fprintf(&b, "你是一个资深的 %s DBA 与 SQL 专家。根据用户的业务需求生成可直接执行的 %s SQL，或回答关于表结构/字段的元数据问题。", dialect, dialect)
-		b.WriteString("\n\n")
-	}
-	b.WriteString("【最高优先级：必须先查表结构，禁止凭空生成 SQL】")
-	b.WriteString("\n生成 SQL 前，必须先完整梳理需求涉及的所有表与关联关系，并对每一张涉及的表调用 get_schema(库名, 表名) 获取真实字段后再编写。只要还没有拿到某张表的真实字段信息，就必须先调用 get_schema 去查询确认，禁止在缺少表结构信息的情况下直接臆造表名、字段名或关联关系生成 SQL。")
-	b.WriteString("\n如果上下文里还没有任何表结构信息，你的第一轮回复必须只调用 get_schema（或先 list_tables 定位表名）获取结构，禁止第一轮就直接输出 SQL。")
-	b.WriteString("\n涉及多表关联时，先分析清楚各表之间靠哪个字段关联（外键/关联列），再用 get_schema 确认关联字段确实存在。")
-	b.WriteString("\n【回答元数据问题（如“某表有哪些字段”）时必须聚焦】只调用 get_schema 查询用户明确指定的那一张表，只回答那一张表的字段，禁止把其它表或整个库的表结构一起列出。")
-	fmt.Fprintf(&b, "\n你的工作范围默认限定在数据库 %q 内，优先只使用该库的表。", target)
-	b.WriteString("\n仅当当前库的表确实无法满足需求（表名或字段对不上、关联表明显不在当前库）时，才调用 list_databases 查看其他库；禁止无依据地随意探索其他库。")
-	b.WriteString("\n需要工具时直接发起工具调用，不要输出解释文本；可一次并行调用多个 get_schema 批量获取多张表结构。")
-	b.WriteString("\n禁止输出思考过程、推理过程或任何 <think>/<thinking>/<reasoning> 标签包裹的内容，直接给出结果。")
-	b.WriteString("\n生成的 SQL 放在 ```sql 代码块中。危险语句（DROP/TRUNCATE/无 WHERE 的 DELETE 等）一律拒绝。")
-	b.WriteString("\n\n已知元数据（表结构需用 get_schema 查询）：\n")
-	fmt.Fprintf(&b, "- %s: ", target)
-	names := tableNames
-	if len(names) > maxListTables {
-		names = names[:maxListTables]
-	}
-	b.WriteString(strings.Join(names, ", "))
-	if len(tableNames) > maxListTables {
-		fmt.Fprintf(&b, ", …共 %d 张表（其余请用 list_tables/get_schema 查询）", len(tableNames))
-	}
-	return b.String()
+	return llm.RenderSystemPrompt(cliLang, cfg.SystemPrompt, dialect,
+		llm.AgentRules(cliLang, target)+llm.KnownTables(cliLang, target, tableNames))
 }
 
 // agentChat 适配器：把 ReactAgent.Stream（工具调用循环）包装为 chatClient 接口，
@@ -209,22 +180,25 @@ type cliToolArgsSchema struct {
 }
 
 // buildAgentTools 构建三个只读探索工具（闭包捕获会话；每次调用在控制台打印进度）。
+// 工具描述与输出文本按 CLI 语言选择（与 Web agent 共用 llm 语言注册表）。
 func (s *session) buildAgentTools(maxSchemaChars int) ([]tool.InvokableTool, error) {
 	conn := s.connInfo
 	if s.currentDB != "" {
 		conn.DBName = s.currentDB
 	}
+	tt := llm.ToolTextsFor(cliLang)
+	ut := cliTextsFor(cliLang)
 	progress := func(name, args string) {
-		fmt.Fprintln(os.Stderr, dim(fmt.Sprintf("  ⟳ %s (%s)...", name, args)))
+		fmt.Fprintln(os.Stderr, dim(sprintf(ut.toolRunning, name, args)))
 	}
 
 	listDBs, err := utils.InferTool("list_databases",
-		"列出当前连接可访问的所有数据库（Oracle 为 schema 列表）。仅当确认需要跨库查询时才调用，默认应优先使用当前库。",
+		tt.ListDBsDesc,
 		func(ctx context.Context, _ struct{}) (string, error) {
-			progress("正在列出可用的数据库", "")
+			progress(ut.toolProgressListDBs, "")
 			tree, err := getTableTree(conn)
 			if err != nil {
-				return "", fmt.Errorf("列出数据库失败: %w", err)
+				return "", fmt.Errorf(tt.ErrListDBs, err)
 			}
 			names := make([]string, 0, len(tree))
 			for _, db := range tree {
@@ -237,14 +211,14 @@ func (s *session) buildAgentTools(maxSchemaChars int) ([]tool.InvokableTool, err
 	}
 
 	listTables, err := utils.InferTool("list_tables",
-		"列出指定数据库中的全部表名。",
+		tt.ListTablesDesc,
 		func(ctx context.Context, args cliToolArgsListTables) (string, error) {
-			progress("正在查询表列表", args.DB)
+			progress(ut.toolProgressListTables, args.DB)
 			sub := conn
 			sub.DBName = args.DB
 			tree, err := getTableTree(sub)
 			if err != nil {
-				return "", fmt.Errorf("列出表失败: %w", err)
+				return "", fmt.Errorf(tt.ErrListTables, err)
 			}
 			for _, db := range tree {
 				if strings.EqualFold(db.Name, args.DB) {
@@ -256,20 +230,20 @@ func (s *session) buildAgentTools(maxSchemaChars int) ([]tool.InvokableTool, err
 			for _, db := range tree {
 				dbNames = append(dbNames, db.Name)
 			}
-			return fmt.Sprintf("数据库 %q 不存在。可用数据库：%s", args.DB, strings.Join(dbNames, ", ")), nil
+			return sprintf(tt.DBNotFound, args.DB, strings.Join(dbNames, ", ")), nil
 		})
 	if err != nil {
 		return nil, fmt.Errorf("构建工具 list_tables 失败: %w", err)
 	}
 
 	getSchema, err := utils.InferTool("get_schema",
-		"获取指定表的结构摘要（表注释 + 字段名/类型/可空/注释）。",
+		tt.GetSchemaDesc,
 		func(ctx context.Context, args cliToolArgsSchema) (string, error) {
-			progress("正在查询表结构", args.DB+"."+args.Table)
+			progress(ut.toolProgressGetSchema, args.DB+"."+args.Table)
 			// 先校验库名（大小写不敏感），避免模型拼错库名时拿到含糊的 not found
 			tree, err := getTableTree(conn)
 			if err != nil {
-				return "", fmt.Errorf("获取库列表失败: %w", err)
+				return "", fmt.Errorf(tt.ErrListDBsForSchema, err)
 			}
 			realDB := ""
 			var dbNames []string
@@ -281,7 +255,7 @@ func (s *session) buildAgentTools(maxSchemaChars int) ([]tool.InvokableTool, err
 			}
 			if realDB == "" {
 				// 库名拼错：返回可用库列表，让模型纠正后重试（不返回 error，避免 agent 直接终止）
-				return fmt.Sprintf("数据库 %q 不存在。可用数据库：%s。请用正确的库名重试 get_schema。",
+				return sprintf(tt.DBNotFoundSchema,
 					args.DB, strings.Join(dbNames, ", ")), nil
 			}
 			sub := conn
@@ -296,7 +270,7 @@ func (s *session) buildAgentTools(maxSchemaChars int) ([]tool.InvokableTool, err
 						break
 					}
 				}
-				return fmt.Sprintf("表 %q 在库 %q 中不存在。该库可用表（前 50 个）：%s。请用正确的表名重试。",
+				return sprintf(tt.TableNotFound,
 					args.Table, realDB, strings.Join(tbls, ", ")), nil
 			}
 			ti := llm.TableInfo{Schema: realDB, Table: args.Table, Comment: meta.Comment}
@@ -310,7 +284,7 @@ func (s *session) buildAgentTools(maxSchemaChars int) ([]tool.InvokableTool, err
 			}
 			// 用完整版渲染（不过滤敏感列）：工具语义是返回真实表结构，
 			// 过滤会让模型误判字段不存在（如 email/mobile/password_*），导致臆造或报错
-			return llm.BuildSchemaTextFull([]llm.TableInfo{ti}, 1, maxSchemaChars), nil
+			return llm.BuildSchemaTextFull(cliLang, []llm.TableInfo{ti}, 1, maxSchemaChars), nil
 		})
 	if err != nil {
 		return nil, fmt.Errorf("构建工具 get_schema 失败: %w", err)
@@ -344,7 +318,7 @@ func (s *session) aiReset() {
 	}
 	s.ai.msgs = nil
 	s.ai.usage = llm.Usage{}
-	fmt.Println(dim("AI 会话已重置（对话上下文与 token 统计清零）"))
+	fmt.Println(dim(cliTextsFor(cliLang).aiResetDone))
 }
 
 // aiCommand \ai 元命令分发。
@@ -380,80 +354,83 @@ func (s *session) aiCommand(args []string) {
 
 // aiStatus 展示配置状态与会话 token 统计。
 func (s *session) aiStatus() {
+	txt := cliTextsFor(cliLang)
 	ast, err := s.aiGet()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, red(err.Error()))
 		return
 	}
 	st := ast.svc.AIStatus()
-	fmt.Printf("AI 状态: %s\n", map[bool]string{true: green("已启用"), false: yellow("未配置")}[st.Enabled])
-	fmt.Printf("  端点:   %s\n", st.BaseURL)
-	fmt.Printf("  模型:   %s\n", st.Model)
-	fmt.Printf("  温度:   %.2f   上限: %d token   超时: %ds\n", st.Temperature, st.MaxTokens, st.TimeoutSec)
-	fmt.Printf("  表结构: 最多 %d 张表 / %d 字符\n", st.MaxSchemaTables, st.MaxSchemaChars)
-	fmt.Printf("  debug 日志: %s（全局开关，--debug 或 config 顶层 debug）\n", map[bool]string{true: green("开启"), false: dim("关闭")}[ast.svc.Config().Debug])
+	printf(txt.aiStatusTitle+"\n", map[bool]string{true: green(txt.aiEnabled), false: yellow(txt.aiNotConfigured)}[st.Enabled])
+	printf(txt.aiEndpoint+"\n", st.BaseURL)
+	printf(txt.aiModel+"\n", st.Model)
+	printf(txt.aiTuning+"\n", st.Temperature, st.MaxTokens, st.TimeoutSec)
+	printf(txt.aiSchemaLimit+"\n", st.MaxSchemaTables, st.MaxSchemaChars)
+	printf(txt.aiDebugLog+"\n", map[bool]string{true: green(txt.aiDebugOn), false: dim(txt.aiDebugOff)}[ast.svc.Config().Debug])
 	if s.ai != nil && len(s.ai.msgs) > 0 {
-		fmt.Printf("  上下文: %d 条消息（含 system）\n", len(s.ai.msgs))
+		printf(txt.aiContext+"\n", len(s.ai.msgs))
 	}
 	if ast.usage.TotalTokens > 0 {
-		fmt.Printf("%s 输入 %d / 输出 %d / 合计 %d\n",
-			dim("进程累计 token:"), ast.usage.PromptTokens, ast.usage.CompletionTokens, ast.usage.TotalTokens)
+		printf("%s %s\n", dim(txt.aiProcTokens),
+			sprintf(txt.tokenInOut, ast.usage.PromptTokens, ast.usage.CompletionTokens, ast.usage.TotalTokens))
 	} else {
-		fmt.Println(dim("进程累计 token: 尚无消耗"))
+		fmt.Println(dim(txt.aiProcTokensNone))
 	}
 }
 
 // aiCopy 复制缓冲区 SQL 到系统剪贴板（跨平台：macOS/Linux/Windows）。
 func (s *session) aiCopy() {
+	txt := cliTextsFor(cliLang)
 	if strings.TrimSpace(s.lastSQL) == "" {
-		fmt.Fprintln(os.Stderr, red("缓冲区为空：请先用 \\ai <需求> 生成 SQL"))
+		fmt.Fprintln(os.Stderr, red(txt.aiCopyEmpty))
 		return
 	}
 	if err := clipboard.WriteAll(s.lastSQL); err != nil {
-		fmt.Fprintln(os.Stderr, red("复制到剪贴板失败: "+err.Error()))
+		fmt.Fprintln(os.Stderr, red(sprintf(txt.aiCopyFail, err.Error())))
 		return
 	}
-	fmt.Println(green("已复制到系统剪贴板"))
+	fmt.Println(green(txt.aiCopyOK))
 }
 
 // aiConfig 引导式修改 AI 配置（写回 config.yaml，Web 端下次启动读取）。
 // 逐项提示，直接回车保持原值，输入 . 退出。
 func (s *session) aiConfig() {
+	txt := cliTextsFor(cliLang)
 	svc, err := newAIService("", "")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, red("初始化服务失败: "+err.Error()))
+		fmt.Fprintln(os.Stderr, red(sprintf(txt.aiInitFail, err.Error())))
 		return
 	}
 	cfg := svc.Config()
 	cur := cfg.AI
 	reader := bufio.NewReader(os.Stdin)
 	ask := func(label, def string) string {
-		fmt.Printf("  %s [%s]: ", label, def)
+		printf("  %s [%s]: ", label, def)
 		line, _ := reader.ReadString('\n')
 		return strings.TrimSpace(line)
 	}
-	fmt.Println("AI 配置引导（直接回车保持原值，输入 . 退出）：")
+	fmt.Println(txt.aiConfigTitle)
 	next := &cfg.AI
 	if v := ask("base_url", cur.BaseURL); v == "." {
-		fmt.Println(dim("已取消"))
+		fmt.Println(dim(txt.cancelled))
 		return
 	} else if v != "" {
 		next.BaseURL = v
 	}
-	if v := ask("api_key（输入新值覆盖，回车保持）", maskAIKey(cur.APIKey)); v == "." {
-		fmt.Println(dim("已取消"))
+	if v := ask(txt.aiCfgAPIKey, maskAIKey(cur.APIKey)); v == "." {
+		fmt.Println(dim(txt.cancelled))
 		return
 	} else if v != "" && !strings.Contains(v, "****") {
 		next.APIKey = v
 	}
 	if v := ask("model", cur.Model); v == "." {
-		fmt.Println(dim("已取消"))
+		fmt.Println(dim(txt.cancelled))
 		return
 	} else if v != "" {
 		next.Model = v
 	}
-	if v := ask("temperature", fmt.Sprintf("%.2f", cur.Temperature)); v == "." {
-		fmt.Println(dim("已取消"))
+	if v := ask("temperature", sprintf("%.2f", cur.Temperature)); v == "." {
+		fmt.Println(dim(txt.cancelled))
 		return
 	} else if v != "" {
 		if f, err := strconv.ParseFloat(v, 32); err == nil {
@@ -461,7 +438,7 @@ func (s *session) aiConfig() {
 		}
 	}
 	if v := ask("max_tokens", strconv.Itoa(cur.MaxTokens)); v == "." {
-		fmt.Println(dim("已取消"))
+		fmt.Println(dim(txt.cancelled))
 		return
 	} else if v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -469,31 +446,31 @@ func (s *session) aiConfig() {
 		}
 	}
 	if v := ask("timeout_sec", strconv.Itoa(cur.TimeoutSec)); v == "." {
-		fmt.Println(dim("已取消"))
+		fmt.Println(dim(txt.cancelled))
 		return
 	} else if v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			next.TimeoutSec = n
 		}
 	}
-	if v := ask("max_schema_tables（注入上下文的最大表数）", strconv.Itoa(cur.MaxSchemaTables)); v == "." {
-		fmt.Println(dim("已取消"))
+	if v := ask(txt.aiCfgMaxSchemaTables, strconv.Itoa(cur.MaxSchemaTables)); v == "." {
+		fmt.Println(dim(txt.cancelled))
 		return
 	} else if v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			next.MaxSchemaTables = n
 		}
 	}
-	if v := ask("max_schema_chars（表结构文本字符上限）", strconv.Itoa(cur.MaxSchemaChars)); v == "." {
-		fmt.Println(dim("已取消"))
+	if v := ask(txt.aiCfgMaxSchemaChars, strconv.Itoa(cur.MaxSchemaChars)); v == "." {
+		fmt.Println(dim(txt.cancelled))
 		return
 	} else if v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			next.MaxSchemaChars = n
 		}
 	}
-	if v := ask("system_prompt（输入 clear 清空，回车保持）", "内置默认模板"); v == "." {
-		fmt.Println(dim("已取消"))
+	if v := ask(txt.aiCfgSystemPrompt, txt.aiCfgDefaultPrompt); v == "." {
+		fmt.Println(dim(txt.cancelled))
 		return
 	} else if strings.EqualFold(v, "clear") {
 		next.SystemPrompt = ""
@@ -501,10 +478,10 @@ func (s *session) aiConfig() {
 		next.SystemPrompt = v
 	}
 	if err := svc.SaveConfig(*cfg); err != nil {
-		fmt.Fprintln(os.Stderr, red("保存失败: "+err.Error()))
+		fmt.Fprintln(os.Stderr, red(sprintf(txt.aiSaveFail, err.Error())))
 		return
 	}
-	fmt.Println(green("AI 配置已保存到 config.yaml"))
+	fmt.Println(green(txt.aiConfigSaved))
 }
 
 // maskAIKey 掩码显示 APIKey（保留首尾各 4 位）。
@@ -520,23 +497,14 @@ func maskAIKey(key string) string {
 
 // aiHelp 帮助。
 func (s *session) aiHelp() {
-	fmt.Println(`AI 辅助 SQL（OpenAI 兼容协议，配置见 config.yaml ai 段或 Web 设置）:
-  \ai <需求>                 生成 SQL 到缓冲区（可 \e 编辑后 \g 执行）
-  \ai explain [SQL]          解释 SQL（缺省用缓冲区）
-  \ai fix [报错信息]      修复缓冲区 SQL（缺省自动附带上次执行报错）
-  \ai continue <补充>        基于上文继续补充生成
-  \ai copy                   复制缓冲区 SQL 到系统剪贴板
-  \ai status                 查看配置状态与 token 统计
-  \ai config                 引导式修改 AI 配置（写回 config.yaml）
-  \ai clear                  重置当前会话（清空上下文与 token 统计）
-  \ai help                   显示此帮助
-生成时自动调用工具（list_databases / list_tables / get_schema）查询真实表结构，无需手动刷新`)
+	fmt.Println(cliTextsFor(cliLang).aiHelp)
 }
 
 // aiGenerate 生成 SQL 到缓冲区（可 \e 编辑后 \g 执行）。
 func (s *session) aiGenerate(text string) {
+	txt := cliTextsFor(cliLang)
 	if strings.TrimSpace(text) == "" {
-		fmt.Fprintln(os.Stderr, red("请输入需求描述，如: \\ai 查询最近 30 天订单量按天分组"))
+		fmt.Fprintln(os.Stderr, red(txt.aiGenerateEmpty))
 		return
 	}
 	_, err := s.aiGet()
@@ -544,10 +512,10 @@ func (s *session) aiGenerate(text string) {
 		fmt.Fprintln(os.Stderr, red(err.Error()))
 		return
 	}
-	fmt.Println(dim("正在生成 SQL..."))
-	content, usage, err := s.aiCall(llm.ActionPrompt("generate", text))
+	fmt.Println(dim(txt.aiGenerating))
+	content, usage, err := s.aiCall(llm.ActionPrompt(cliLang, "generate", text))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, red("生成失败: "+err.Error()))
+		fmt.Fprintln(os.Stderr, red(sprintf(txt.aiGenFail, err.Error())))
 		return
 	}
 	s.aiOutput(content, usage)
@@ -555,14 +523,15 @@ func (s *session) aiGenerate(text string) {
 
 // aiContinue 基于上文继续补充（追加普通用户消息）。
 func (s *session) aiContinue(text string) {
+	txt := cliTextsFor(cliLang)
 	if strings.TrimSpace(text) == "" {
-		fmt.Fprintln(os.Stderr, red("用法: \\ai continue <补充描述>"))
+		fmt.Fprintln(os.Stderr, red(txt.aiContinueUsage))
 		return
 	}
-	fmt.Println(dim("正在继续生成..."))
+	fmt.Println(dim(txt.aiGenerating2))
 	content, usage, err := s.aiCall(text)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, red("生成失败: "+err.Error()))
+		fmt.Fprintln(os.Stderr, red(sprintf(txt.aiGenFail, err.Error())))
 		return
 	}
 	s.aiOutput(content, usage)
@@ -570,17 +539,18 @@ func (s *session) aiContinue(text string) {
 
 // aiExplain 解释 SQL。
 func (s *session) aiExplain(sql string) {
+	txt := cliTextsFor(cliLang)
 	if strings.TrimSpace(sql) == "" {
 		sql = s.lastSQL
 	}
 	if strings.TrimSpace(sql) == "" {
-		fmt.Fprintln(os.Stderr, red("请提供 SQL 或先用 \\ai <需求> 生成"))
+		fmt.Fprintln(os.Stderr, red(txt.aiNoSQL))
 		return
 	}
-	fmt.Println(dim("正在解释 SQL..."))
-	content, _, err := s.aiCall(llm.ActionPrompt("explain", sql))
+	fmt.Println(dim(txt.aiExplaining))
+	content, _, err := s.aiCall(llm.ActionPrompt(cliLang, "explain", sql))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, red("解释失败: "+err.Error()))
+		fmt.Fprintln(os.Stderr, red(sprintf(txt.aiExplainFail, err.Error())))
 		return
 	}
 	fmt.Println(content)
@@ -588,20 +558,21 @@ func (s *session) aiExplain(sql string) {
 
 // aiFix 修复缓冲区 SQL（携带报错信息；缺省自动附带最近一次执行报错）。
 func (s *session) aiFix(errMsg string) {
+	txt := cliTextsFor(cliLang)
 	if s.lastSQL == "" {
-		fmt.Fprintln(os.Stderr, red("缓冲区为空：请先用 \\ai <需求> 生成 SQL"))
+		fmt.Fprintln(os.Stderr, red(txt.aiCopyEmpty))
 		return
 	}
-	detail := "原始 SQL：\n" + s.lastSQL
+	detail := txt.aiFixDetailSQL + "\n" + s.lastSQL
 	if strings.TrimSpace(errMsg) != "" {
-		detail += "\n报错信息：\n" + errMsg
+		detail += "\n" + txt.aiFixDetailErr + "\n" + errMsg
 	} else if strings.TrimSpace(s.lastErr) != "" {
-		detail += "\n报错信息：\n" + s.lastErr
+		detail += "\n" + txt.aiFixDetailErr + "\n" + s.lastErr
 	}
-	fmt.Println(dim("正在修复 SQL..."))
-	content, usage, err := s.aiCall(llm.ActionPrompt("fix", detail))
+	fmt.Println(dim(txt.aiFixing))
+	content, usage, err := s.aiCall(llm.ActionPrompt(cliLang, "fix", detail))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, red("修复失败: "+err.Error()))
+		fmt.Fprintln(os.Stderr, red(sprintf(txt.aiFixFail, err.Error())))
 		return
 	}
 	s.aiOutput(content, usage)
@@ -609,12 +580,13 @@ func (s *session) aiFix(errMsg string) {
 
 // aiOutput 输出生成结果：提取 SQL、危险检查、写入缓冲区。
 func (s *session) aiOutput(content string, usage llm.Usage) {
+	txt := cliTextsFor(cliLang)
 	sql := llm.ExtractSQL(content)
 	if sql == "" {
-		fmt.Fprintln(os.Stderr, yellow("模型未返回可执行的 SQL，原文如下："))
+		fmt.Fprintln(os.Stderr, yellow(txt.aiNoExecSQL))
 		fmt.Println(content)
 		if usage.TotalTokens > 0 {
-			fmt.Println(dim(fmt.Sprintf("本轮 token: 输入 %d / 输出 %d / 合计 %d", usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)))
+			fmt.Println(dim(sprintf(txt.aiTokens, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)))
 		}
 		return
 	}
@@ -622,24 +594,24 @@ func (s *session) aiOutput(content string, usage llm.Usage) {
 	// 安全链路：危险函数检测（注释已在上游剥离）
 	warnings, forbidden := checkDangerous(sql)
 	if len(forbidden) > 0 {
-		fmt.Fprintln(os.Stderr, red("已拒绝：生成结果包含禁止操作"))
+		fmt.Fprintln(os.Stderr, red(txt.aiRejected))
 		for _, f := range forbidden {
 			fmt.Fprintln(os.Stderr, red("  - "+f))
 		}
 		return
 	}
 	for _, w := range warnings {
-		fmt.Fprintln(os.Stderr, yellow("警告: "+w))
+		fmt.Fprintln(os.Stderr, yellow(sprintf(txt.aiWarning, w)))
 	}
 
-	fmt.Println(bold("生成的 SQL："))
+	fmt.Println(bold(txt.aiGeneratedSQL))
 	fmt.Println(sql)
 	if usage.TotalTokens > 0 {
-		fmt.Println(dim(fmt.Sprintf("本轮 token: 输入 %d / 输出 %d / 合计 %d", usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)))
+		fmt.Println(dim(sprintf(txt.aiTokens, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)))
 	}
 	// 写入缓冲区，可 \e 编辑 / \g 执行 / \ai continue 继续补充
 	s.lastSQL = sql
-	fmt.Println(dim("已写入缓冲区。可用 \\e 编辑、\\g 执行、\\ai continue 继续补充"))
+	fmt.Println(dim(txt.aiBufferWritten))
 }
 
 // dialectLabel CLI 方言标签（与 service 层一致）。

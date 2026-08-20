@@ -38,7 +38,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 	if opts.Source == nil {
 		return nil, fmt.Errorf("未提供源数据库连接")
 	}
-	t := newTracker(cb)
+	t := newTracker(cb, opts.Lang)
 
 	outputDir := opts.OutputDir
 	if outputDir == "" {
@@ -93,7 +93,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 		}
 		tables := filterTables(all, opts.Tables, db)
 		if len(tables) == 0 {
-			t.log("库 %s 无选中的表，仅处理对象", db)
+			t.log(engineTextsFor(t.lang).expNoTables, db)
 		}
 		plan = append(plan, dbTables{db: db, tables: tables})
 	}
@@ -106,7 +106,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 		totalTables += len(p.tables)
 	}
 	t.p.TotalUnits = totalTables
-	t.log("开始导出: %d 个库, %d 张表 → %s", len(plan), totalTables, baseDir)
+	t.log(engineTextsFor(t.lang).expStart, len(plan), totalTables, baseDir)
 
 	// 3. 逐库导出（每库一个 sql 文件）
 	var totalRows int64
@@ -123,7 +123,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 		endSQL := dialectDDL(cli, dialect.FuncNameGetEndSql, p.db)
 		if beginSQL == "" {
 			// 前置语句缺失时明示告警（如 MySQL 关闭外键检查失败，导入带外键依赖的库会失败）
-			t.log("警告: 库 %s 未获取到前置约束语句，导入带外键依赖的库可能失败", p.db)
+			t.log(engineTextsFor(t.lang).expNoFKWarn, p.db)
 		}
 
 		dbFile := filepath.Join(baseDir, sanitizeName(p.db)+sqlFileExt(opts.Gzip))
@@ -143,7 +143,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 	result := &ExportResult{OutputDir: baseDir, TotalTables: totalTables, TotalRows: totalRows}
 	if opts.Compress {
 		zipPath := filepath.Join(outputDir, fmt.Sprintf("%s_%s.zip", taskName, ts))
-		t.log("打包 zip: %s", zipPath)
+		t.log(engineTextsFor(t.lang).zipPack, zipPath)
 		if err := zipDir(baseDir, zipPath); err != nil {
 			return nil, fmt.Errorf("打包 zip 失败: %w", err)
 		}
@@ -156,7 +156,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 
 	t.p.OutputPath = result.OutputPath
 	t.finish()
-	t.log("导出完成: %d 表, %d 行 → %s", totalTables, totalRows, result.OutputPath)
+	t.log(engineTextsFor(t.lang).expDone, totalTables, totalRows, result.OutputPath)
 	return result, nil
 }
 
@@ -180,28 +180,28 @@ func beginSnapshot(cli *cydb.DBCli, enabled bool, t *tracker) (*cydb.DBCli, func
 	case "mysql", "mariadb":
 		// 快照需 REPEATABLE READ 隔离级别才对整事务有效；会话级设置，对其后开启的事务生效
 		if _, err := cli.DirectExecute("SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ"); err != nil {
-			t.log("警告: 设置会话隔离级别失败: %v（退化为普通导出）", err)
+			t.log(engineTextsFor(t.lang).expIsolationWarn, err)
 			return cli, noop
 		}
 	case "postgres":
 	default:
-		t.log("库类型 %s 不支持一致性快照导出，按普通方式导出", cli.DBType())
+		t.log(engineTextsFor(t.lang).expNoSnapshot, cli.DBType())
 		return cli, noop
 	}
 	tx, err := cli.BeginTx()
 	if err != nil {
-		t.log("警告: 开启快照事务失败: %v（退化为普通导出）", err)
+		t.log(engineTextsFor(t.lang).expSnapshotFail, err)
 		return cli, noop
 	}
 	if dbType == "postgres" {
 		// Postgres 事务默认 READ COMMITTED，需在首次读取前提升为 REPEATABLE READ
 		if _, err := tx.DirectExecute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"); err != nil {
 			_ = tx.Rollback()
-			t.log("警告: 设置事务隔离级别失败: %v（退化为普通导出）", err)
+			t.log(engineTextsFor(t.lang).expTxIsolationWarn, err)
 			return cli, noop
 		}
 	}
-	t.log("一致性快照已启用：全部表在同一事务内读取")
+	t.log("%s", engineTextsFor(t.lang).expSnapshotOn)
 	return tx, func(ok bool) {
 		if ok {
 			_ = tx.Commit()
@@ -262,7 +262,7 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 			if opts.SchemaOnly {
 				t.p.DoneUnits++
 			}
-			t.log("%s.%s 结构导出完成", db, table)
+			t.log(engineTextsFor(t.lang).expStructDone, db, table)
 			fmt.Fprintln(w)
 		}
 	}
@@ -285,7 +285,7 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 			}
 			// skip 模式：跳过该表的数据导出
 			if dataMode == TableDataModeSkip {
-				t.log("%s.%s 跳过数据导出（dataMode=skip）", db, table)
+				t.log(engineTextsFor(t.lang).expSkipData, db, table)
 				t.p.DoneUnits++
 				desc.Tables = append(desc.Tables, ExportDescTable{Name: table, Rows: 0})
 				continue
@@ -307,7 +307,7 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 			}
 			totalRows += rows
 			t.p.DoneUnits++
-			t.log("%s.%s 数据导出完成 (%d 行)", db, table, rows)
+			t.log(engineTextsFor(t.lang).expDataDone, db, table, rows)
 			fmt.Fprintln(w)
 
 			// 记录表信息到 desc（条件统一归一化为完整 SELECT）
@@ -346,7 +346,7 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 	base := strings.TrimSuffix(filePath, ".gz")
 	descPath := strings.TrimSuffix(base, filepath.Ext(base)) + ".desc"
 	if err := writeDescFile(descPath, desc); err != nil {
-		t.log("写入描述文件失败（已跳过）: %v", err)
+		t.log(engineTextsFor(t.lang).expDescFail, err)
 	}
 
 	return totalRows, nil
@@ -378,7 +378,7 @@ func sortTablesByFK(cli *cydb.DBCli, tables []string, t *tracker) []string {
 	sorted, err := cli.GetSortedSql(dialect.FuncNameSortTables, cli.Database(), tables)
 	if err != nil || len(sorted) == 0 {
 		if err != nil {
-			t.log("表依赖排序不可用（将按原顺序导出）: %v", err)
+			t.log(engineTextsFor(t.lang).expSortFail, err)
 		}
 		return tables
 	}
@@ -538,14 +538,14 @@ func exportObjectsToWriter(ctx context.Context, cli *cydb.DBCli, db, schema stri
 
 			ddl, err := objectDDL(cli, kind, name)
 			if err != nil {
-				t.log("导出%s %s.%s 失败（已跳过）: %v", dirName, db, name, err)
+				t.log(engineTextsFor(t.lang).expObjFail, dirName, db, name, err)
 				t.p.DoneUnits++
 				continue
 			}
 			fmt.Fprintf(w, "-- %s: %s\n", kindSingular[kind], name)
 			fmt.Fprintf(w, "%s\n\n", terminateSQL(ddl))
 			t.p.DoneUnits++
-			t.log("%s.%s/%s 导出完成", db, dirName, name)
+			t.log(engineTextsFor(t.lang).expObjDone, db, dirName, name)
 			exported[dirName] = append(exported[dirName], name)
 		}
 		fmt.Fprintln(w)

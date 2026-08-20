@@ -1,4 +1,5 @@
 // SQL 语句分类与危险检测（前端第一道护栏；后端 engine 有第二道强制拦截）
+import i18n from "@/lib/i18n"
 
 const WRITE_RE = /^\s*(insert|update|delete|drop|alter|create|truncate|rename|grant|revoke|call|replace|merge|comment|lock|unlock)\b/i
 const READ_RE = /^\s*(select|show|desc|describe|explain|use|with|set|begin|commit|rollback|start|kill|check|help)\b/i
@@ -25,7 +26,7 @@ export function isReadSQL(sql: string): boolean {
 /** 提取危险操作提示（用于确认弹窗文案） */
 export function describeWriteOp(sql: string): string {
   const m = sql.trim().match(/^\s*(\w+)/i)
-  return m ? m[1].toUpperCase() : "写操作"
+  return m ? m[1].toUpperCase() : i18n.t("sql.writeOp")
 }
 
 /** 提取首个语句用于提示（截断超长） */

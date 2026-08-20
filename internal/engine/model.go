@@ -58,17 +58,20 @@ type ExportOptions struct {
 	// 替换为 MySQL 5.7 兼容的 utf8mb4_unicode_ci，使导出 SQL 可在低版本 MySQL 上执行。
 	// 仅对 MySQL 导出的建表 DDL 生效（表级和列级 COLLATE）。
 	CompatCollation bool `json:"compatCollation" yaml:"compatCollation"`
+	// Lang 任务日志/产物文案语言（zh/en），默认 zh
+	Lang string `json:"lang,omitempty" yaml:"lang,omitempty"`
 }
 
 // DictionaryOptions 数据字典导出选项：按选定库表生成单个 .xlsx 数据字典（总览 + 每库字段明细）
 type DictionaryOptions struct {
 	SourceConn string      `json:"sourceConn" yaml:"sourceConn"` // 已保存连接名（与 Source 二选一）
 	Source     *DBConnInfo `json:"source,omitempty" yaml:"source,omitempty"`
-	OutputDir  string      `json:"outputDir" yaml:"outputDir"` // 导出根目录，默认数据目录下 exports/
-	TaskName   string      `json:"taskName" yaml:"taskName"`   // 用于生成产物文件名
-	Databases  []string    `json:"databases" yaml:"databases"` // 指定库（空=连接配置的库）
-	Tables     []string    `json:"tables" yaml:"tables"`       // 指定表（nil=全部，空数组=不导出）
-	Compress   bool        `json:"compress" yaml:"compress"`   // 是否打包 zip，默认 true
+	OutputDir  string      `json:"outputDir" yaml:"outputDir"`           // 导出根目录，默认数据目录下 exports/
+	TaskName   string      `json:"taskName" yaml:"taskName"`             // 用于生成产物文件名
+	Databases  []string    `json:"databases" yaml:"databases"`           // 指定库（空=连接配置的库）
+	Tables     []string    `json:"tables" yaml:"tables"`                 // 指定表（nil=全部，空数组=不导出）
+	Compress   bool        `json:"compress" yaml:"compress"`             // 是否打包 zip，默认 true
+	Lang       string      `json:"lang,omitempty" yaml:"lang,omitempty"` // 产物文案语言（zh/en），默认 zh
 }
 
 // ResetMode 重置数据模式
@@ -92,6 +95,8 @@ type ImportOptions struct {
 	// CompatCollation 兼容排序规则：将 SQL 文件中的 MySQL 8.0 特有排序规则（如 utf8mb4_0900_ai_ci）
 	// 替换为 MySQL 5.7 兼容的 utf8mb4_unicode_ci。仅对 MySQL 目标的导入生效。
 	CompatCollation bool `json:"compatCollation" yaml:"compatCollation"`
+	// Lang 任务日志语言（zh/en），默认 zh
+	Lang string `json:"lang,omitempty" yaml:"lang,omitempty"`
 }
 
 // MigrateOptions 迁移选项
@@ -112,6 +117,8 @@ type MigrateOptions struct {
 	// 替换为 MySQL 5.7 兼容的 utf8mb4_unicode_ci。
 	// 仅对 MySQL 同类型迁移的建表 DDL 生效（表级和列级 COLLATE）。
 	CompatCollation bool `json:"compatCollation" yaml:"compatCollation"`
+	// Lang 任务日志/产物文案语言（zh/en），默认 zh
+	Lang string `json:"lang,omitempty" yaml:"lang,omitempty"`
 }
 
 // Progress 任务进度信息
@@ -147,19 +154,21 @@ const DefaultBatchSize = 500
 // Tables 为 nil 时对比所有选中库的全部表（项为 "库.表" 限定名或裸表名）。
 // 源/目标不同名的同义表通过 Aliases 配对。
 type CompareOptions struct {
-	SourceConn       string          `json:"sourceConn" yaml:"sourceConn"`
-	TargetConn       string          `json:"targetConn" yaml:"targetConn"`
-	Source           *DBConnInfo     `json:"source,omitempty" yaml:"source,omitempty"`
-	Target           *DBConnInfo     `json:"target,omitempty" yaml:"target,omitempty"`
-	Databases        []CompareDBPair `json:"databases,omitempty" yaml:"databases,omitempty"`     // 库对（源库↔目标库），按索引配对
-	DBMapping        map[string]string `json:"dbMapping,omitempty" yaml:"dbMapping,omitempty"`   // 源库名→目标库名覆盖映射
-	Tables           []string        `json:"tables,omitempty" yaml:"tables,omitempty"`
-	Aliases          []TableAlias    `json:"aliases,omitempty" yaml:"aliases,omitempty"`
-	StructureOnly    bool            `json:"structureOnly" yaml:"structureOnly"`               // 仅比结构
-	DataOnly         bool            `json:"dataOnly" yaml:"dataOnly"`                         // 仅比数据
-	Threshold        int             `json:"threshold" yaml:"threshold"`                       // 数据逐行比较阈值，默认 1000
-	IgnoreColumns    []string        `json:"ignoreColumns,omitempty" yaml:"ignoreColumns,omitempty"`
-	ForceData        bool            `json:"forceData,omitempty" yaml:"forceData,omitempty"`
+	SourceConn    string            `json:"sourceConn" yaml:"sourceConn"`
+	TargetConn    string            `json:"targetConn" yaml:"targetConn"`
+	Source        *DBConnInfo       `json:"source,omitempty" yaml:"source,omitempty"`
+	Target        *DBConnInfo       `json:"target,omitempty" yaml:"target,omitempty"`
+	Databases     []CompareDBPair   `json:"databases,omitempty" yaml:"databases,omitempty"` // 库对（源库↔目标库），按索引配对
+	DBMapping     map[string]string `json:"dbMapping,omitempty" yaml:"dbMapping,omitempty"` // 源库名→目标库名覆盖映射
+	Tables        []string          `json:"tables,omitempty" yaml:"tables,omitempty"`
+	Aliases       []TableAlias      `json:"aliases,omitempty" yaml:"aliases,omitempty"`
+	StructureOnly bool              `json:"structureOnly" yaml:"structureOnly"` // 仅比结构
+	DataOnly      bool              `json:"dataOnly" yaml:"dataOnly"`           // 仅比数据
+	Threshold     int               `json:"threshold" yaml:"threshold"`         // 数据逐行比较阈值，默认 1000
+	IgnoreColumns []string          `json:"ignoreColumns,omitempty" yaml:"ignoreColumns,omitempty"`
+	ForceData     bool              `json:"forceData,omitempty" yaml:"forceData,omitempty"`
+	// Lang 任务日志语言（zh/en），默认 zh
+	Lang string `json:"lang,omitempty" yaml:"lang,omitempty"`
 }
 
 // CompareDBPair 对比的库对（源库 ↔ 目标库）
@@ -179,11 +188,11 @@ type TableAlias struct {
 
 // CompareResult 对比结果（多库分组，序列化落盘为 JSON 报告）
 type CompareResult struct {
-	Source    string                  `json:"source"`             // 源连接标签
-	Target    string                  `json:"target"`             // 目标连接标签
-	Databases []CompareDatabaseResult `json:"databases"`          // 每个库对的结果（多库分组）
-	Tables    []CompareTableResult    `json:"tables,omitempty"`   // 兼容字段：所有库表的扁平汇总（旧数据可读，新写入不再依赖）
-	Summary   CompareSummary          `json:"summary"`            // 汇总统计（所有库合计）
+	Source    string                  `json:"source"`           // 源连接标签
+	Target    string                  `json:"target"`           // 目标连接标签
+	Databases []CompareDatabaseResult `json:"databases"`        // 每个库对的结果（多库分组）
+	Tables    []CompareTableResult    `json:"tables,omitempty"` // 兼容字段：所有库表的扁平汇总（旧数据可读，新写入不再依赖）
+	Summary   CompareSummary          `json:"summary"`          // 汇总统计（所有库合计）
 }
 
 // CompareDatabaseResult 单个库对（源库 ↔ 目标库）的对比结果
@@ -228,7 +237,7 @@ type ColumnDiff struct {
 // ColumnItem 单列信息
 type ColumnItem struct {
 	Name           string `json:"name"`
-	DataType       string `json:"dataType"`       // 原始类型（GetOrginalDataType），用于展示
+	DataType       string `json:"dataType"`                 // 原始类型（GetOrginalDataType），用于展示
 	NormalizedType string `json:"normalizedType,omitempty"` // 按方言归一后的类型（写入时固化，diff 优先用此比对）
 	Nullable       bool   `json:"nullable"`
 	PrimaryKey     bool   `json:"primaryKey"`
@@ -277,18 +286,18 @@ type ValueDiff struct {
 // Snapshot 快照完整数据（单个快照文件内容，与索引分离以减少列表加载开销）
 // 支持覆盖多库：Databases 为各库快照，根上的 DBName/Tables 仅作单库兼容读取（v1 旧文件）
 type Snapshot struct {
-	ID         string             `json:"id"`
-	Name       string             `json:"name"`
-	Description string            `json:"description,omitempty"`
-	ConnID     string             `json:"connId"`    // 来源连接 ID（允许连接被删除后快照仍可读）
-	ConnLabel  string             `json:"connLabel"` // 冗余连接名称
-	DBType     string             `json:"dbType"`
-	CreatedAt  int64              `json:"createdAt"` // unix 秒
-	TableCount int                `json:"tableCount"`
-	TotalRows  int64              `json:"totalRows"`
-	Databases  []SnapshotDatabase `json:"databases"`           // 多库快照
-	DBName     string             `json:"dbName,omitempty"`    // 兼容字段（单库旧快照），新写入不再使用
-	Tables     []SnapshotTable    `json:"tables,omitempty"`    // 兼容字段（单库旧快照）
+	ID          string             `json:"id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description,omitempty"`
+	ConnID      string             `json:"connId"`    // 来源连接 ID（允许连接被删除后快照仍可读）
+	ConnLabel   string             `json:"connLabel"` // 冗余连接名称
+	DBType      string             `json:"dbType"`
+	CreatedAt   int64              `json:"createdAt"` // unix 秒
+	TableCount  int                `json:"tableCount"`
+	TotalRows   int64              `json:"totalRows"`
+	Databases   []SnapshotDatabase `json:"databases"`        // 多库快照
+	DBName      string             `json:"dbName,omitempty"` // 兼容字段（单库旧快照），新写入不再使用
+	Tables      []SnapshotTable    `json:"tables,omitempty"` // 兼容字段（单库旧快照）
 }
 
 // SnapshotDatabase 单库快照
@@ -311,7 +320,7 @@ type SnapshotTable struct {
 // SnapshotColumn 列快照
 type SnapshotColumn struct {
 	Name           string `json:"name"`
-	DataType       string `json:"dataType"`       // 原始类型
+	DataType       string `json:"dataType"`                 // 原始类型
 	NormalizedType string `json:"normalizedType,omitempty"` // 按快照库方言归一后的类型（写入时固化）
 	Nullable       bool   `json:"nullable"`
 	PrimaryKey     bool   `json:"primaryKey"`
@@ -338,15 +347,19 @@ type SnapshotInfo struct {
 type CreateSnapshotOptions struct {
 	IncludeSamples bool // 是否保存前 N 行采样数据
 	SampleLimit    int  // 采样行数上限，默认 10
+	// Lang 任务日志语言（zh/en），默认 zh
+	Lang string
 }
 
 // SnapshotCompareOptions 快照对比选项
 type SnapshotCompareOptions struct {
-	SnapshotID    string          `json:"snapshotId"`
-	TargetConn    string          `json:"targetConn"`
-	Target        *DBConnInfo     `json:"target,omitempty"`
-	DBMapping     map[string]string `json:"dbMapping,omitempty"` // 快照库名→目标库名映射（默认同名）
-	Tables        []string        `json:"tables,omitempty"`      // 限定对比的表，nil=全部（"库.表" 或裸名）
+	SnapshotID string            `json:"snapshotId"`
+	TargetConn string            `json:"targetConn"`
+	Target     *DBConnInfo       `json:"target,omitempty"`
+	DBMapping  map[string]string `json:"dbMapping,omitempty"` // 快照库名→目标库名映射（默认同名）
+	Tables     []string          `json:"tables,omitempty"`    // 限定对比的表，nil=全部（"库.表" 或裸名）
+	// Lang 任务日志语言（zh/en），默认 zh
+	Lang string `json:"lang,omitempty"`
 }
 
 // ExportDesc 导出描述文件（.desc）内容，与 .sql 文件同名，JSON 格式

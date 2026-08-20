@@ -67,7 +67,7 @@ func cliExport(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	opts := ExportOptions{Compress: true, SingleTransaction: true}
+	opts := ExportOptions{Compress: true, SingleTransaction: true, Lang: cliLang()}
 	var wantZip string
 	if v, _ := f.GetString("config"); v != "" {
 		cfg, lerr := loadExportConfig(v)
@@ -168,7 +168,7 @@ func cliExport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	cb, _ := cliProgress()
-	fmt.Println("开始导出...")
+	fmt.Println(cliTextsFor(cliLang()).startExport)
 	outputPath, err := svc.RunExport(context.Background(), opts, cb)
 	if err != nil {
 		return err
@@ -179,6 +179,6 @@ func cliExport(cmd *cobra.Command, args []string) error {
 			outputPath = wantZip
 		}
 	}
-	fmt.Printf("导出完成: %s\n", outputPath)
+	printf(cliTextsFor(cliLang()).doneExport+"\n", outputPath)
 	return nil
 }

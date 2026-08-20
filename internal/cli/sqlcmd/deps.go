@@ -17,10 +17,10 @@ type ColorFuncs struct {
 
 // ConnResolver 连接解析器（由父包注入，避免循环引用）。
 type ConnResolver struct {
-	NewCliService func() (any, error)                                       // 返回 *service.Service
+	NewCliService func() (any, error)                                               // 返回 *service.Service
 	ResolveConn   func(svc any, key, dbOverride string) (*engine.DBConnInfo, error) // 已保存连接解析
-	RegisterFlags func(cmd any, prefix string, cf *ConnFlags)                // 注册连接 flags
-	RegisterAlias func(cmd any, aliasPrefix, refPrefix string, cf *ConnFlags) // 注册别名
+	RegisterFlags func(cmd any, prefix string, cf *ConnFlags)                       // 注册连接 flags
+	RegisterAlias func(cmd any, aliasPrefix, refPrefix string, cf *ConnFlags)       // 注册别名
 }
 
 // ConnFlags 连接 flag 结构体。

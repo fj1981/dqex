@@ -145,7 +145,7 @@ func (s *session) handleMeta(cmd string) (bool, bool) {
 	parts := strings.Fields(cmd)
 	name := parts[0]
 	args := parts[1:]
-
+	txt := cliTextsFor(cliLang)
 	switch name {
 	case "\\q", "\\quit":
 		return true, true
@@ -168,7 +168,7 @@ func (s *session) handleMeta(cmd string) (bool, bool) {
 	case "\\c", "\\use", "\\connect":
 		if len(args) > 0 {
 			if err := s.switchDB(args[0]); err != nil {
-				fmt.Fprintf(os.Stderr, "%s\n", red(err.Error()))
+				fprintf(os.Stderr, "%s\n", red(err.Error()))
 			}
 		} else {
 			s.showConnInfo()
@@ -177,9 +177,9 @@ func (s *session) handleMeta(cmd string) (bool, bool) {
 	case "\\timing":
 		showTiming = !showTiming
 		if showTiming {
-			fmt.Println(dim("耗时显示: 开"))
+			fmt.Println(dim(txt.timingOn))
 		} else {
-			fmt.Println(dim("耗时显示: 关"))
+			fmt.Println(dim(txt.timingOff))
 		}
 		return true, false
 	case "\\x":
@@ -204,7 +204,7 @@ func (s *session) handleMeta(cmd string) (bool, bool) {
 			}
 		}
 		s.saveDisplayMode()
-		fmt.Println(dim(fmt.Sprintf("扩展显示: %s（已写入 config.yaml 作为默认）", displayModeLabel(s.displayMode))))
+		fmt.Println(dim(sprintf(txt.xDisplaySaved, displayModeLabel(s.displayMode))))
 		return true, false
 	case "\\g", "\\G":
 		s.runLastSQL(name == "\\G")
@@ -225,7 +225,7 @@ func (s *session) handleMeta(cmd string) (bool, bool) {
 		if len(args) > 0 {
 			exportToFile(s, args[0])
 		} else {
-			fmt.Fprintln(os.Stderr, red("用法: \\copy <文件路径>"))
+			fmt.Fprintln(os.Stderr, red(txt.copyUsage))
 		}
 		return true, false
 	case "\\w", "\\write":
@@ -247,6 +247,7 @@ func (s *session) handleMeta(cmd string) (bool, bool) {
 
 // runLastSQL 重新执行上一条 SQL（缓冲区）；vertical 为 true 时垂直显示（\G）。
 func (s *session) runLastSQL(vertical bool) {
+	txt := cliTextsFor(cliLang)
 	if s.lastSQL == "" {
 		return
 	}
@@ -254,8 +255,8 @@ func (s *session) runLastSQL(vertical bool) {
 	result, err := s.execute(ctx, s.lastSQL)
 	if err != nil {
 		s.lastErr = err.Error()
-		fmt.Fprintf(os.Stderr, "%s\n", red(err.Error()))
-		fmt.Fprintln(os.Stderr, dim("提示: 输入 \\ai fix 可让 AI 根据该报错自动修复 SQL"))
+		fprintf(os.Stderr, "%s\n", red(err.Error()))
+		fmt.Fprintln(os.Stderr, dim(txt.aiFixHint))
 		return
 	}
 	s.renderResult(result, vertical)
@@ -276,43 +277,46 @@ func (s *session) renderResult(r *queryResult, forceVertical bool) {
 
 // saveDisplayMode 将当前显示模式写回 config.yaml（cli.display_mode），下次启动作为默认生效。
 func (s *session) saveDisplayMode() {
+	txt := cliTextsFor(cliLang)
 	svc, err := newAIService("", "")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, dim("(提示：显示模式未能写入 config.yaml: "+err.Error()+")"))
+		fmt.Fprintln(os.Stderr, dim(sprintf(txt.displayModeSaveFail, err.Error())))
 		return
 	}
 	cfg := *svc.Config()
 	cfg.CLI.DisplayMode = s.displayMode
 	if err := svc.SaveConfig(cfg); err != nil {
-		fmt.Fprintln(os.Stderr, dim("(提示：显示模式未能写入 config.yaml: "+err.Error()+")"))
+		fmt.Fprintln(os.Stderr, dim(sprintf(txt.displayModeSaveFail, err.Error())))
 	}
 }
 
-// displayModeLabel 显示模式的友好描述。
+// displayModeLabel 显示模式的友好描述（按 CLI 语言）。
 func displayModeLabel(mode string) string {
+	txt := cliTextsFor(cliLang)
 	switch mode {
 	case "vertical":
-		return "开（垂直显示）"
+		return txt.xModeVertical
 	case "table":
-		return "关（表格显示）"
+		return txt.xModeTable
 	default:
-		return "auto（表格超宽时自动垂直）"
+		return txt.xModeAuto
 	}
 }
 
 func (s *session) showConnInfo() {
-	info := fmt.Sprintf("连接信息: %s @ %s:%d/%s",
-		s.dbType, s.connInfo.Host, s.connInfo.Port, s.currentDB)
+	txt := cliTextsFor(cliLang)
+	info := sprintf(txt.bannerConn, s.dbType, s.connInfo.Host, s.connInfo.Port, s.currentDB)
 	if s.connInfo.SubType != "" {
-		info += fmt.Sprintf(" (%s)", s.connInfo.SubType)
+		info += sprintf(" (%s)", s.connInfo.SubType)
 	}
 	fmt.Println(info)
 }
 
 func (s *session) showTables(filter []string) {
+	txt := cliTextsFor(cliLang)
 	tables, err := s.cli.GetTables(s.currentDB, nil, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", red(fmt.Sprintf("获取表列表失败: %v", err)))
+		fprintf(os.Stderr, "%s\n", red(sprintf(txt.failListTables, err)))
 		return
 	}
 	filtered := tables
@@ -327,7 +331,7 @@ func (s *session) showTables(filter []string) {
 	}
 	s.tableCache = filtered
 	if len(filtered) == 0 {
-		fmt.Println(dim("(无匹配表)"))
+		fmt.Println(dim(txt.noTables))
 		return
 	}
 	sort.Strings(filtered)
@@ -337,17 +341,18 @@ func (s *session) showTables(filter []string) {
 }
 
 func (s *session) descTable(name string) {
+	txt := cliTextsFor(cliLang)
 	info, err := s.cli.GetTableInfo(name)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", red(fmt.Sprintf("获取表结构失败: %v", err)))
+		fprintf(os.Stderr, "%s\n", red(sprintf(txt.failTableMeta, err)))
 		return
 	}
 	columns := info.GetColumns()
 	if len(columns) == 0 {
-		fmt.Println(dim("(无列信息)"))
+		fmt.Println(dim(txt.noColumns))
 		return
 	}
-	cols := []string{"列名", "类型", "可空", "默认值", "说明"}
+	cols := []string{txt.colName, txt.colType, txt.colNullable, txt.colDefault, txt.colComment}
 	rows := make([][]any, 0, len(columns))
 	for _, c := range columns {
 		nullable := "YES"
@@ -364,19 +369,20 @@ func (s *session) descTable(name string) {
 }
 
 func (s *session) descTableVerbose(name string) {
+	txt := cliTextsFor(cliLang)
 	s.descTable(name)
 	// 补充索引信息
 	fmt.Println()
 	indexes, err := s.cli.GetIndexes(name)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, dim(fmt.Sprintf("(无法获取索引信息: %v)", err)))
+		fmt.Fprintln(os.Stderr, dim(sprintf(txt.failIndexInfo, err)))
 		return
 	}
 	if len(indexes) == 0 {
-		fmt.Println(dim("(无索引)"))
+		fmt.Println(dim(txt.noIndexes))
 		return
 	}
-	fmt.Println(bold("索引:"))
+	fmt.Println(bold(txt.indexesTitle))
 	for _, idx := range indexes {
 		marker := ""
 		if idx.IsPrimary {
@@ -388,14 +394,15 @@ func (s *session) descTableVerbose(name string) {
 		if cols == "" {
 			cols = idx.Name
 		}
-		fmt.Printf("  %s%s: %s\n", idx.Name, marker, cols)
+		printf("  %s%s: %s\n", idx.Name, marker, cols)
 	}
 }
 
 func (s *session) showDatabases() {
+	txt := cliTextsFor(cliLang)
 	dbs, err := s.cli.GetDatabases()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", red(fmt.Sprintf("获取数据库列表失败: %v", err)))
+		fprintf(os.Stderr, "%s\n", red(sprintf(txt.failListDBs, err)))
 		return
 	}
 	for _, db := range dbs {
@@ -403,7 +410,7 @@ func (s *session) showDatabases() {
 		if strings.EqualFold(db, s.currentDB) {
 			marker = " " + green("*")
 		}
-		fmt.Printf("%s%s\n", db, marker)
+		printf("%s%s\n", db, marker)
 	}
 }
 
@@ -417,19 +424,20 @@ func matchPattern(s, pattern string) bool {
 // ---- 文件操作 ----
 
 func exportToFile(s *session, path string) {
+	txt := cliTextsFor(cliLang)
 	if s.lastSQL == "" {
-		fmt.Fprintln(os.Stderr, red("没有上一条查询结果可导出"))
+		fmt.Fprintln(os.Stderr, red(txt.noExportSQL))
 		return
 	}
 	ctx := context.Background()
 	result, err := s.execute(ctx, s.lastSQL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", red(err.Error()))
+		fprintf(os.Stderr, "%s\n", red(err.Error()))
 		return
 	}
 	f, err := os.Create(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", red(err.Error()))
+		fprintf(os.Stderr, "%s\n", red(err.Error()))
 		return
 	}
 	defer f.Close()
@@ -437,11 +445,11 @@ func exportToFile(s *session, path string) {
 	for _, row := range result.Rows {
 		vals := make([]string, len(row))
 		for i, v := range row {
-			vals[i] = csvField(fmt.Sprintf("%v", v))
+			vals[i] = csvField(sprintf("%v", v))
 		}
 		fmt.Fprintln(f, strings.Join(vals, ","))
 	}
-	fmt.Printf("已导出 %d 行到 %s\n", result.RowCount, path)
+	printf(txt.exportedRows+"\n", result.RowCount, path)
 }
 
 // csvFields 批量将字段转为 CSV 转义文本。
@@ -462,17 +470,18 @@ func csvField(s string) string {
 }
 
 func executeFile(s *session, path string) {
+	txt := cliTextsFor(cliLang)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", red(err.Error()))
+		fprintf(os.Stderr, "%s\n", red(err.Error()))
 		return
 	}
 	sql := string(data)
-	fmt.Printf("执行 %s...\n", path)
+	printf(txt.execFile+"\n", path)
 	ctx := context.Background()
 	result, err := s.execute(ctx, sql)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", red(err.Error()))
+		fprintf(os.Stderr, "%s\n", red(err.Error()))
 		return
 	}
 	outputTable(result)
@@ -690,8 +699,9 @@ func isConnErr(err error) bool {
 
 // editLastSQL 用外部编辑器打开上一条 SQL。
 func (s *session) editLastSQL() {
+	txt := cliTextsFor(cliLang)
 	if s.lastSQL == "" {
-		fmt.Fprintln(os.Stderr, red("没有上一条 SQL 可编辑"))
+		fmt.Fprintln(os.Stderr, red(txt.noEditSQL))
 		return
 	}
 	editor := os.Getenv("EDITOR")
@@ -710,7 +720,7 @@ func (s *session) editLastSQL() {
 	// 写入临时文件
 	tmpFile, err := os.CreateTemp("", "dbx-edit-*.sql")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", red(err.Error()))
+		fprintf(os.Stderr, "%s\n", red(err.Error()))
 		return
 	}
 	defer os.Remove(tmpFile.Name())
@@ -723,20 +733,20 @@ func (s *session) editLastSQL() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", red(err.Error()))
+		fprintf(os.Stderr, "%s\n", red(err.Error()))
 		return
 	}
 
 	// 读取编辑后的内容
 	data, err := os.ReadFile(tmpFile.Name())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", red(err.Error()))
+		fprintf(os.Stderr, "%s\n", red(err.Error()))
 		return
 	}
 	edited := strings.TrimSpace(string(data))
 	if edited != "" && edited != s.lastSQL {
 		s.lastSQL = edited
-		fmt.Println(dim("SQL 已更新"))
+		fmt.Println(dim(txt.sqlUpdated))
 	}
 }
 
@@ -754,32 +764,5 @@ func parseUseDB(sql string) string {
 }
 
 func printHelp() {
-	fmt.Println(`元命令:
-  \q, \quit           退出
-  \dt, \tables [pat]  列出表（支持通配符 * ?）
-  \d, \desc  <表名>    查看表结构
-  \d+ <表名>           查看表结构（含索引/约束）
-  \l, \list            列出数据库
-  \c, \use  <库名>     切换数据库
-  \c                   查看当前连接信息
-  \timing              切换耗时显示
-  \g                   再次执行上一条 SQL（表格）
-  \G                   执行上一条 SQL 并垂直显示（每行一个字段）
-  \x [on|off|auto]     扩展显示：on=垂直 off=表格 auto=超宽自动（写入 config.yaml）
-  \p, \print           打印当前缓冲区
-  \r, \reset           清空缓冲区
-  \ai <需求>            AI 生成 SQL 到缓冲区（\ai help 查看子命令）
-  \h, \help            显示此帮助
-  \e, \edit           用外部编辑器编辑上一条 SQL
-  \copy <文件>          导出上一条查询结果到文件（CSV）
-  \w <文件>             导出上一条查询结果到文件
-  \i <文件>             执行文件中的 SQL
-
-快捷键:
-  Enter (分号结尾)      执行 SQL
-  Enter (无分号)        多行续写
-  Ctrl+R               搜索历史
-  Tab                  自动补全
-  Ctrl+C               取消输入（空行退出）
-  Ctrl+D               退出`)
+	fmt.Println(cliTextsFor(cliLang).metaHelp)
 }

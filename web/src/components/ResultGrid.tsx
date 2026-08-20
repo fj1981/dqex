@@ -1,5 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { ArrowDown, ArrowUp, BarChart3, ChevronLeft, ChevronRight, ChevronsUpDown, Columns3, Copy, Download, EyeOff, Filter, Pin, PinOff, X } from "lucide-react"
+import { useTranslation } from "react-i18next"
+import { tKey } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { useGridColors } from "@/lib/theme"
 import { useClickOutside } from "@/lib/useClickOutside"
@@ -40,6 +42,7 @@ export default function ResultGrid({ result }: Props) {
   const rows = rawRows ?? []
   // 网格底色：随主题切换响应式重算（见 lib/theme.ts）
   const grid = useGridColors()
+  const { t } = useTranslation()
 
   // 分页状态
   const [page, setPage] = useState(1)
@@ -363,7 +366,7 @@ export default function ResultGrid({ result }: Props) {
   // 保证用户可通过表头漏斗/列头右键清除或修改过滤条件，不被「无数据」卡死。
   if (columns.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">暂无结果</div>
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{t("grid.noResult")}</div>
     )
   }
 
@@ -373,11 +376,11 @@ export default function ResultGrid({ result }: Props) {
       {filters.length > 0 && (
         <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-primary/20 bg-primary/5 px-2 py-1.5">
           <Filter className="h-3.5 w-3.5 shrink-0 text-primary" />
-          <span className="text-xs font-medium text-primary">已应用 {filters.length} 个过滤条件</span>
+          <span className="text-xs font-medium text-primary">{t("grid.filtersApplied", { n: filters.length })}</span>
           {filters.map((f, i) => (
             <span key={i} className="flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
               <span className="font-medium">{f.column}</span>
-              <span className="text-muted-foreground">{FILTER_OP_LABEL[f.op]}</span>
+              <span className="text-muted-foreground">{tKey(FILTER_OP_LABEL[f.op])}</span>
               {f.value !== undefined && f.value !== null && f.value !== "" && (
                 <span className="max-w-[120px] truncate">“{String(f.value)}”</span>
               )}
@@ -387,7 +390,7 @@ export default function ResultGrid({ result }: Props) {
             </span>
           ))}
           <button type="button" className="ml-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" onClick={clearAllFilters}>
-            清除全部
+            {t("grid.clearAll")}
           </button>
         </div>
       )}
@@ -418,7 +421,7 @@ export default function ResultGrid({ result }: Props) {
                           frozenLeft !== undefined && "sticky left-0 top-0 z-30 bg-muted frozen-col",
                         )}
                         style={{ width: `${colWidths[i]}px`, ...(frozenLeft !== undefined ? { left: frozenLeft } : {}) }}
-                        title={`点击排序：${c}（Shift+点击叠加多列排序）`}
+                        title={t("grid.sortHint", { col: c })}
                         onClick={(e) => handleSort(c, e.shiftKey)}
                       >
                         <div className="flex items-center gap-1">
@@ -437,7 +440,7 @@ export default function ResultGrid({ result }: Props) {
                               "flex h-4 w-4 shrink-0 items-center justify-center rounded hover:bg-primary/10",
                               filtered ? "text-primary" : "text-muted-foreground/50 hover:text-muted-foreground",
                             )}
-                            title={filtered ? "已过滤，点击编辑" : "筛选此列"}
+                            title={filtered ? t("grid.filteredEdit") : t("grid.filterColumn")}
                             onClick={(e) => {
                               e.stopPropagation()
                               openFilterPanel(c)
@@ -465,14 +468,14 @@ export default function ResultGrid({ result }: Props) {
                               </SelectTrigger>
                               <SelectContent>
                                 {FILTER_OPS.map((f) => (
-                                  <SelectItem key={f.op} value={f.op}>{f.label}</SelectItem>
+                                  <SelectItem key={f.op} value={f.op}>{tKey(f.label)}</SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                             {FILTER_OPS.find((f) => f.op === filterDraft.op)?.needValue && (
                               <Input
                                 className="mt-1.5 h-7 text-xs"
-                                placeholder="输入过滤值"
+                                placeholder={t("grid.filterValue")}
                                 value={filterDraft.value}
                                 autoFocus
                                 onChange={(e) => setFilterDraft((d) => ({ ...d, value: e.target.value }))}
@@ -482,11 +485,11 @@ export default function ResultGrid({ result }: Props) {
                             <div className="mt-2 flex justify-end gap-1">
                               {filtered && (
                                 <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => clearColumnFilter(c)}>
-                                  清除
+                                  {t("grid.clear")}
                                 </Button>
                               )}
                               <Button size="sm" className="h-7 px-2 text-xs" onClick={() => applyFilter(c)}>
-                                应用
+                                {t("grid.apply")}
                               </Button>
                             </div>
                           </div>
@@ -495,49 +498,49 @@ export default function ResultGrid({ result }: Props) {
                     </ContextMenuTrigger>
                     <ContextMenuContent>
                       <ContextMenuItem onSelect={() => { setSortSpecs((p) => p.some((s) => s.column === c && s.order === "asc") ? p.filter((s) => s.column !== c) : [...p.filter((s) => s.column !== c), { column: c, order: "asc" }]); setPage(1) }}>
-                        <ArrowUp className="mr-2 h-3.5 w-3.5" /> 升序排序
+                        <ArrowUp className="mr-2 h-3.5 w-3.5" /> {t("grid.sortAsc")}
                       </ContextMenuItem>
                       <ContextMenuItem onSelect={() => { setSortSpecs((p) => p.some((s) => s.column === c && s.order === "desc") ? p.filter((s) => s.column !== c) : [...p.filter((s) => s.column !== c), { column: c, order: "desc" }]); setPage(1) }}>
-                        <ArrowDown className="mr-2 h-3.5 w-3.5" /> 降序排序
+                        <ArrowDown className="mr-2 h-3.5 w-3.5" /> {t("grid.sortDesc")}
                       </ContextMenuItem>
                       {sortSpec && (
                         <ContextMenuItem onSelect={() => setSortSpecs((p) => p.filter((s) => s.column !== c))}>
-                          <ChevronsUpDown className="mr-2 h-3.5 w-3.5" /> 取消排序
+                          <ChevronsUpDown className="mr-2 h-3.5 w-3.5" /> {t("grid.sortCancel")}
                         </ContextMenuItem>
                       )}
                       <ContextMenuSeparator />
                       <ContextMenuItem onSelect={() => openFilterPanel(c)}>
-                        <Filter className="mr-2 h-3.5 w-3.5" /> 筛选此列
+                        <Filter className="mr-2 h-3.5 w-3.5" /> {t("grid.filterColumn")}
                       </ContextMenuItem>
                       <ContextMenuItem onSelect={() => { setFilters((p) => p.filter((f) => f.column !== c).concat({ column: c, op: "isNull" })); setPage(1) }}>
-                        <Filter className="mr-2 h-3.5 w-3.5" /> 只看空值
+                        <Filter className="mr-2 h-3.5 w-3.5" /> {t("grid.onlyNull")}
                       </ContextMenuItem>
                       <ContextMenuItem onSelect={() => { setFilters((p) => p.filter((f) => f.column !== c).concat({ column: c, op: "isNotNull" })); setPage(1) }}>
-                        <Filter className="mr-2 h-3.5 w-3.5" /> 只看非空
+                        <Filter className="mr-2 h-3.5 w-3.5" /> {t("grid.onlyNotNull")}
                       </ContextMenuItem>
                       <ContextMenuItem onSelect={() => toggleColumn(c)}>
-                        <EyeOff className="mr-2 h-3.5 w-3.5" /> 隐藏此列
+                        <EyeOff className="mr-2 h-3.5 w-3.5" /> {t("grid.hideColumn")}
                       </ContextMenuItem>
                       <ContextMenuSeparator />
                       {/* 冻结列：固定到当前列（含左侧所有可见列）；右键当前边界列时显示「取消固定」 */}
                       {frozenUntil === c ? (
                         <ContextMenuItem onSelect={clearFrozen}>
-                          <PinOff className="mr-2 h-3.5 w-3.5" /> 取消固定
+                          <PinOff className="mr-2 h-3.5 w-3.5" /> {t("grid.unpin")}
                         </ContextMenuItem>
                       ) : (
                         <>
                           <ContextMenuItem onSelect={() => setFrozen(c)}>
-                            <Pin className="mr-2 h-3.5 w-3.5" /> 固定到此列
+                            <Pin className="mr-2 h-3.5 w-3.5" /> {t("grid.pinHere")}
                           </ContextMenuItem>
                           {frozenUntil !== null && (
                             <ContextMenuItem onSelect={clearFrozen}>
-                              <PinOff className="mr-2 h-3.5 w-3.5" /> 取消固定
+                              <PinOff className="mr-2 h-3.5 w-3.5" /> {t("grid.unpin")}
                             </ContextMenuItem>
                           )}
                         </>
                       )}
                       <ContextMenuItem onSelect={() => copyToClipboard(c)}>
-                        <Copy className="mr-2 h-3.5 w-3.5" /> 复制列名
+                        <Copy className="mr-2 h-3.5 w-3.5" /> {t("grid.copyColName")}
                       </ContextMenuItem>
                     </ContextMenuContent>
                   </ContextMenu>
@@ -549,7 +552,7 @@ export default function ResultGrid({ result }: Props) {
             {pageRows.length === 0 ? (
               <tr onContextMenu={(e) => e.stopPropagation()}>
                 <td colSpan={columns.length} className="px-2 py-8 text-center text-sm text-muted-foreground">
-                  无匹配数据（已应用 {filters.length} 个过滤条件）
+                  {t("grid.noMatchData", { n: filters.length })}
                 </td>
               </tr>
             ) : (
@@ -575,7 +578,7 @@ export default function ResultGrid({ result }: Props) {
                               // 所有单元格背景色统一内联（斑马 > 默认），色值取自主题变量
                               backgroundColor: (start + ri) % 2 === 1 ? grid.zebra : grid.base,
                             }}
-                            title={`${text}\n（点击查看）`}
+                            title={`${text}\n${t("grid.clickView")}`}
                             onClick={() => {
                               setFocusedCell({ rowIndex: ri, colIndex: visibleColIdxList.indexOf(ci) })
                               setViewing({ rowIndex: start + ri, colIndex: ci })
@@ -628,11 +631,11 @@ export default function ResultGrid({ result }: Props) {
                     >
                       {st.numeric ? (
                         <span className="tabular-nums">
-                          Σ {fmtNum(st.sum)} · avg {fmtNum(st.avg)}
-                          {st.nullCount > 0 ? ` · ${st.nullCount} 空` : ""}
+                          {t("grid.statsSum", { sum: fmtNum(st.sum), avg: fmtNum(st.avg) })}
+                          {st.nullCount > 0 ? ` · ${t("grid.nullCount", { n: st.nullCount })}` : ""}
                         </span>
                       ) : (
-                        <span className="tabular-nums">{st.nullCount > 0 ? `${st.nullCount} 空` : "—"}</span>
+                        <span className="tabular-nums">{st.nullCount > 0 ? t("grid.nullCount", { n: st.nullCount }) : "—"}</span>
                       )}
                     </td>
                   )
@@ -650,7 +653,7 @@ export default function ResultGrid({ result }: Props) {
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t px-2 py-1.5">
         <div className="flex items-center gap-2">
           <span className="text-xs tabular-nums text-muted-foreground">
-            共 {filteredRows.length} 行 · {result.elapsedMs} ms
+            {t("grid.totalRowsMs", { n: filteredRows.length, ms: result.elapsedMs })}
           </span>
           <Button
             variant="outline"
@@ -667,7 +670,7 @@ export default function ResultGrid({ result }: Props) {
               )
             }
           >
-            <Download className="h-3.5 w-3.5" /> 导出 CSV
+            <Download className="h-3.5 w-3.5" /> {t("grid.exportCSV")}
           </Button>
           <Button
             variant={showStats ? "secondary" : "outline"}
@@ -675,7 +678,7 @@ export default function ResultGrid({ result }: Props) {
             className="h-7 gap-1 px-2 text-xs"
             onClick={() => setShowStats((v) => !v)}
           >
-            <BarChart3 className="h-3.5 w-3.5" /> 统计
+            <BarChart3 className="h-3.5 w-3.5" /> {t("grid.stats")}
           </Button>
           {/* 列管理：显示/隐藏列（隐藏列后从这里重新显示） */}
           <div className="relative" ref={columnPanelRef}>
@@ -685,15 +688,15 @@ export default function ResultGrid({ result }: Props) {
               className="h-7 gap-1 px-2 text-xs"
               onClick={() => setShowColumnPanel((v) => !v)}
             >
-              <Columns3 className="h-3.5 w-3.5" /> 列
+              <Columns3 className="h-3.5 w-3.5" /> {t("grid.columns")}
               {hiddenColumns.size > 0 && <span className="rounded bg-muted px-1 text-[10px]">{hiddenColumns.size}</span>}
             </Button>
             {showColumnPanel && (
               <div className="absolute bottom-full left-0 z-30 mb-1 max-h-80 w-64 overflow-auto rounded-md border bg-popover p-1.5 shadow-md">
                 <div className="mb-1 flex items-center justify-between px-1">
-                  <span className="text-xs font-semibold text-foreground">显示列</span>
+                  <span className="text-xs font-semibold text-foreground">{t("grid.showColumns")}</span>
                   <button type="button" className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" onClick={() => setHiddenColumns(new Set())}>
-                    全部显示
+                    {t("grid.showAll")}
                   </button>
                 </div>
                 {columns.map((col) => {
@@ -717,7 +720,7 @@ export default function ResultGrid({ result }: Props) {
             </SelectTrigger>
             <SelectContent>
               {[50, 100, 200, 500, 1000].map((s) => (
-                <SelectItem key={s} value={String(s)}>{s} 行/页</SelectItem>
+                <SelectItem key={s} value={String(s)}>{t("grid.rowsPerPage", { n: s })}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -746,7 +749,7 @@ export default function ResultGrid({ result }: Props) {
           </Button>
 
           <div className="ml-2 flex items-center gap-1">
-            <span className="text-xs text-muted-foreground">跳至</span>
+            <span className="text-xs text-muted-foreground">{t("grid.jumpTo")}</span>
             <Input
               className="h-7 w-14 px-1.5 text-center text-xs tabular-nums"
               value={jumpInput}
@@ -756,7 +759,7 @@ export default function ResultGrid({ result }: Props) {
               onKeyDown={(e) => e.key === "Enter" && commitJump()}
               onBlur={commitJump}
             />
-            <span className="text-xs text-muted-foreground">/ {pages} 页</span>
+            <span className="text-xs text-muted-foreground">{t("grid.ofPages", { n: pages })}</span>
           </div>
         </div>
       </div>
@@ -765,7 +768,7 @@ export default function ResultGrid({ result }: Props) {
       <Dialog open={viewing !== null} onOpenChange={(open) => !open && setViewing(null)}>
         <DialogContent className="max-w-[720px]">
           <DialogHeader>
-            <DialogTitle>查看单元格</DialogTitle>
+            <DialogTitle>{t("grid.viewCell")}</DialogTitle>
           </DialogHeader>
           {viewing !== null && columns[viewing.colIndex] !== undefined ? (
             <CellEditor
@@ -793,6 +796,7 @@ const ResultGridCellMenu = forwardRef<CellMenuHandle, {
   rows: unknown[][]
   onQuickFilter: (col: string, cell: unknown, op: FilterOp) => void
 }>(({ columns, rows, onQuickFilter }, ref) => {
+  const { t } = useTranslation()
   const [cell, setCell] = useState<{ rowIndex: number; colIndex: number } | null>(null)
   useImperativeHandle(ref, () => ({
     show: (c) => setCell(c),
@@ -809,29 +813,29 @@ const ResultGridCellMenu = forwardRef<CellMenuHandle, {
           return (
             <>
               <ContextMenuItem onSelect={() => copyToClipboard(copyCellValue(cellVal))}>
-                <Copy className="mr-2 h-3.5 w-3.5" /> 复制单元格值
+                <Copy className="mr-2 h-3.5 w-3.5" /> {t("grid.copyCellValue")}
               </ContextMenuItem>
               <ContextMenuItem onSelect={() => copyToClipboard(rowToTSV(fullRow))}>
-                <Copy className="mr-2 h-3.5 w-3.5" /> 复制整行 (TSV)
+                <Copy className="mr-2 h-3.5 w-3.5" /> {t("grid.copyRowTSV")}
               </ContextMenuItem>
               <ContextMenuItem onSelect={() => copyToClipboard(col)}>
-                <Copy className="mr-2 h-3.5 w-3.5" /> 复制列名
+                <Copy className="mr-2 h-3.5 w-3.5" /> {t("grid.copyColName")}
               </ContextMenuItem>
               <ContextMenuSeparator />
               <ContextMenuItem onSelect={() => onQuickFilter(col, cellVal, "eq")}>
-                <Filter className="mr-2 h-3.5 w-3.5" /> 等于此值：<span className="ml-1 max-w-[120px] truncate text-muted-foreground">{val}</span>
+                <Filter className="mr-2 h-3.5 w-3.5" /> {t("grid.equalsValue")}<span className="ml-1 max-w-[120px] truncate text-muted-foreground">{val}</span>
               </ContextMenuItem>
               <ContextMenuItem onSelect={() => onQuickFilter(col, cellVal, "neq")}>
-                <Filter className="mr-2 h-3.5 w-3.5" /> 不等于此值
+                <Filter className="mr-2 h-3.5 w-3.5" /> {t("grid.notEqualsValue")}
               </ContextMenuItem>
               <ContextMenuItem onSelect={() => onQuickFilter(col, cellVal, "contains")}>
-                <Filter className="mr-2 h-3.5 w-3.5" /> 包含此值
+                <Filter className="mr-2 h-3.5 w-3.5" /> {t("grid.containsValue")}
               </ContextMenuItem>
             </>
           )
         })()
       ) : (
-        <ContextMenuItem disabled>未选中单元格</ContextMenuItem>
+        <ContextMenuItem disabled>{t("grid.noCellSelected")}</ContextMenuItem>
       )}
     </ContextMenuContent>
   )

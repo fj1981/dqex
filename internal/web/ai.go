@@ -87,7 +87,7 @@ func handleAICreateSession(svc *service.Service) gin.HandlerFunc {
 		defer cancel()
 		// 组装历史消息（会话重建场景）
 		history := buildHistory(req.History)
-		ses, err := svc.AINewSession(ctx, req.ConnID, req.DB, req.TabID, history, "")
+		ses, err := svc.AINewSession(ctx, cygin.FromCtx(c), req.ConnID, req.DB, req.TabID, history, "")
 		if err != nil {
 			cylog.Debugf("[ai] 创建会话失败 conn=%s db=%s tab=%s err=%v", req.ConnID, req.DB, req.TabID, err)
 			return nil, err
@@ -128,7 +128,7 @@ func handleAISessionUsage(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req AISessionIDReq) (any, error) {
 		usage, ok := svc.AISessionUsage(req.ID)
 		if !ok {
-			return nil, fmt.Errorf("会话不存在或已过期")
+			return nil, cygin.NewError(service.ErrAISessionNotFound)
 		}
 		return gin.H{"usage": usage}, nil
 	})
@@ -160,7 +160,7 @@ func handleAISessionHistory(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req AISessionIDReq) (any, error) {
 		recs := svc.AILoadSessionHistory(req.ID)
 		if recs == nil {
-			return nil, fmt.Errorf("会话不存在或已过期")
+			return nil, cygin.NewError(service.ErrAISessionNotFound)
 		}
 		return gin.H{"session": recs[0]}, nil
 	})
@@ -218,7 +218,7 @@ func handleAIChatStream(c *gin.Context, svc *service.Service) {
 
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": http.StatusInternalServerError, "msg": "当前环境不支持流式输出"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": http.StatusInternalServerError, "msg": cyginMsg(c, service.ErrStreamUnsupported)})
 		return
 	}
 	// 显式超时兜底：上游模型无响应（TTFB 过长/服务挂起）时不能无限挂起，
@@ -329,14 +329,14 @@ func handleAIChatStream(c *gin.Context, svc *service.Service) {
 		}
 		if !finished {
 			// 异常兜底：panic 或提前 return 时补发 error 结束事件
-			finish("error", gin.H{"message": "服务异常，请重试"})
+			finish("error", gin.H{"message": cyginMsg(c, service.ErrServiceException)})
 		}
 	}()
 
 	// 组装历史消息（会话失效透明重建时回放，保留多轮上下文）
 	history := buildHistory(req.History)
 
-	usage, schemaVerified, err := svc.AIChatStreamWithFallback(ctx, req.SessionID, action, req.Text, req.MsgID, req.ConnID, req.DB, req.TabID, history, func(delta string) {
+	usage, schemaVerified, err := svc.AIChatStreamWithFallback(ctx, cygin.FromCtx(c), req.SessionID, action, req.Text, req.MsgID, req.ConnID, req.DB, req.TabID, history, func(delta string) {
 		if firstDelta {
 			firstDelta = false
 			cylog.Debugf("[ai] SSE 首字节 耗时=%s deltaChars=%d", time.Since(start).Round(time.Millisecond), len(delta))
@@ -352,7 +352,7 @@ func handleAIChatStream(c *gin.Context, svc *service.Service) {
 		cylog.Debugf("[ai] SSE 失败 session=%s action=%s 耗时=%s err=%v",
 			req.SessionID, action, time.Since(start).Round(time.Millisecond), err)
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			finish("error", gin.H{"message": "生成超时（" + fmt.Sprintf("%ds", int(timeout/time.Second)) + "），请检查模型服务是否可用，或调大 ai.timeout_sec 配置"})
+			finish("error", gin.H{"message": cyginMsg(c, service.ErrAITimeout)})
 		} else {
 			finish("error", gin.H{"message": err.Error()})
 		}

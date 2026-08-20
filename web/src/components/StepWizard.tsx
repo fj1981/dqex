@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next"
 import { Check } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -11,6 +12,7 @@ interface Props {
 // 每步固定等宽（flex-1），连接线绝对定位只画在相邻圆点之间，
 // 保证不同页面/文案长度下圆点位置一致，且首尾无多余线条
 export default function StepWizard({ steps, current, onStepClick }: Props) {
+  const { t } = useTranslation()
   return (
     <div className="flex shrink-0 items-start rounded-lg border bg-background px-6 py-4">
       {steps.map((label, i) => {
@@ -36,7 +38,7 @@ export default function StepWizard({ steps, current, onStepClick }: Props) {
                 "group relative z-10 flex flex-col items-center gap-1.5 outline-none",
                 clickable && "cursor-pointer",
               )}
-              title={clickable ? `返回「${label}」` : label}
+              title={clickable ? t("wizard.backTo", { label }) : label}
             >
               <span
                 className={cn(

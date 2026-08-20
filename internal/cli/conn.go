@@ -53,14 +53,15 @@ var connListCmd = &cobra.Command{
 		}
 		conns := svc.ListConnections()
 		if len(conns) == 0 {
-			fmt.Println("（无已保存连接）")
+			fmt.Println(cliTextsFor(cliLang()).connNone)
 			return nil
 		}
-		fmt.Printf("%-26s %-16s %-14s %-10s %s\n", "ID", "名称", "短名", "类型", "地址")
+		txt := cliTextsFor(cliLang())
+		printf("%-26s %-16s %-14s %-10s %s\n", txt.hdrID, txt.hdrName, txt.hdrShort, txt.hdrType, txt.hdrAddr)
 		for _, c := range conns {
 			addr := c.Conn.Host
 			if c.Conn.Port > 0 {
-				addr = fmt.Sprintf("%s:%d", c.Conn.Host, c.Conn.Port)
+				addr = sprintf("%s:%d", c.Conn.Host, c.Conn.Port)
 			}
 			if c.Conn.DBName != "" {
 				addr += "/" + c.Conn.DBName
@@ -73,7 +74,7 @@ var connListCmd = &cobra.Command{
 			if sn == "" {
 				sn = "-"
 			}
-			fmt.Printf("%-26s %-16s %-14s %-10s %s\n", c.ID, c.Name, sn, typ, addr)
+			printf("%-26s %-16s %-14s %-10s %s\n", c.ID, c.Name, sn, typ, addr)
 		}
 		return nil
 	},
@@ -101,9 +102,9 @@ var connAddCmd = &cobra.Command{
 		}
 		info := saved.Name
 		if saved.ShortName != "" {
-			info += fmt.Sprintf(" (短名: %s)", saved.ShortName)
+			info += sprintf(cliTextsFor(cliLang()).connShortName, saved.ShortName)
 		}
-		fmt.Printf("连接已保存: %s (%s)\n", saved.ID, info)
+		printf(cliTextsFor(cliLang()).connSaved+"\n", saved.ID, info)
 		return nil
 	},
 }
@@ -121,12 +122,13 @@ var connTestCmd = &cobra.Command{
 		if !ok {
 			return cygin.NewError(ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("未找到连接: %s", key))
 		}
-		fmt.Printf("测试连接 %s ... ", rec.Name)
+		txt := cliTextsFor(cliLang())
+		printf(txt.connTesting, rec.Name)
 		if err := svc.TestConnection(rec.Conn); err != nil {
-			fmt.Println("失败")
+			fmt.Println(txt.connFail)
 			return err
 		}
-		fmt.Println("成功")
+		fmt.Println(txt.connOK)
 		return nil
 	},
 }
@@ -144,7 +146,7 @@ var connDeleteCmd = &cobra.Command{
 		if err := svc.DeleteConnection(key); err != nil {
 			return err
 		}
-		fmt.Println("连接已删除")
+		fmt.Println(cliTextsFor(cliLang()).connDeleted)
 		return nil
 	},
 }

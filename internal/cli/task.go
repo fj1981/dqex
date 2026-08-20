@@ -52,15 +52,16 @@ var taskListCmd = &cobra.Command{
 		taskType, _ := cmd.Flags().GetString("type")
 		tasks := svc.ListTasks(taskType)
 		if len(tasks) == 0 {
-			fmt.Println("（无任务配置）")
+			fmt.Println(cliTextsFor(cliLang()).taskNone)
 			return nil
 		}
+		txt := cliTextsFor(cliLang())
 		for _, t := range tasks {
 			last := ""
 			if t.IsLastUsed {
-				last = " [最近使用]"
+				last = txt.taskLastUsed
 			}
-			fmt.Printf("%s  %-8s %s%s\n", t.ID, t.Type, t.Name, last)
+			printf("%s  %-8s %s%s\n", t.ID, t.Type, t.Name, last)
 		}
 		return nil
 	},
@@ -101,7 +102,7 @@ var taskRunCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Printf("执行任务: %s (%s)\n", task.Name, task.Type)
+		printf(cliTextsFor(cliLang()).taskRunning+"\n", task.Name, task.Type)
 		cb, _ := cliProgress()
 		ctx := context.Background()
 		// CLI 直接同步执行
@@ -109,20 +110,20 @@ var taskRunCmd = &cobra.Command{
 		case "export":
 			outputPath, err := svc.RunExport(ctx, *task.ExportOpts, cb)
 			if err == nil {
-				fmt.Printf("导出完成: %s\n", outputPath)
+				printf(cliTextsFor(cliLang()).doneExport+"\n", outputPath)
 			}
 			return err
 		case "import":
 			if err := svc.RunImport(ctx, *task.ImportOpts, cb); err != nil {
 				return err
 			}
-			fmt.Println("导入完成")
+			fmt.Println(cliTextsFor(cliLang()).doneImport)
 			return nil
 		case "migrate":
 			if err := svc.RunMigrate(ctx, *task.MigrateOpts, cb); err != nil {
 				return err
 			}
-			fmt.Println("迁移完成")
+			fmt.Println(cliTextsFor(cliLang()).doneMigrate)
 			return nil
 		case "compare":
 			recordID, result, err := svc.RunCompareRecorded(ctx, *task.CompareOpts, cb, id)
@@ -135,7 +136,7 @@ var taskRunCmd = &cobra.Command{
 		case "dictionary":
 			outputPath, err := svc.RunDictionary(ctx, *task.DictionaryOpts, cb)
 			if err == nil {
-				fmt.Printf("数据字典生成完成: %s\n", outputPath)
+				printf(cliTextsFor(cliLang()).doneDict+"\n", outputPath)
 			}
 			return err
 		}
@@ -222,7 +223,7 @@ var taskSaveCmd = &cobra.Command{
 		if err := svc.SaveTask(&task); err != nil {
 			return err
 		}
-		fmt.Printf("任务已保存: %s (%s)\n", task.ID, task.Type)
+		printf(cliTextsFor(cliLang()).taskSaved+"\n", task.ID, task.Type)
 		return nil
 	},
 }
@@ -240,7 +241,7 @@ var taskDeleteCmd = &cobra.Command{
 		if err := svc.DeleteTask(id); err != nil {
 			return err
 		}
-		fmt.Println("任务已删除")
+		fmt.Println(cliTextsFor(cliLang()).taskDeleted)
 		return nil
 	},
 }

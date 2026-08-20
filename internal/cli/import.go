@@ -55,7 +55,7 @@ func cliImport(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	opts := ImportOptions{Backup: true}
+	opts := ImportOptions{Backup: true, Lang: cliLang()}
 	if v, _ := f.GetString("config"); v != "" {
 		cfg, lerr := loadImportConfig(v)
 		if lerr != nil {
@@ -125,7 +125,7 @@ func cliImport(cmd *cobra.Command, args []string) error {
 		return cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf("缺少导入文件：配置 input 字段或 --input"))
 	}
 	if opts.ResetMode != ResetNone && !opts.Backup {
-		fmt.Println(yellow("警告: 重置数据且未开启备份，目标表现有数据将无法恢复！"))
+		fmt.Println(yellow(cliTextsFor(cliLang()).warnReset))
 	}
 
 	svc, err := newCliService()
@@ -133,10 +133,10 @@ func cliImport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	cb, _ := cliProgress()
-	fmt.Println("开始导入...")
+	fmt.Println(cliTextsFor(cliLang()).startImport)
 	if err := svc.RunImport(context.Background(), opts, cb); err != nil {
 		return err
 	}
-	fmt.Println(green("导入完成"))
+	fmt.Println(green(cliTextsFor(cliLang()).doneImport))
 	return nil
 }

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import i18n from "@/lib/i18n"
 
 interface ConfirmOptions {
   title?: string
@@ -84,10 +85,10 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
     confirmHandler = (opts: ConfirmOptions) =>
       new Promise<boolean>((resolve) => {
         setState({
-          title: opts.title ?? "确认操作",
+          title: opts.title ?? i18n.t("common.operate"),
           description: opts.description ?? "",
-          confirmText: opts.confirmText ?? "确认",
-          cancelText: opts.cancelText ?? "取消",
+          confirmText: opts.confirmText ?? i18n.t("common.confirm"),
+          cancelText: opts.cancelText ?? i18n.t("common.cancel"),
           danger: opts.danger ?? false,
           resolve,
         })
@@ -96,12 +97,12 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
       new Promise<string | null>((resolve) => {
         setPromptValue(opts.defaultValue ?? "")
         setPromptState({
-          title: opts.title ?? "输入",
+          title: opts.title ?? i18n.t("common.input"),
           description: opts.description ?? "",
           defaultValue: opts.defaultValue ?? "",
           placeholder: opts.placeholder ?? "",
-          confirmText: opts.confirmText ?? "确认",
-          cancelText: opts.cancelText ?? "取消",
+          confirmText: opts.confirmText ?? i18n.t("common.confirm"),
+          cancelText: opts.cancelText ?? i18n.t("common.cancel"),
           required: opts.required,
           resolve,
         })

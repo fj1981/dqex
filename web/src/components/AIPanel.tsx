@@ -1,4 +1,5 @@
 import { isValidElement, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { toast } from "sonner"
 import {
@@ -32,16 +33,17 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import * as api from "@/api"
+import { tKey } from "@/lib/i18n"
 import type { AIUsage } from "@/types"
 
 type AiMode = "generate" | "explain" | "fix" | "optimize"
 
 // 动作 → 对话气泡标签（用于快捷触发「解释/优化/修复」时在 user 气泡上标识语义，避免纯 SQL 无法区分）
 const ACTION_LABEL: Record<AiMode, string> = {
-  generate: "生成",
-  explain: "解释 SQL",
-  optimize: "优化 SQL",
-  fix: "修复 SQL",
+  generate: "ai.action.generate",
+  explain: "ai.action.explain",
+  optimize: "ai.action.optimize",
+  fix: "ai.action.fix",
 }
 
 interface AiMessage {
@@ -107,6 +109,7 @@ function parseThinking(text: string): { thinking: string; answer: string } {
 //   - 已有文字输出（answer 已流式）：显示极简的呼吸圆点（提示仍在持续生成）
 // 统一替代原先消息头部 + 工具提示两处割裂的 Loader2 旋转图标。
 function StreamingStatus({ toolHint, hasAnswer }: { toolHint: string; hasAnswer: boolean }) {
+  const { t } = useTranslation()
   if (toolHint) {
     return (
       <div className="mb-1.5 inline-flex items-center gap-2 rounded-full border border-violet-500/30 bg-violet-500/10 px-2.5 py-1 text-[11px] font-medium text-violet-700 dark:text-violet-300">
@@ -120,7 +123,7 @@ function StreamingStatus({ toolHint, hasAnswer }: { toolHint: string; hasAnswer:
     )
   }
   // 无工具调用：思考中（无输出）或生成中（已有输出，用呼吸圆点表达「仍在持续」）
-  const label = hasAnswer ? "正在生成…" : "正在思考…"
+  const label = hasAnswer ? t("ai.generating") : t("ai.thinking")
   return (
     <div className="mb-1.5 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
       <span className="ai-status-dot h-1.5 w-1.5 rounded-full bg-violet-500" />
@@ -134,6 +137,7 @@ function StreamingStatus({ toolHint, hasAnswer }: { toolHint: string; hasAnswer:
 // live=true 表示流式输出中：此时始终展开（不折叠、不显示按钮），避免输出过程中高度抖动；
 // 流式结束后（live 变 false）才按实际高度启用折叠。
 function CollapsibleContent({ children, maxHeight = 320, live = false }: { children: ReactNode; maxHeight?: number; live?: boolean }) {
+  const { t } = useTranslation()
   const innerRef = useRef<HTMLDivElement>(null)
   const [collapsed, setCollapsed] = useState(true)
   const [overflow, setOverflow] = useState(false)
@@ -183,12 +187,12 @@ function CollapsibleContent({ children, maxHeight = 320, live = false }: { child
       >
         {collapsed ? (
           <>
-            展开完整内容
+            {t("ai.expandFull")}
             <ChevronDown className="h-3 w-3" />
           </>
         ) : (
           <>
-            收起
+            {t("common.collapse")}
             <ChevronUp className="h-3 w-3" />
           </>
         )}
@@ -198,6 +202,7 @@ function CollapsibleContent({ children, maxHeight = 320, live = false }: { child
 }
 
 function ThinkingBlock({ text, defaultOpen }: { text: string; defaultOpen: boolean }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(defaultOpen)
   useEffect(() => {
     setOpen(defaultOpen)
@@ -210,7 +215,7 @@ function ThinkingBlock({ text, defaultOpen }: { text: string; defaultOpen: boole
         className="flex w-full items-center gap-1.5 px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-accent"
       >
         <BrainCircuit className="h-3 w-3" />
-        <span>{open ? "思考过程" : "思考过程（点击展开）"}</span>
+        <span>{open ? t("ai.thinkingProcess") : t("ai.thinkingProcessOpen")}</span>
         {open ? (
           <ChevronUp className="ml-auto h-3 w-3" />
         ) : (
@@ -236,6 +241,7 @@ function CodeBlock({ text, lang, isSql, hasSelection, schemaVerified, onApplySql
   schemaVerified: boolean
   onApplySql: (sql: string, action: "replace_all" | "replace_selection" | "insert_cursor" | "append") => void
 }) {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   
@@ -253,7 +259,7 @@ function CodeBlock({ text, lang, isSql, hasSelection, schemaVerified, onApplySql
         copyTimerRef.current = null
       }, 1500)
     } catch {
-      toast.error("复制失败，请手动复制")
+      toast.error(t("ai.copyFailed"))
     }
   }
   return (
@@ -264,7 +270,7 @@ function CodeBlock({ text, lang, isSql, hasSelection, schemaVerified, onApplySql
         {isSql && (
           <span
             className="flex items-center gap-0.5 text-[10px]"
-            title={schemaVerified ? "本轮已查询真实表结构，字段可靠" : "本轮未查询真实表结构，字段可能不准确，请人工确认"}
+            title={schemaVerified ? t("ai.schemaVerifiedTitle") : t("ai.schemaNotVerifiedTitle")}
           >
             {schemaVerified ? (
               <Check className="h-3 w-3 text-emerald-500" />
@@ -272,7 +278,7 @@ function CodeBlock({ text, lang, isSql, hasSelection, schemaVerified, onApplySql
               <span className="text-muted-foreground">?</span>
             )}
             <span className={schemaVerified ? "text-emerald-600" : "text-muted-foreground"}>
-              {schemaVerified ? "已验证" : "未验证"}
+              {schemaVerified ? t("ai.schemaVerified") : t("ai.schemaNotVerified")}
             </span>
           </span>
         )}
@@ -281,7 +287,7 @@ function CodeBlock({ text, lang, isSql, hasSelection, schemaVerified, onApplySql
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button size="sm" variant="ghost" className="h-5 gap-1 px-1.5 text-[10px] text-muted-foreground hover:text-violet-600">
-                  <CornerDownLeft className="h-3 w-3" /> 插入
+                  <CornerDownLeft className="h-3 w-3" /> {t("ai.insert")}
                   <ChevronDown className="h-3 w-3" />
                 </Button>
               </DropdownMenuTrigger>
@@ -289,27 +295,27 @@ function CodeBlock({ text, lang, isSql, hasSelection, schemaVerified, onApplySql
                 {hasSelection && (
                   <DropdownMenuItem onClick={() => onApplySql(text, "replace_selection")}>
                     <CornerDownLeft className="mr-2 h-3.5 w-3.5 text-violet-500" />
-                    替换所选内容
+                    {t("ai.replaceSelection")}
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onClick={() => onApplySql(text, "replace_all")}>
                   <CornerDownLeft className="mr-2 h-3.5 w-3.5 text-violet-500" />
-                  全部替换
+                  {t("ai.replaceAll")}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onApplySql(text, "insert_cursor")}>
                   <CornerDownLeft className="mr-2 h-3.5 w-3.5 text-violet-500" />
-                  插入当前光标处
+                  {t("ai.insertCursor")}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onApplySql(text, "append")}>
                   <CornerDownLeft className="mr-2 h-3.5 w-3.5 text-violet-500" />
-                  追加到末尾
+                  {t("ai.append")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-          <Button size="sm" variant="ghost" className="h-5 gap-1 px-1.5 text-[10px] text-muted-foreground hover:text-foreground" onClick={copy} title="复制">
+          <Button size="sm" variant="ghost" className="h-5 gap-1 px-1.5 text-[10px] text-muted-foreground hover:text-foreground" onClick={copy} title={t("common.copy")}>
             {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-            {copied ? "已复制" : "复制"}
+            {copied ? t("common.copied") : t("common.copy")}
           </Button>
         </div>
       </div>
@@ -392,6 +398,7 @@ function MarkdownContent({ content, hasSelection, schemaVerified, onApplySql }: 
 }
 
 export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRequest, onQuickConsumed, onClose }: AIPanelProps) {
+  const { t } = useTranslation()
   const [messages, setMessages] = useState<AiMessage[]>([])
   const [input, setInput] = useState("")
   const [streaming, setStreaming] = useState(false)
@@ -621,13 +628,13 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
             onTool: (name, args) => {
               let hint = ""
               if (name === "list_databases") {
-                hint = "正在列出可用的数据库…"
+                hint = t("ai.toolListDatabases")
               } else if (name === "list_tables") {
-                hint = fmtToolHint(args, (a) => `正在查询 ${a.db ?? ""} 的表列表…`, "正在查询表列表…")
+                hint = fmtToolHint(args, (a) => t("ai.toolListTables", { db: a.db ?? "" }), t("ai.toolListTablesFallback"))
               } else if (name === "get_schema") {
-                hint = fmtToolHint(args, (a) => `正在查询 ${a.table ?? ""} 的表结构…`, "正在查询表结构…")
+                hint = fmtToolHint(args, (a) => t("ai.toolGetSchema", { table: a.table ?? "" }), t("ai.toolGetSchemaFallback"))
               } else {
-                hint = `正在调用工具 ${name}…`
+                hint = t("ai.toolCalling", { name })
               }
               setToolHint(hint)
             },
@@ -661,7 +668,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
         )
         stopRef.current = stop
       } catch (e) {
-        const msg = (e as Error).message || "创建 AI 会话失败"
+        const msg = (e as Error).message || t("ai.createSessionFailed")
         appendError(msg)
         toast.error(msg)
         setStreaming(false)
@@ -669,7 +676,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
         setToolHint("")
       }
     },
-    [ensureSession, appendError, connId, db, tabId, refreshProcUsage],
+    [ensureSession, appendError, connId, db, tabId, refreshProcUsage, t],
   )
 
   // 错误气泡「重试」：回溯到错误前最后一条 user 消息，截断其后的失败对话并重新发送
@@ -753,7 +760,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
     }
     setMessages([])
     setUsage(null)
-    toast.success("AI 会话已重置")
+    toast.success(t("ai.sessionReset"))
   }
 
   return (
@@ -762,7 +769,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
       <div className="flex items-center gap-1 border-b px-3 py-2">
         <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
           <Sparkles className="h-4 w-4 shrink-0 text-violet-500" />
-          <span className="shrink-0 text-sm font-semibold whitespace-nowrap">AI 助手</span>
+          <span className="shrink-0 text-sm font-semibold whitespace-nowrap">{t("ai.title")}</span>
           {db ? (
             <Badge variant="secondary" className="min-w-0 max-w-[100px] truncate font-mono text-[10px]" title={db}>
               {db}
@@ -770,10 +777,10 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={reset} title="重置会话">
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={reset} title={t("ai.resetSession")}>
             <RotateCcw className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose} title="关闭">
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose} title={t("common.close")}>
             <X className="h-4 w-4" />
           </Button>
         </div>
@@ -784,8 +791,8 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
         {messages.length === 0 ? (
           <div className="flex flex-col items-center gap-2 pt-8 text-center text-xs text-muted-foreground">
             <Bot className="h-8 w-8 text-muted-foreground/50" />
-            <p>描述需求生成 SQL，或咨询表结构 / 字段 / 关联关系等信息</p>
-            <p className="text-[11px]">解释 / 优化 / 修复可在编辑器工具栏或报错卡片一键触发，生成的 SQL 请人工审核后再执行</p>
+            <p>{t("ai.emptyHint")}</p>
+            <p className="text-[11px]">{t("ai.emptyHint2")}</p>
           </div>
         ) : (
           // 虚拟滚动容器：用总高度撑开滚动条
@@ -828,7 +835,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
                               ) : (
                                 <Wrench className="h-3 w-3" />
                               )}
-                              {ACTION_LABEL[m.action]}
+                              {tKey(ACTION_LABEL[m.action])}
                             </span>
                           </div>
                         ) : null}
@@ -859,7 +866,7 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
                               disabled={streaming}
                               onClick={() => retrySend(i)}
                             >
-                              <RotateCcw className="h-3 w-3" /> 重试
+                              <RotateCcw className="h-3 w-3" /> {t("common.retry")}
                             </Button>
                           </div>
                         )}
@@ -909,26 +916,26 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
             }
           }}
           rows={3}
-          placeholder="描述需求生成 SQL，或咨询表结构。例：查询最近 30 天订单量 / sys_user 表有哪些字段"
+          placeholder={t("ai.inputPlaceholder")}
           className="resize-none text-xs"
           disabled={creating}
         />
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-muted-foreground">
-            Enter 发送 / Shift+Enter 换行
+            {t("ai.enterHint")}
           </span>
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={reset} title="清空会话">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={reset} title={t("ai.clearSession")}>
               <Eraser className="h-3.5 w-3.5" />
             </Button>
             {streaming ? (
               <Button size="sm" variant="destructive" className="h-7 gap-1 text-xs" onClick={stop}>
-                <Square className="h-3 w-3" /> 停止
+                <Square className="h-3 w-3" /> {t("ai.stop")}
               </Button>
             ) : (
               <Button size="sm" className="h-7 gap-1 text-xs" onClick={() => void send()} disabled={!input.trim() || creating}>
                 {creating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bot className="h-3 w-3" />}
-                发送
+                {t("ai.send")}
               </Button>
             )}
           </div>
@@ -936,11 +943,11 @@ export function AIPanel({ connId, db, tabId, onPreviewSql, hasSelection, quickRe
         {(usage && usage.total_tokens > 0) || (procUsage && procUsage.total_tokens > 0) ? (
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
             {usage && usage.total_tokens > 0 ? (
-              <span className="font-mono" title="本轮会话累计">本会话 {usage.total_tokens} token</span>
+              <span className="font-mono" title={t("ai.sessionTokensTitle")}>{t("ai.sessionTokens", { n: usage.total_tokens })}</span>
             ) : null}
             {procUsage && procUsage.total_tokens > 0 ? (
-              <span className="font-mono text-violet-500" title="服务启动以来所有会话累计">
-                进程累计 {procUsage.total_tokens}
+              <span className="font-mono text-violet-500" title={t("ai.procTokensTitle")}>
+                {t("ai.procTokens", { n: procUsage.total_tokens })}
               </span>
             ) : null}
           </div>

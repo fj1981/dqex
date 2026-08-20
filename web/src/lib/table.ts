@@ -2,6 +2,7 @@
 // 供结果网格（ResultGrid）与表浏览（TableBrowser）共用，避免重复实现。
 
 import type { ColumnFilter, FilterOp } from "@/types"
+import i18n from "@/lib/i18n"
 
 const MIN_COL_W = 80 // 列最小宽度 px
 const MAX_COL_W = 420 // 列最大宽度 px
@@ -35,7 +36,7 @@ export function renderCell(v: unknown): string {
 // NULL → "NULL"；空字符串 → "(空)"（区别于 NULL，避免数据核对误判）。
 export function renderCellText(v: unknown): string {
   if (v === null || v === undefined) return "NULL"
-  if (typeof v === "string" && v === "") return "(空)"
+  if (typeof v === "string" && v === "") return i18n.t("grid.emptyCell")
   if (typeof v === "object") {
     try {
       return JSON.stringify(v)
@@ -149,7 +150,8 @@ export interface ColumnStat {
 export function fmtNum(n: number | undefined): string {
   if (n === undefined || !Number.isFinite(n)) return "—"
   const rounded = Math.round(n * 100) / 100
-  return rounded.toLocaleString("zh-CN", { maximumFractionDigits: 2 })
+  const locale = i18n.language?.startsWith("en") ? "en-US" : "zh-CN"
+  return rounded.toLocaleString(locale, { maximumFractionDigits: 2 })
 }
 
 // 对 rows 的某一列（列索引 ci）做统计。数值判断：该列所有非 NULL 值均可转 number 时视为数值列。
@@ -206,20 +208,20 @@ export function computeColWidths(columns: string[], rows: unknown[][], sampleN =
 
 // ---- 列过滤共享逻辑（TableBrowser 后端过滤 / ResultGrid 前端过滤共用）----
 
-// 过滤操作符元数据：文案 + 是否需要输入值（isNull/isNotNull 无需值）
+// 过滤操作符元数据：label 为 i18n key（渲染时 tKey(label)）+ 是否需要输入值（isNull/isNotNull 无需值）
 export const FILTER_OPS: { op: FilterOp; label: string; needValue: boolean }[] = [
-  { op: "eq", label: "等于", needValue: true },
-  { op: "neq", label: "不等于", needValue: true },
-  { op: "contains", label: "包含", needValue: true },
-  { op: "notContains", label: "不包含", needValue: true },
-  { op: "startsWith", label: "开头是", needValue: true },
-  { op: "endsWith", label: "结尾是", needValue: true },
-  { op: "gt", label: "大于", needValue: true },
-  { op: "gte", label: "大于等于", needValue: true },
-  { op: "lt", label: "小于", needValue: true },
-  { op: "lte", label: "小于等于", needValue: true },
-  { op: "isNull", label: "为空", needValue: false },
-  { op: "isNotNull", label: "非空", needValue: false },
+  { op: "eq", label: "filterOp.eq", needValue: true },
+  { op: "neq", label: "filterOp.neq", needValue: true },
+  { op: "contains", label: "filterOp.contains", needValue: true },
+  { op: "notContains", label: "filterOp.notContains", needValue: true },
+  { op: "startsWith", label: "filterOp.startsWith", needValue: true },
+  { op: "endsWith", label: "filterOp.endsWith", needValue: true },
+  { op: "gt", label: "filterOp.gt", needValue: true },
+  { op: "gte", label: "filterOp.gte", needValue: true },
+  { op: "lt", label: "filterOp.lt", needValue: true },
+  { op: "lte", label: "filterOp.lte", needValue: true },
+  { op: "isNull", label: "filterOp.isNull", needValue: false },
+  { op: "isNotNull", label: "filterOp.isNotNull", needValue: false },
 ]
 
 // 过滤操作符文案映射（用于已应用过滤的 chips 展示）

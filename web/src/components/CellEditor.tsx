@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import Editor from "@monaco-editor/react"
 import JsonView from "@uiw/react-json-view"
+import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
@@ -59,6 +60,7 @@ function isJSONValue(v: unknown): v is object {
 }
 
 export default function CellEditor({ column, dataType, value, nullable, onSave, onCancel, saving, readonly, maximized }: Props) {
+  const { t } = useTranslation()
   const isDark = useIsDark()
   const kind = useMemo(() => detectKind(value, dataType), [value, dataType])
   // 内容区高度：最大化时撑满剩余高度，否则用固定 min-h（240px）与 max-h（40vh）
@@ -85,7 +87,7 @@ export default function CellEditor({ column, dataType, value, nullable, onSave, 
     if (kind === "json") {
       const parsed = tryParseJSON(text)
       if (parsed === undefined) {
-        setJsonError("JSON 格式错误，无法保存")
+        setJsonError(t("cellEditor.jsonErr"))
         return
       }
       onSave(text.trim()) // 保存规范化后的 JSON 字符串
@@ -95,7 +97,7 @@ export default function CellEditor({ column, dataType, value, nullable, onSave, 
     if (kind === "number") {
       const n = Number(text)
       if (Number.isNaN(n)) {
-        setJsonError("请输入有效数字")
+        setJsonError(t("cellEditor.numberErr"))
         return
       }
       onSave(n)
@@ -109,7 +111,7 @@ export default function CellEditor({ column, dataType, value, nullable, onSave, 
       {/* 头部：列名 + 类型 */}
       <div className="flex items-center gap-2">
         <span className="font-medium">{column}</span>
-        <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{dataType || "未知类型"}</span>
+        <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{dataType || t("cellEditor.unknownType")}</span>
         <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">{kind.toUpperCase()}</span>
       </div>
 
@@ -120,7 +122,7 @@ export default function CellEditor({ column, dataType, value, nullable, onSave, 
             <JsonView value={parsedJSON as object} collapsed={2} displayDataTypes={false} enableClipboard={false} />
           </div>
         ) : kind === "json" ? (
-          <div className={cn("rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive", boxH)}>JSON 格式无效</div>
+          <div className={cn("rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive", boxH)}>{t("cellEditor.jsonInvalid")}</div>
         ) : kind === "sql" || kind === "xml" ? (
           <div className={cn("overflow-hidden rounded-md border", boxH)}>
             <Editor
@@ -147,8 +149,8 @@ export default function CellEditor({ column, dataType, value, nullable, onSave, 
         /* 可编辑模式：顶部 Tab 查看 / 编辑 */
         <Tabs defaultValue="view" className={cn("flex min-h-0 flex-col", maximized && "flex-1")}>
           <TabsList className="w-fit">
-            <TabsTrigger value="view">查看</TabsTrigger>
-            <TabsTrigger value="edit">编辑</TabsTrigger>
+            <TabsTrigger value="view">{t("cellEditor.view")}</TabsTrigger>
+            <TabsTrigger value="edit">{t("cellEditor.edit")}</TabsTrigger>
           </TabsList>
 
           {/* 查看：只读渲染，按格式选最佳展示（min-h 与编辑区对齐，避免切换抖动） */}
@@ -159,7 +161,7 @@ export default function CellEditor({ column, dataType, value, nullable, onSave, 
               </div>
             ) : kind === "json" ? (
               <div className={cn("rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive", boxH)}>
-                JSON 格式无效，请切到「编辑」修正
+                {t("cellEditor.jsonInvalidEdit")}
               </div>
             ) : kind === "sql" || kind === "xml" ? (
               <div className={cn("overflow-hidden rounded-md border", boxH)}>
@@ -216,7 +218,7 @@ export default function CellEditor({ column, dataType, value, nullable, onSave, 
                   setText(e.target.value)
                   setJsonError("")
                 }}
-                placeholder={nullable ? "留空保存 NULL" : ""}
+                placeholder={nullable ? t("cellEditor.placeholderNull") : ""}
               />
             )}
           </TabsContent>
@@ -229,11 +231,11 @@ export default function CellEditor({ column, dataType, value, nullable, onSave, 
       {/* 底部操作 */}
       <div className="flex shrink-0 items-center justify-end gap-2">
         <Button variant="outline" size="sm" onClick={onCancel} disabled={saving}>
-          {readonly ? "关闭" : "取消"}
+          {readonly ? t("common.close") : t("common.cancel")}
         </Button>
         {!readonly && (
           <Button size="sm" onClick={handleSave} disabled={saving}>
-            {saving ? "保存中..." : "保存"}
+            {saving ? t("cellEditor.saving") : t("common.save")}
           </Button>
         )}
       </div>

@@ -2,8 +2,6 @@
 package web
 
 import (
-	"errors"
-
 	"dbimpex/internal/engine"
 	"dbimpex/internal/service"
 
@@ -222,7 +220,7 @@ func handleDeleteFavorite(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req FavoriteReq) (any, error) {
 		id := c.Query("id")
 		if id == "" {
-			return nil, errors.New("id 必填")
+			return nil, cygin.NewError(cygin.ErrParamsInvalid)
 		}
 		if err := svc.DeleteFavorite(id); err != nil {
 			return nil, err

@@ -68,7 +68,7 @@ func RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*Com
 
 	// 清空表结构元数据缓存：对比要求两侧实时结构，避免复用陈旧/他实例缓存
 	cydb.FlushTableInfoCache()
-	t := newTracker(cb)
+	t := newTracker(cb, opts.Lang)
 
 	// 连接走进程级池化（GetOrCreateCli），相同库复用同一实例，程序退出前无需 Close
 	sourceCli, err := ConnectPooled(*opts.Source, opts.Source.DBName)
@@ -115,7 +115,7 @@ func RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*Com
 		result.Summary = mergeSummary(result.Summary, dr.Summary)
 	}
 	t.finish()
-	t.log("对比完成（%d 个库）: 共%d项, 一致%d, 仅源有%d, 仅目标有%d, 结构差异%d, 数据差异%d",
+	t.log(engineTextsFor(t.lang).cmpDone,
 		len(result.Databases), result.Summary.Total, result.Summary.Matched, result.Summary.SourceOnly,
 		result.Summary.TargetOnly, result.Summary.StructureDiff, result.Summary.DataDiff)
 	return result, nil
@@ -181,7 +181,7 @@ func runCompareDatabase(ctx context.Context, srcConn, tgtConn *DBConnInfo, sourc
 		return nil, err
 	}
 	t.p.TotalUnits += len(pairs)
-	t.log("开始对比库对 %s ↔ %s: %d 组表配对, 数据阈值=%d", srcDB, tgtDB, len(pairs), threshold)
+	t.log(engineTextsFor(t.lang).cmpStart, srcDB, tgtDB, len(pairs), threshold)
 
 	dr := &CompareDatabaseResult{SourceDB: srcDB, TargetDB: tgtDB, Tables: []CompareTableResult{}}
 	for _, pair := range pairs {
@@ -204,7 +204,7 @@ func runCompareDatabase(ctx context.Context, srcConn, tgtConn *DBConnInfo, sourc
 			if !opts.DataOnly {
 				cols, err := compareColumns(sourceCli, targetCli, pair.SourceName, pair.TargetName)
 				if err != nil {
-					t.log("表 %s 结构对比失败（已跳过）: %v", pair.Name, err)
+					t.log(engineTextsFor(t.lang).cmpStructFail, pair.Name, err)
 				} else {
 					tr.Columns = cols
 					structDiff = !cols.Matched
@@ -213,7 +213,7 @@ func runCompareDatabase(ctx context.Context, srcConn, tgtConn *DBConnInfo, sourc
 			if !opts.StructureOnly {
 				if structDiff && !opts.ForceData {
 					// 结构不一致时默认不对比数据（列定义都不同，数据对比意义有限）；--force-data 可强制
-					tr.Data = &DataDiff{Mode: "skipped", SkippedReason: "结构不一致，已跳过数据对比（--force-data 可强制）"}
+					tr.Data = &DataDiff{Mode: "skipped", SkippedReason: engineTextsFor(t.lang).skipStructDiff}
 				} else {
 					// 表级忽略列与全局合并；无表级配置时直接用全局集合（避免逐表拷贝）
 					tblIgnore := ignore
@@ -228,7 +228,7 @@ func runCompareDatabase(ctx context.Context, srcConn, tgtConn *DBConnInfo, sourc
 					}
 					data, err := compareTableData(ctx, sourceCli, targetCli, pair.SourceName, pair.TargetName, threshold, tblIgnore, t)
 					if err != nil {
-						t.log("表 %s 数据对比失败（已跳过）: %v", pair.Name, err)
+						t.log(engineTextsFor(t.lang).cmpDataFail, pair.Name, err)
 					} else {
 						tr.Data = data
 					}
@@ -237,7 +237,7 @@ func runCompareDatabase(ctx context.Context, srcConn, tgtConn *DBConnInfo, sourc
 		}
 		dr.Tables = append(dr.Tables, tr)
 		t.p.DoneUnits++
-		t.log("%s: %s", pair.Name, tableResultDesc(&tr))
+		t.log("%s: %s", pair.Name, tableResultDesc(&tr, t.lang))
 	}
 	dr.Summary = buildCompareSummary(dr.Tables)
 	return dr, nil
@@ -535,7 +535,7 @@ func compareTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, src
 	if srcRows > int64(threshold) || tgtRows > int64(threshold) {
 		dd.Mode = "count"
 		dd.Equal = srcRows == tgtRows
-		dd.SkippedReason = fmt.Sprintf("行数（源 %d / 目标 %d）超过阈值 %d，仅比较行数", srcRows, tgtRows, threshold)
+		dd.SkippedReason = fmt.Sprintf(engineTextsFor(t.lang).skipRowsThresh, srcRows, tgtRows, threshold)
 		return dd, nil
 	}
 	dd.Mode = "rows"
@@ -553,7 +553,7 @@ func compareTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, src
 	}
 	common := commonColumns(srcCols, tgtCols)
 	if len(common) == 0 {
-		dd.SkippedReason = "无公共列，跳过数据对比"
+		dd.SkippedReason = engineTextsFor(t.lang).skipNoCols
 		return dd, nil
 	}
 	// 内容列 = 公共列 − 忽略列（主键列不可忽略，否则无法判断有无）
@@ -565,7 +565,7 @@ func compareTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, src
 		}
 	}
 	if len(content) == 0 {
-		dd.SkippedReason = "公共列均被忽略，跳过数据对比"
+		dd.SkippedReason = engineTextsFor(t.lang).skipAllIgnored
 		return dd, nil
 	}
 
@@ -1071,19 +1071,20 @@ func mergeSummary(a, b CompareSummary) CompareSummary {
 }
 
 // tableResultDesc 单表结论摘要（进度日志用）
-func tableResultDesc(tr *CompareTableResult) string {
+func tableResultDesc(tr *CompareTableResult, lang string) string {
+	txt := engineTextsFor(lang)
 	if tr.Status == compareStatusSourceOnly {
-		return "仅源库存在"
+		return txt.descSrcOnly
 	}
 	if tr.Status == compareStatusTargetOnly {
-		return "仅目标库存在"
+		return txt.descTgtOnly
 	}
 	parts := []string{}
 	if tr.Columns != nil {
 		if tr.Columns.Matched {
-			parts = append(parts, "结构一致")
+			parts = append(parts, txt.descStructSame)
 		} else {
-			parts = append(parts, fmt.Sprintf("结构差异(源独有%d列/目标独有%d列/%d列不一致)",
+			parts = append(parts, fmt.Sprintf(txt.descStructDiff,
 				len(tr.Columns.SourceOnly), len(tr.Columns.TargetOnly), len(tr.Columns.Different)))
 		}
 	}
@@ -1092,11 +1093,11 @@ func tableResultDesc(tr *CompareTableResult) string {
 		case tr.Data.SkippedReason != "" && tr.Data.Mode != "count":
 			parts = append(parts, tr.Data.SkippedReason)
 		case tr.Data.Equal:
-			parts = append(parts, fmt.Sprintf("数据一致(%d行)", tr.Data.SourceRows))
+			parts = append(parts, fmt.Sprintf(txt.descDataSame, tr.Data.SourceRows))
 		case tr.Data.Mode == "count":
-			parts = append(parts, fmt.Sprintf("行数不一致(源%d/目标%d)", tr.Data.SourceRows, tr.Data.TargetRows))
+			parts = append(parts, fmt.Sprintf(txt.descRowDiff, tr.Data.SourceRows, tr.Data.TargetRows))
 		default:
-			parts = append(parts, fmt.Sprintf("数据差异(缺失%d行/多出%d行)", tr.Data.Missing, tr.Data.Extra))
+			parts = append(parts, fmt.Sprintf(txt.descDataDiff, tr.Data.Missing, tr.Data.Extra))
 		}
 	}
 	return strings.Join(parts, ", ")

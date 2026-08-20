@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { CheckCircle2, Database, Loader2, PlugZap, Settings2, XCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -26,6 +27,7 @@ interface Props {
 
 // 连接选择卡片：下拉选择已保存连接 + 连接摘要 + 测试连接 + 管理连接
 export default function ConnectionSelect({ title, subtitle, value, onChange, fill }: Props) {
+  const { t } = useTranslation()
   const { connections, openDrawer } = useAppStore()
   const [tested, setTested] = useState<Record<string, boolean>>({})
   const [testing, setTesting] = useState(false)
@@ -42,11 +44,11 @@ export default function ConnectionSelect({ title, subtitle, value, onChange, fil
     setTesting(true)
     try {
       await api.testConnection({ id: selected.id })
-      setTested((t) => ({ ...t, [value]: true }))
-      toast.success("连接成功")
+      setTested((prev) => ({ ...prev, [value]: true }))
+      toast.success(t("conn.testOk"))
     } catch (e) {
-      setTested((t) => ({ ...t, [value]: false }))
-      toast.error(`连接失败: ${(e as Error).message}`)
+      setTested((prev) => ({ ...prev, [value]: false }))
+      toast.error(t("conn.testFailMsg", { msg: (e as Error).message }))
     } finally {
       setTesting(false)
     }
@@ -68,7 +70,7 @@ export default function ConnectionSelect({ title, subtitle, value, onChange, fil
           {subtitle && <div className="mt-1 text-xs text-muted-foreground">{subtitle}</div>}
         </div>
         <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground hover:text-foreground" onClick={() => openDrawer()}>
-          <Settings2 className="mr-1 h-3.5 w-3.5" /> 管理连接
+          <Settings2 className="mr-1 h-3.5 w-3.5" /> {t("conn.manage")}
         </Button>
       </div>
 
@@ -83,12 +85,12 @@ export default function ConnectionSelect({ title, subtitle, value, onChange, fil
               {selected.shortName && <span className="shrink-0 text-xs text-muted-foreground">({selected.shortName})</span>}
             </span>
           ) : (
-            <span>选择数据库连接...</span>
+            <span>{t("conn.selectPlaceholder")}</span>
           )}
         </SelectTrigger>
         <SelectContent>
           {connections.length === 0 && (
-            <div className="px-2 py-4 text-center text-sm text-muted-foreground">暂无连接，请先「管理连接」新建</div>
+            <div className="px-2 py-4 text-center text-sm text-muted-foreground">{t("conn.noConnsHint")}</div>
           )}
           {connections.map((c) => (
             <SelectItem key={c.id} value={c.id}>
@@ -120,7 +122,7 @@ export default function ConnectionSelect({ title, subtitle, value, onChange, fil
                   {selected.conn.Schema ? ` / ${selected.conn.Schema}` : ""}
                 </span>
                 {!selected.conn.DBName && !selected.conn.Service && (
-                  <span className="shrink-0 whitespace-nowrap text-xs text-amber-600">未指定库</span>
+                  <span className="shrink-0 whitespace-nowrap text-xs text-amber-600">{t("conn.noDb")}</span>
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -132,12 +134,12 @@ export default function ConnectionSelect({ title, subtitle, value, onChange, fil
                 )}
                 <Button variant="outline" size="sm" className="h-7 text-xs" onClick={doTest} disabled={testing}>
                   {testing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <PlugZap className="mr-1 h-3.5 w-3.5" />}
-                  {testing ? "测试中..." : "测试连接"}
+                  {testing ? t("conn.testing") : t("conn.testConn")}
                 </Button>
               </div>
             </>
           ) : (
-            <span className="text-xs text-muted-foreground">选择连接后在此展示连接摘要</span>
+            <span className="text-xs text-muted-foreground">{t("conn.summaryPlaceholder")}</span>
           )}
         </div>
       </div>

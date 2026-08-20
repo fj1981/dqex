@@ -4,6 +4,7 @@ import { confirm } from "@/components/ui/alert-dialog"
 import { deleteAISessionByTab } from "@/api"
 import { fetchWorkspace, runSql, saveWorkspace } from "@/api/sql"
 import { describeWriteOp, isWriteSQL, previewSQL } from "@/lib/sql"
+import i18n from "@/lib/i18n"
 import { getSqlEditor } from "@/lib/editorRef"
 import { loadQueryResult, removeQueryResult, resultCacheKey, saveQueryResult } from "@/lib/queryResultCache"
 import type { ObjectDDLType, SQLExecMode, SQLQueryResult, TableViewLayout, WorkspaceTab as WorkspaceTabDTO } from "@/types"
@@ -99,7 +100,7 @@ const newQueryTab = (db = "", seq: number): QueryTab => ({
   id: nextId("query"),
   kind: "query",
   seq,
-  title: `查询 ${seq}`,
+  title: i18n.t("query.tabTitle", { n: seq }),
   db,
   sql: "",
   mode: "transform", // 默认：转换 + 限制
@@ -120,7 +121,7 @@ const newQueryTab = (db = "", seq: number): QueryTab => ({
 // 从内存 WorkspaceTab 转后端 DTO（剥离 results/running 等瞬时字段）
 function toDTO(t: WorkspaceTab): WorkspaceTabDTO {
   if (t.kind === "query") {
-    const defaultTitle = `查询 ${t.seq}`
+    const defaultTitle = i18n.t("query.tabTitle", { n: t.seq })
     return {
       id: t.id,
       kind: "query",
@@ -443,7 +444,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     const sql = (selection ?? tab.sql).trim()
     if (!sql) {
       set((s) => ({
-        tabs: s.tabs.map((t) => (t.id === id && t.kind === "query" ? { ...t, error: "请输入 SQL" } : t)) as WorkspaceTab[],
+        tabs: s.tabs.map((t) => (t.id === id && t.kind === "query" ? { ...t, error: i18n.t("query.enterSQL") } : t)) as WorkspaceTab[],
       }))
       return
     }
@@ -455,7 +456,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     }))
     try {
       // 写操作统一确认：检测到 INSERT/UPDATE/DELETE/DDL 时弹一次确认，避免误点
-      if (isWriteSQL(sql) && !(await confirm({ title: "确认写操作", description: `检测到 ${describeWriteOp(sql)} 写操作，确认执行？\n\n${previewSQL(sql)}`, confirmText: "确认执行", danger: true }))) {
+      if (isWriteSQL(sql) && !(await confirm({ title: i18n.t("query.confirmWriteTitle"), description: i18n.t("query.confirmWriteDesc", { op: describeWriteOp(sql), sql: previewSQL(sql) }), confirmText: i18n.t("query.confirmExec"), danger: true }))) {
         set((s) => ({
           running: false,
           tabs: s.tabs.map((t) => (t.id === id && t.kind === "query" ? { ...t, running: false } : t)) as WorkspaceTab[],
@@ -557,7 +558,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       applied = true
     }
     if (!applied) {
-      toast.info("未获取到编辑器光标位置，已改为追加到末尾")
+      toast.info(i18n.t("workspace.noCursor"))
       final = base.trim() ? `${base.trim()}\n\n${sql}` : sql
     }
     get().updateTabSql(active.id, final)

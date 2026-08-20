@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { FileDown, FileUp, ArrowLeftRight, Scale, BookOpenText, ClipboardList, Eye, Pencil, Play, Search, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -20,6 +21,8 @@ import PageHeader from "@/components/PageHeader"
 import { useAppStore } from "@/stores/app"
 import { TASK_TYPE_LABEL, type ConnInfo, type ExecutionRecord, type TaskConfig } from "@/types"
 import { formatTime } from "@/lib/utils"
+import { tKey } from "@/lib/i18n"
+import i18n from "@/lib/i18n"
 
 const TYPE_ICON: Record<string, { icon: React.ReactNode; cls: string }> = {
   export: { icon: <FileDown className="h-5 w-5" />, cls: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
@@ -39,54 +42,57 @@ function connLabel(key: string | undefined, conns: ConnInfo[]): string {
 function tablesSummary(tables?: string[]): string {
   if (!tables?.length) return ""
   const head = tables.slice(0, 3).join("，")
-  return tables.length > 3 ? `${head} 等 ${tables.length} 张` : head
+  return tables.length > 3 ? i18n.t("task.etcTables", { head, n: tables.length }) : head
 }
 
 function taskSummary(task: TaskConfig, conns: ConnInfo[]): string[] {
   const lines: string[] = []
   if (task.type === "export" && task.exportOpts) {
     const o = task.exportOpts
-    lines.push(`源: ${connLabel(o.sourceConn, conns)}`)
+    lines.push(i18n.t("task.sumSource", { conn: connLabel(o.sourceConn, conns) }))
     const tbl = tablesSummary(o.tables)
-    if (tbl) lines.push(`表: ${tbl}`)
-    lines.push(`模式: ${o.schemaOnly ? "仅结构" : o.dataOnly ? "仅数据" : "结构+数据"}${o.compress ? "，zip 打包" : ""}`)
+    if (tbl) lines.push(i18n.t("task.sumTables", { tbl }))
+    const mode = o.schemaOnly ? i18n.t("task.modeSchema") : o.dataOnly ? i18n.t("task.modeData") : i18n.t("task.modeBoth")
+    lines.push(i18n.t("task.sumMode", { mode, zip: o.compress ? i18n.t("task.zipSuffix") : "" }))
   } else if (task.type === "import" && task.importOpts) {
     const o = task.importOpts
-    lines.push(`目标: ${connLabel(o.targetConn, conns)}`)
+    lines.push(i18n.t("task.sumTarget", { conn: connLabel(o.targetConn, conns) }))
     // 仅展示文件名，隐藏服务器路径信息；未选文件时不占位
     const file = o.inputPath ? o.inputPath.split(/[\\/]/).pop() : ""
-    if (file) lines.push(`文件: ${file}`)
-    lines.push(`重置: ${o.resetMode || "不重置"}`)
+    if (file) lines.push(i18n.t("task.sumFile", { file }))
+    lines.push(i18n.t("task.sumReset", { mode: o.resetMode || i18n.t("task.noReset") }))
   } else if (task.type === "migrate" && task.migrateOpts) {
     const o = task.migrateOpts
     lines.push(`${connLabel(o.sourceConn, conns)} → ${connLabel(o.targetConn, conns)}`)
     const tbl = tablesSummary(o.tables)
-    if (tbl) lines.push(`表: ${tbl}`)
-    lines.push(`模式: ${o.schemaOnly ? "仅结构" : o.dataOnly ? "仅数据" : "结构+数据"}，重置: ${o.resetMode || "不重置"}`)
+    if (tbl) lines.push(i18n.t("task.sumTables", { tbl }))
+    const mode = o.schemaOnly ? i18n.t("task.modeSchema") : o.dataOnly ? i18n.t("task.modeData") : i18n.t("task.modeBoth")
+    lines.push(i18n.t("task.sumModeReset", { mode, reset: o.resetMode || i18n.t("task.noReset") }))
   } else if (task.type === "compare" && task.compareOpts) {
     const o = task.compareOpts
     lines.push(`${connLabel(o.sourceConn, conns)} ↔ ${connLabel(o.targetConn, conns)}`)
     const tbl = tablesSummary(o.tables)
-    if (tbl) lines.push(`表: ${tbl}`)
-    if (o.aliases?.length) lines.push(`别名配对: ${o.aliases.length} 组`)
+    if (tbl) lines.push(i18n.t("task.sumTables", { tbl }))
+    if (o.aliases?.length) lines.push(i18n.t("task.sumAliases", { n: o.aliases.length }))
     const extras: string[] = []
-    extras.push(o.structureOnly ? "仅结构" : o.dataOnly ? "仅数据" : "结构+数据")
-    if (!o.structureOnly) extras.push(`阈值 ${o.threshold}`)
-    if (o.ignoreColumns?.length) extras.push(`忽略 ${o.ignoreColumns.length} 列`)
-    if (o.forceData) extras.push("强制对比数据")
+    extras.push(o.structureOnly ? i18n.t("task.modeSchema") : o.dataOnly ? i18n.t("task.modeData") : i18n.t("task.modeBoth"))
+    if (!o.structureOnly) extras.push(i18n.t("task.sumThreshold", { n: o.threshold }))
+    if (o.ignoreColumns?.length) extras.push(i18n.t("task.sumIgnoreCols", { n: o.ignoreColumns.length }))
+    if (o.forceData) extras.push(i18n.t("compare.forceData"))
     lines.push(extras.join("，"))
   } else if (task.type === "dictionary" && task.dictionaryOpts) {
     const o = task.dictionaryOpts
-    lines.push(`源: ${connLabel(o.sourceConn, conns)}`)
+    lines.push(i18n.t("task.sumSource", { conn: connLabel(o.sourceConn, conns) }))
     const tbl = tablesSummary(o.tables)
-    if (tbl) lines.push(`表: ${tbl}`)
-    lines.push(`模式: 结构+注释${o.compress ? "，zip 打包" : ""}`)
+    if (tbl) lines.push(i18n.t("task.sumTables", { tbl }))
+    lines.push(i18n.t("task.sumMode", { mode: i18n.t("task.dictMode"), zip: o.compress ? i18n.t("task.zipSuffix") : "" }))
   }
   return lines
 }
 
 // 任务页：已保存的任务配置列表（默认首页）
 export default function TaskView() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const loadHistory = useAppStore((s) => s.loadHistory)
   const connections = useAppStore((s) => s.connections)
@@ -127,18 +133,18 @@ export default function TaskView() {
   const doRun = async (task: TaskConfig) => {
     try {
       const { taskID } = await api.runTask(task.id)
-      toast.success(`任务已启动: ${taskID}`)
+      toast.success(t("task.started", { id: taskID }))
       loadHistory()
       navigate(`/${task.type}?running=${taskID}&task=${task.id}`)
     } catch (e) {
-      toast.error(`执行失败: ${(e as Error).message}`)
+      toast.error(t("task.execFailed", { err: (e as Error).message }))
     }
   }
 
   const doDelete = async (task: TaskConfig) => {
     try {
       await api.deleteTask(task.id)
-      toast.success("已删除")
+      toast.success(t("task.deleted"))
       load()
     } catch (e) {
       toast.error((e as Error).message)
@@ -148,13 +154,13 @@ export default function TaskView() {
   return (
     <div className="mx-auto max-w-5xl space-y-4">
       <PageHeader
-        title="任务列表"
-        description="已保存的任务配置，可一键重复执行"
+        title={t("task.title")}
+        description={t("task.desc")}
         actions={
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="搜索任务名称..."
+              placeholder={t("task.searchPlaceholder")}
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               className="w-48 pl-8"
@@ -165,20 +171,20 @@ export default function TaskView() {
 
       <Tabs value={typeFilter} onValueChange={setTypeFilter}>
         <TabsList>
-          <TabsTrigger value="all">全部</TabsTrigger>
-          <TabsTrigger value="export">导出</TabsTrigger>
-          <TabsTrigger value="import">导入</TabsTrigger>
-          <TabsTrigger value="migrate">迁移</TabsTrigger>
-          <TabsTrigger value="compare">对比</TabsTrigger>
-          <TabsTrigger value="dictionary">字典</TabsTrigger>
+          <TabsTrigger value="all">{t("task.tabAll")}</TabsTrigger>
+          <TabsTrigger value="export">{tKey(TASK_TYPE_LABEL.export)}</TabsTrigger>
+          <TabsTrigger value="import">{tKey(TASK_TYPE_LABEL.import)}</TabsTrigger>
+          <TabsTrigger value="migrate">{tKey(TASK_TYPE_LABEL.migrate)}</TabsTrigger>
+          <TabsTrigger value="compare">{tKey(TASK_TYPE_LABEL.compare)}</TabsTrigger>
+          <TabsTrigger value="dictionary">{tKey(TASK_TYPE_LABEL.dictionary)}</TabsTrigger>
         </TabsList>
       </Tabs>
 
       {filtered.length === 0 && (
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed bg-background py-16 text-center">
           <ClipboardList className="h-8 w-8 text-muted-foreground/50" />
-          <div className="text-sm text-muted-foreground">暂无任务配置</div>
-          <div className="text-xs text-muted-foreground">可在「导出 / 导入 / 迁移 / 对比 / 字典」页保存配置后在此统一管理</div>
+          <div className="text-sm text-muted-foreground">{t("task.empty")}</div>
+          <div className="text-xs text-muted-foreground">{t("task.emptyHint")}</div>
         </div>
       )}
 
@@ -195,29 +201,29 @@ export default function TaskView() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="truncate font-medium">{task.name}</span>
-                      <Badge variant="secondary" className="shrink-0 font-normal">{TASK_TYPE_LABEL[task.type]}</Badge>
-                      {task.isLastUsed && <Badge variant="outline" className="shrink-0 font-normal">上次使用</Badge>}
+                      <Badge variant="secondary" className="shrink-0 font-normal">{tKey(TASK_TYPE_LABEL[task.type])}</Badge>
+                      {task.isLastUsed && <Badge variant="outline" className="shrink-0 font-normal">{t("task.lastUsed")}</Badge>}
                     </div>
                     <div className="mt-1 space-y-0.5 text-sm text-muted-foreground">
                       {taskSummary(task, connections).map((l, i) => (
                         <div key={i} className="truncate" title={l}>{l}</div>
                       ))}
-                      <div className="text-xs">更新于 {formatTime(new Date(task.updatedAt).toISOString())}</div>
+                      <div className="text-xs">{t("task.updatedAt", { time: formatTime(new Date(task.updatedAt).toISOString()) })}</div>
                     </div>
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <Button variant="ghost" size="icon" title="查看详情" onClick={() => openDetail(task)}>
+                  <Button variant="ghost" size="icon" title={t("task.viewDetail")} onClick={() => openDetail(task)}>
                     <Eye className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="icon" title="编辑配置" onClick={() => navigate(`/${task.type}?task=${task.id}`)}>
+                  <Button variant="ghost" size="icon" title={t("task.editConfig")} onClick={() => navigate(`/${task.type}?task=${task.id}`)}>
                     <Pencil className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="icon" title="删除" onClick={() => doDelete(task)}>
+                  <Button variant="ghost" size="icon" title={t("common.delete")} onClick={() => doDelete(task)}>
                     <Trash2 className="h-4 w-4 text-destructive" />
                   </Button>
                   <Button size="sm" className="ml-1" onClick={() => doRun(task)}>
-                    <Play className="mr-1 h-4 w-4" /> 执行
+                    <Play className="mr-1 h-4 w-4" /> {t("task.run")}
                   </Button>
                 </div>
               </div>
@@ -230,7 +236,7 @@ export default function TaskView() {
       <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
         <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
-            <DialogTitle>配置详情: {detail?.name}</DialogTitle>
+            <DialogTitle>{t("task.detailTitle", { name: detail?.name })}</DialogTitle>
           </DialogHeader>
           {detail && (
             <div className="space-y-3 text-sm">
@@ -247,14 +253,14 @@ export default function TaskView() {
                 if (conds.length === 0) return null
                 return (
                   <div>
-                    <div className="mb-1 font-medium">过滤条件:</div>
+                    <div className="mb-1 font-medium">{t("task.condTitle")}</div>
                     <ScrollArea className="h-28 rounded border p-2">
                       {conds.map((c) => (
                         <div key={c.tableName} className="break-all text-xs">
                           {c.tableName} |
                           {c.dataMode === "skip"
-                            ? " 不导出数据"
-                            : ` ${c.query || (c.where ? `WHERE ${c.where}` : "（无）")}${!c.query && c.columns?.length ? ` | 列: ${c.columns.join(",")}` : ""}`}
+                            ? t("task.noExportData")
+                            : ` ${c.query || (c.where ? `WHERE ${c.where}` : t("task.noCond"))}${!c.query && c.columns?.length ? t("task.colsSuffix", { cols: c.columns.join(",") }) : ""}`}
                         </div>
                       ))}
                     </ScrollArea>
@@ -267,12 +273,12 @@ export default function TaskView() {
                 <div>
                   {detail.compareOpts.aliases && detail.compareOpts.aliases.length > 0 && (
                     <div className="mb-2">
-                      <div className="mb-1 font-medium">表别名配对:</div>
+                      <div className="mb-1 font-medium">{t("task.aliasTitle")}</div>
                       <ScrollArea className="max-h-28 rounded border p-2">
                         {detail.compareOpts.aliases.map((a) => (
                           <div key={`${a.source}-${a.target}`} className="break-all text-xs">
                             {a.source} ↔ {a.target}
-                            {a.ignoreColumns?.length ? `（忽略: ${a.ignoreColumns.join(",")}）` : ""}
+                            {a.ignoreColumns?.length ? t("task.ignoreSuffix", { cols: a.ignoreColumns.join(",") }) : ""}
                           </div>
                         ))}
                       </ScrollArea>
@@ -280,16 +286,16 @@ export default function TaskView() {
                   )}
                   {detail.compareOpts.ignoreColumns && detail.compareOpts.ignoreColumns.length > 0 && (
                     <div className="break-all text-xs text-muted-foreground">
-                      全局忽略列: {detail.compareOpts.ignoreColumns.join(", ")}
+                      {t("task.globalIgnore", { cols: detail.compareOpts.ignoreColumns.join(", ") })}
                     </div>
                   )}
                 </div>
               ) : null}
 
               <div>
-                <div className="mb-1 font-medium">执行历史:</div>
+                <div className="mb-1 font-medium">{t("task.historyTitle")}</div>
                 {detailHistory.length === 0 && (
-                  <div className="text-muted-foreground">暂无执行记录</div>
+                  <div className="text-muted-foreground">{t("task.noHistory")}</div>
                 )}
                 <ScrollArea className="max-h-36 rounded border p-2">
                   {detailHistory.map((h) => (
@@ -304,7 +310,7 @@ export default function TaskView() {
                               : "text-muted-foreground"
                         }
                       >
-                        {h.status === "done" ? "成功" : h.status === "error" ? "失败" : h.status}
+                        {h.status === "done" ? t("common.success") : h.status === "error" ? t("common.failed") : h.status}
                       </span>
                       <span className="text-muted-foreground">{h.summary}</span>
                     </div>
@@ -314,11 +320,11 @@ export default function TaskView() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setDetail(null)}>关闭</Button>
+            <Button variant="ghost" onClick={() => setDetail(null)}>{t("common.close")}</Button>
             <Button variant="outline" onClick={() => detail && navigate(`/${detail.type}?task=${detail.id}`)}>
-              编辑配置
+              {t("task.editConfig")}
             </Button>
-            <Button onClick={() => detail && doRun(detail)}>立即执行</Button>
+            <Button onClick={() => detail && doRun(detail)}>{t("task.runNow")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

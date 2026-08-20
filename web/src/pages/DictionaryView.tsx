@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Play } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -19,9 +20,10 @@ import { CheckRow, Section } from "@/components/Section"
 import StepWizard from "@/components/StepWizard"
 import TablePicker from "@/components/TablePicker"
 import { useAppStore } from "@/stores/app"
+import { tKey } from "@/lib/i18n"
 import type { DictionaryOptions, TaskConfig } from "@/types"
 
-const STEPS = ["选择源数据库", "选择库表", "开始执行"]
+const STEPS = ["dictionary.step1", "dictionary.step2", "dictionary.step3"]
 
 function defaultOptions(): DictionaryOptions {
   return {
@@ -35,6 +37,7 @@ function defaultOptions(): DictionaryOptions {
 }
 
 export default function DictionaryView() {
+  const { t, i18n } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const cachedTask = useAppStore((s) => s.lastTasks["dictionary"])
   const setLastTask = useAppStore((s) => s.setLastTask)
@@ -85,22 +88,22 @@ export default function DictionaryView() {
 
   const startRun = async () => {
     if (!opts.sourceConn) {
-      toast.error("请先选择源数据库连接")
+      toast.error(t("dictionary.needSourceConn"))
       setStep(0)
       return
     }
     if ((opts.tables || []).length === 0) {
-      toast.error("请至少选择一张表")
+      toast.error(t("dictionary.needTable"))
       setStep(1)
       return
     }
     try {
-      const { taskID } = await api.startDictionary(opts, taskConfigId)
+      const { taskID } = await api.startDictionary({ ...opts, lang: i18n.language }, taskConfigId)
       setRunningTaskID(taskID)
       setStep(2)
       refreshHistory()
     } catch (e) {
-      toast.error(`启动失败: ${(e as Error).message}`)
+      toast.error(t("dictionary.startFailed", { err: (e as Error).message }))
     }
   }
 
@@ -112,8 +115,8 @@ export default function DictionaryView() {
   return (
     <div className="mx-auto flex h-full max-w-5xl flex-col gap-4">
       <PageHeader
-        title="数据字典"
-        description="导出数据库表结构及注释为 Excel 文档（总览 + 每库字段明细）"
+        title={t("dictionary.title")}
+        description={t("dictionary.desc")}
         actions={
           <TaskConfigBar
             savedTasks={savedTasks}
@@ -126,17 +129,17 @@ export default function DictionaryView() {
       />
 
       <Card className="flex flex-1 flex-col gap-5 bg-gradient-to-br from-muted/50 via-muted/15 to-muted/85 p-5 dark:from-muted/30 dark:via-muted/10 dark:to-muted/55">
-        <StepWizard steps={STEPS} current={step} onStepClick={(i) => runningTaskID ? undefined : setStep(i)} />
+        <StepWizard steps={STEPS.map((s) => tKey(s))} current={step} onStepClick={(i) => runningTaskID ? undefined : setStep(i)} />
 
         {step === 0 && (
         <div className={`mx-auto w-full space-y-4 ${CONN_SINGLE_W}`}>
           <ConnectionSelect
-            title="源数据库"
-            subtitle="选择要导出数据字典的数据库连接"
+            title={t("dictionary.sourceDb")}
+            subtitle={t("dictionary.sourceDbDesc")}
             value={opts.sourceConn}
             onChange={(name) => set({ sourceConn: name })}
           />
-          <Hint>产物为单个 Excel 文档（.xlsx），包含总览页及各库字段明细，附注释信息。</Hint>
+          <Hint>{t("dictionary.hint1")}</Hint>
           <WizardFooter onNext={() => setStep(1)} />
         </div>
       )}
@@ -144,7 +147,7 @@ export default function DictionaryView() {
       {step === 1 && (
         <div className="space-y-4">
           <Hint>
-            勾选要纳入字典的库与表；字典仅覆盖表结构（不含视图/函数/存储过程），不统计行数。
+            {t("dictionary.hint2")}
           </Hint>
           <TablePicker
             connId={opts.sourceConn}
@@ -164,30 +167,30 @@ export default function DictionaryView() {
         <div className="mx-auto max-w-3xl space-y-4">
           <Card className="divide-y p-0">
             <div className="p-5">
-              <Section title="输出设置">
+              <Section title={t("export.outputSettings")}>
                 <div className="grid gap-2">
                   <CheckRow
                     checked={opts.compress}
                     onCheckedChange={(v) => set({ compress: v })}
-                    label="压缩为 zip"
-                    description="将生成的 xlsx 打包为 zip 文件"
+                    label={t("export.compress")}
+                    description={t("dictionary.compressDesc")}
                   />
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <Label>任务名称</Label>
+                    <Label>{t("export.taskName")}</Label>
                     <Input
                       value={opts.taskName}
                       onChange={(e) => set({ taskName: e.target.value })}
-                      placeholder="用于生成文件名，如：dict_prod"
+                      placeholder={t("dictionary.taskNamePlaceholder")}
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label>输出目录（可选）</Label>
+                    <Label>{t("export.outputDir")}</Label>
                     <Input
                       value={opts.outputDir}
                       onChange={(e) => set({ outputDir: e.target.value })}
-                      placeholder="留空使用默认目录"
+                      placeholder={t("export.outputDirPlaceholder")}
                     />
                   </div>
                 </div>
@@ -198,7 +201,7 @@ export default function DictionaryView() {
             onBack={() => setStep(1)}
             next={
               <Button onClick={startRun}>
-                <Play className="mr-1 h-4 w-4" /> 开始生成
+                <Play className="mr-1 h-4 w-4" /> {t("dictionary.start")}
               </Button>
             }
           />

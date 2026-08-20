@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { Database, Info, Loader2 } from "lucide-react"
 import {
   Dialog,
@@ -12,6 +13,7 @@ import type { VersionInfo } from "@/types"
 
 // 关于弹窗：版本 + 构建时间 + 支持的数据库。低频查看信息，用弹窗比独立页面更轻量。
 export default function AboutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const { t } = useTranslation()
   const [version, setVersion] = useState<VersionInfo | null>(null)
 
   useEffect(() => {
@@ -27,7 +29,7 @@ export default function AboutDialog({ open, onOpenChange }: { open: boolean; onO
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[420px]">
         <DialogHeader>
-          <DialogTitle>关于</DialogTitle>
+          <DialogTitle>{t("about.title")}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -37,8 +39,8 @@ export default function AboutDialog({ open, onOpenChange }: { open: boolean; onO
               <Database className="h-6 w-6" />
             </span>
             <div>
-              <div className="text-base font-medium">数据库工作台 dbx</div>
-              <div className="text-sm text-muted-foreground">数据库导入 / 导出 / 迁移 / 对比 / 数据字典工具</div>
+              <div className="text-base font-medium">{t("about.brand")}</div>
+              <div className="text-sm text-muted-foreground">{t("about.tagline")}</div>
             </div>
           </div>
 
@@ -50,18 +52,18 @@ export default function AboutDialog({ open, onOpenChange }: { open: boolean; onO
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-2 text-muted-foreground">
                   <Info className="h-4 w-4" />
-                  版本
+                  {t("about.version")}
                 </span>
                 <span className="font-mono font-medium">dbx {version.version}</span>
               </div>
               {version.buildTime && (
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">构建时间</span>
+                  <span className="text-muted-foreground">{t("about.buildTime")}</span>
                   <span className="font-mono">{version.buildTime}</span>
                 </div>
               )}
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">支持的数据库</span>
+                <span className="text-muted-foreground">{t("about.dbTypes")}</span>
                 <span className="font-mono">{version.dbTypes.join(" / ")}</span>
               </div>
             </div>

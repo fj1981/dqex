@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { MoveRight, Play } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -19,9 +20,10 @@ import { CheckRow, Section } from "@/components/Section"
 import StepWizard from "@/components/StepWizard"
 import TablePicker from "@/components/TablePicker"
 import { useAppStore } from "@/stores/app"
+import { tKey } from "@/lib/i18n"
 import type { MigrateOptions, TaskConfig } from "@/types"
 
-const STEPS = ["选择源和目标库", "选择表和条件", "设置迁移选项", "执行"]
+const STEPS = ["migrate.step1", "migrate.step2", "migrate.step3", "migrate.step4"]
 
 function defaultOptions(): MigrateOptions {
   return {
@@ -42,6 +44,7 @@ function defaultOptions(): MigrateOptions {
 
 // 迁移页：四步向导（支持跨数据库类型：数据以行数据中转，结构自动转换）
 export default function MigrateView() {
+  const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   // 会话内缓存的最近应用配置：挂载时同步初始化，避免空配置闪现后再回填
   const cachedTask = useAppStore((s) => s.lastTasks["migrate"])
@@ -137,22 +140,22 @@ export default function MigrateView() {
 
   const startRun = async () => {
     if (!opts.sourceConn || !opts.targetConn) {
-      toast.error("请先选择源和目标数据库连接")
+      toast.error(t("migrate.needBothConn"))
       setStep(0)
       return
     }
     if (opts.sourceConn === opts.targetConn) {
-      toast.error("源和目标不能是同一个连接")
+      toast.error(t("migrate.sameConn"))
       setStep(0)
       return
     }
     if ((opts.tables || []).length === 0 && (opts.objects || []).length === 0) {
-      toast.error("请至少选择一张表或一个对象")
+      toast.error(t("migrate.needTable"))
       setStep(1)
       return
     }
     if (crossType && (opts.objects || []).length > 0) {
-      toast.error("跨类型迁移不支持迁移对象，请取消勾选对象")
+      toast.error(t("migrate.crossTypeNoObjects"))
       setStep(1)
       return
     }
@@ -162,15 +165,15 @@ export default function MigrateView() {
       setStep(3)
       setTimeout(() => useAppStore.getState().loadHistory(), 800)
     } catch (e) {
-      toast.error(`启动失败: ${(e as Error).message}`)
+      toast.error(t("migrate.startFailed", { err: (e as Error).message }))
     }
   }
 
   return (
     <div className="mx-auto flex h-full max-w-5xl flex-col gap-4">
       <PageHeader
-        title="迁移数据"
-        description="在两个数据库之间迁移结构与数据，支持跨数据库类型"
+        title={t("migrate.title")}
+        description={t("migrate.desc")}
         actions={
           <TaskConfigBar
             savedTasks={savedTasks}
@@ -183,36 +186,35 @@ export default function MigrateView() {
       />
 
       <Card className="flex flex-1 flex-col gap-5 bg-gradient-to-br from-muted/50 via-muted/15 to-muted/85 p-5 dark:from-muted/30 dark:via-muted/10 dark:to-muted/55">
-        <StepWizard steps={STEPS} current={step} onStepClick={(i) => !runningTaskID && setStep(i)} />
+        <StepWizard steps={STEPS.map((s) => tKey(s))} current={step} onStepClick={(i) => !runningTaskID && setStep(i)} />
 
         {/* 数据源卡片布局共用 ConnectionPair，各任务页卡片尺寸统一 */}
         {step === 0 && (
           <ConnectionPair
           source={{
-            title: "源数据库",
-            subtitle: "从中读取结构与数据",
+            title: t("migrate.sourceDb"),
+            subtitle: t("migrate.sourceDbDesc"),
             value: opts.sourceConn,
             onChange: (name) => set({ sourceConn: name, source: null, databases: [], tables: [], objects: [], conditions: [] }),
           }}
           target={{
-            title: "目标数据库",
-            subtitle: "将数据写入此处",
+            title: t("migrate.targetDb"),
+            subtitle: t("migrate.targetDbDesc"),
             value: opts.targetConn,
             onChange: (name) => set({ targetConn: name, target: null }),
           }}
         >
           {opts.sourceConn && opts.sourceConn === opts.targetConn && (
-            <Hint variant="warning">源和目标不能是同一个连接，请重新选择。</Hint>
+            <Hint variant="warning">{t("migrate.sameConnHint")}</Hint>
           )}
           {crossType && (
             <Hint>
-              跨类型迁移（{srcType} → {tgtType}）：表结构自动转换，数据可正常迁移；
-              触发器/视图/函数/存储过程不支持跨类型迁移（如需请使用同类型迁移）。
+              {t("migrate.crossHint", { src: srcType, tgt: tgtType })}
             </Hint>
           )}
           {!crossType && !!opts.sourceConn && !!opts.targetConn && opts.sourceConn !== opts.targetConn && (
             <Hint>
-              同类型迁移：表结构（含触发器）与数据全量迁移，表完成后追加迁移视图/函数/存储过程。
+              {t("migrate.sameHint")}
             </Hint>
           )}
           <WizardFooter
@@ -222,7 +224,7 @@ export default function MigrateView() {
                 disabled={!opts.sourceConn || !opts.targetConn || opts.sourceConn === opts.targetConn}
                 onClick={() => setStep(1)}
               >
-                下一步 <MoveRight className="ml-1 h-4 w-4" />
+                {t("common.next")} <MoveRight className="ml-1 h-4 w-4" />
               </Button>
             }
           />
@@ -232,7 +234,7 @@ export default function MigrateView() {
       {step === 1 && (
         <div className="space-y-4">
           <Hint>
-            从源库勾选要迁移的库、表与对象（对象仅同类型迁移支持）；勾选库节点将级联选中库下所有表与对象，不选则不迁移。
+            {t("migrate.hint1")}
           </Hint>
           <TablePicker
             connId={opts.sourceConn}
@@ -252,7 +254,7 @@ export default function MigrateView() {
         <div className="mx-auto max-w-3xl space-y-4">
           <Card className="divide-y p-0">
             <div className="p-5">
-              <Section title="迁移内容" description="至少保留一项，默认同时迁移结构与数据">
+              <Section title={t("migrate.content")} description={t("migrate.contentDesc")}>
                 <div className="grid gap-2">
                   <CheckRow
                     checked={!opts.dataOnly}
@@ -260,8 +262,8 @@ export default function MigrateView() {
                       if (!v && opts.dataOnly) return
                       set({ schemaOnly: !v })
                     }}
-                    label="迁移结构"
-                    description="表结构（含触发器），跨数据库类型时自动转换"
+                    label={t("migrate.schemaOnly")}
+                    description={t("migrate.schemaOnlyDesc")}
                   />
                   <CheckRow
                     checked={!opts.schemaOnly}
@@ -269,8 +271,8 @@ export default function MigrateView() {
                       if (!v && opts.schemaOnly) return
                       set({ dataOnly: !v })
                     }}
-                    label="迁移数据"
-                    description="按批量大小分批迁移表数据"
+                    label={t("migrate.dataOnly")}
+                    description={t("migrate.dataOnlyDesc")}
                   />
                 </div>
               </Section>
@@ -286,9 +288,9 @@ export default function MigrateView() {
             </div>
 
             <div className="p-5">
-              <Section title="性能" description="批量越大迁移越快，但内存占用更高">
+              <Section title={t("export.performance")} description={t("migrate.performanceDesc")}>
                 <div className="space-y-1">
-                  <Label>批量大小</Label>
+                  <Label>{t("export.batchSize")}</Label>
                   <Input
                     type="number"
                     className="w-40"
@@ -300,12 +302,12 @@ export default function MigrateView() {
             </div>
 
             <div className="p-5">
-              <Section title="兼容性" description="将新版本数据库特有的排序规则替换为旧版本兼容的等效规则">
+              <Section title={t("export.compat")} description={t("export.compatDesc")}>
                 <CheckRow
                   checked={opts.compatCollation}
                   onCheckedChange={(v) => set({ compatCollation: v })}
-                  label="字符集兼容"
-                  description="将 SQL 中的 utf8mb4_0900_* 系列排序规则替换为 utf8mb4_unicode_ci，避免目标库为不支持新排序规则的旧版本数据库（如 MySQL 5.7）时建表报错"
+                  label={t("export.compatCollation")}
+                  description={t("migrate.compatCollationDesc")}
                 />
               </Section>
             </div>
@@ -314,7 +316,7 @@ export default function MigrateView() {
             onBack={() => setStep(1)}
             next={
               <Button onClick={startRun}>
-                <Play className="mr-1 h-4 w-4" /> 开始迁移
+                <Play className="mr-1 h-4 w-4" /> {t("migrate.start")}
               </Button>
             }
           />

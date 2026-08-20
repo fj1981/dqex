@@ -2,6 +2,7 @@
 // 高度遵循「最大高度限制」原则（对齐单元格编辑弹窗）：弹窗整体限高，
 // 内容区独立滚动——弹窗高度不与 SQL 长度绑定；标题栏可最大化查看超长 SQL。
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import { Copy, Loader2, Maximize2, Minimize2, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -19,6 +20,7 @@ interface Props {
 }
 
 export default function GenSQLDialog({ open, title, sql, loading, error, onCopy, onSendToQuery, onClose }: Props) {
+  const { t } = useTranslation()
   const [maximized, setMaximized] = useState(false)
   const canSend = !loading && !error && sql.trim() !== ""
 
@@ -32,7 +34,7 @@ export default function GenSQLDialog({ open, title, sql, loading, error, onCopy,
               variant="ghost"
               size="sm"
               className="h-6 w-6 p-0"
-              title={maximized ? "还原" : "最大化"}
+              title={maximized ? t("genSQL.restore") : t("genSQL.maximize")}
               onClick={() => setMaximized((m) => !m)}
             >
               {maximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
@@ -44,7 +46,7 @@ export default function GenSQLDialog({ open, title, sql, loading, error, onCopy,
         <div className={cn("scrollbar-thin max-h-[60vh] overflow-auto rounded-md border bg-muted/20", maximized && "flex-1")}>
           {loading ? (
             <div className="flex items-center justify-center gap-1.5 py-8 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> 生成中...
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("genSQL.generating")}
             </div>
           ) : error ? (
             <div className="m-2 flex items-start gap-1.5 rounded-md border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-xs text-destructive">
@@ -56,12 +58,12 @@ export default function GenSQLDialog({ open, title, sql, loading, error, onCopy,
         </div>
 
         <div className="mt-2 flex shrink-0 justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={onClose}>关闭</Button>
+          <Button variant="ghost" size="sm" onClick={onClose}>{t("common.close")}</Button>
           <Button variant="outline" size="sm" disabled={!canSend} onClick={onCopy}>
-            <Copy className="mr-1 h-3.5 w-3.5" /> 复制
+            <Copy className="mr-1 h-3.5 w-3.5" /> {t("common.copy")}
           </Button>
           <Button size="sm" disabled={!canSend} onClick={onSendToQuery}>
-            <Send className="mr-1 h-3.5 w-3.5" /> 发送到查询页
+            <Send className="mr-1 h-3.5 w-3.5" /> {t("genSQL.sendToQuery")}
           </Button>
         </div>
       </DialogContent>

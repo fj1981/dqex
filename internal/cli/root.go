@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"dbimpex/internal/cli/sqlcmd"
+	"dbimpex/internal/llm"
 
 	"github.com/spf13/cobra"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
@@ -33,8 +34,19 @@ type WebArgs struct {
 
 var (
 	webArgs     = &WebArgs{Host: "127.0.0.1", Port: 8181}
-	cliExecuted bool // 执行过任一 CLI 子命令（含 help）时为 true
+	cliExecuted bool   // 执行过任一 CLI 子命令（含 help）时为 true
+	langFlag    string // --lang 标志（CLI 输出语言，优先级最高）
 )
+
+// cliLang 解析 CLI 输出语言：--lang 标志 > 环境变量 DBX_LANG > 默认 zh。
+// 语言代码走 llm.NormLang 归一与回退，与 AI/字典注册表一致（可扩展）。
+func cliLang() string {
+	lang := strings.TrimSpace(langFlag)
+	if lang == "" {
+		lang = os.Getenv("DBX_LANG")
+	}
+	return llm.NormLang(lang)
+}
 
 func init() {
 	rootCmd.AddCommand(sqlcmd.Command())
@@ -56,6 +68,9 @@ CLI 子命令与 Web 功能对齐：export / import / migrate / compare / conn /
 		if cmd.Parent() != nil {
 			cliExecuted = true
 		}
+		// 把解析后的语言注入 sqlcmd 包（元命令/帮助/状态文本按语言输出）；
+		// 放在此处而非 Execute：--lang flag 需先经 cobra 解析完成
+		sqlcmd.SetLang(cliLang())
 	},
 }
 
@@ -69,14 +84,22 @@ func Execute() *WebArgs {
 	rootCmd.PersistentFlags().StringVar(&webArgs.DataDir, "data-dir", "", "数据根目录（默认取全局配置，否则 ~/.dbimpex）")
 	rootCmd.PersistentFlags().StringVar(&webArgs.ConfigFile, "config-file", "", "全局配置文件（默认 环境变量 DBIMPEX_CONFIG 或 ~/.dbimpex/config.yaml）")
 	rootCmd.PersistentFlags().BoolVar(&webArgs.Debug, "debug", false, "输出 debug 及以上级别的日志（含 AI 链路；等效 config 顶层 debug: true）")
+	rootCmd.PersistentFlags().StringVar(&langFlag, "lang", "", "CLI 输出语言（zh/en；环境变量 DBX_LANG，默认 zh）")
 	// help 展示（--help / 裸跑分组命令）也视为 CLI 执行，避免随后误启 Web
 	defaultHelp := rootCmd.HelpFunc()
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		cliExecuted = true
+		applyHelpLang(cliLang()) // 帮助/flag usage 按当前语言渲染（--help 时 PersistentPreRun 不执行）
 		defaultHelp(cmd, args)
 	})
+	// 命令错误打印 usage 的场景同样按语言重写（如 RunE 返回错误时 cobra 展示用法）
+	defaultUsage := rootCmd.UsageFunc()
+	rootCmd.SetUsageFunc(func(cmd *cobra.Command) error {
+		applyHelpLang(cliLang())
+		return defaultUsage(cmd)
+	})
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "错误: %s\n", cliErrMsg(err))
+		fprintf(os.Stderr, cliTextsFor(cliLang()).errPrefix+"\n", cliErrMsg(err))
 		os.Exit(1)
 	}
 	if cliExecuted {
@@ -85,12 +108,13 @@ func Execute() *WebArgs {
 	return webArgs
 }
 
-// cliErrMsg 提取可读错误信息：*cygin.Error 输出中文消息 + 详情，其他错误直接输出
+// cliErrMsg 提取可读错误信息：*cygin.Error 输出当前语言消息；
+// details 为中文补充详情（服务端日志口径），仅 zh 下拼接展示，en 下避免中文泄漏。
 func cliErrMsg(err error) string {
 	if e, ok := err.(*cygin.Error); ok {
-		msg := e.Msg("zh")
-		if len(e.Details) > 0 {
-			return fmt.Sprintf("%s (%s)", msg, strings.Join(e.Details, "; "))
+		msg := e.Msg(cliLang())
+		if len(e.Details) > 0 && cliLang() == "zh" {
+			return sprintf("%s (%s)", msg, strings.Join(e.Details, "; "))
 		}
 		return msg
 	}
@@ -122,7 +146,7 @@ func completeConnNames(cmd *cobra.Command, args []string, toComplete string) ([]
 	conns := svc.Persist().LoadConns()
 	names := make([]string, 0, len(conns)*2)
 	for _, rec := range conns {
-		desc := fmt.Sprintf("ID: %s  %s:%d", rec.ID, rec.Conn.Host, rec.Conn.Port)
+		desc := sprintf("ID: %s  %s:%d", rec.ID, rec.Conn.Host, rec.Conn.Port)
 		names = append(names, rec.Name+"\t"+desc)
 		if rec.ShortName != "" {
 			names = append(names, rec.ShortName+"\t"+desc+" ("+rec.Name+")")
@@ -355,9 +379,9 @@ func cliProgress() (ProgressFunc, *string) {
 		if p.Message != "" && p.Message != lastMsg {
 			lastMsg = p.Message
 			if tty {
-				fmt.Printf("\r\033[K%s %s\n", dim("·"), p.Message)
+				printf("\r\033[K%s %s\n", dim("·"), p.Message)
 			} else {
-				fmt.Printf("  · %s\n", p.Message)
+				printf("  · %s\n", p.Message)
 			}
 		}
 		terminal := p.State == "done" || p.State == "error" || p.State == "cancelled"
@@ -365,11 +389,11 @@ func cliProgress() (ProgressFunc, *string) {
 			// 非 TTY：每 20% 一条，避免重定向日志刷屏
 			if terminal || p.Percent >= lastPct+20 {
 				lastPct = p.Percent
-				fmt.Printf("  进度 %.0f%% (%d/%d 项)\n", p.Percent, p.DoneUnits, p.TotalUnits)
+				printf(cliTextsFor(cliLang()).progressPct+"\n", p.Percent, p.DoneUnits, p.TotalUnits)
 			}
 			return
 		}
-		fmt.Printf("\r\033[K%s", renderBar(p))
+		printf("\r\033[K%s", renderBar(p))
 		if terminal {
 			fmt.Println()
 		}
@@ -388,9 +412,9 @@ func renderBar(p ProgressInfo) string {
 	}
 	filled := int(pct / 100 * width)
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
-	line := fmt.Sprintf("[%s] %5.1f%%  %d/%d 项", bar, pct, p.DoneUnits, p.TotalUnits)
+	line := sprintf("[%s] %5.1f%%  %s", bar, pct, sprintf(cliTextsFor(cliLang()).progressUnits, p.DoneUnits, p.TotalUnits))
 	if p.DoneRows > 0 {
-		line += fmt.Sprintf(" · %s行", humanRows(p.DoneRows))
+		line += sprintf(cliTextsFor(cliLang()).progressRows, humanRows(p.DoneRows))
 	}
 	if p.CurrentTable != "" {
 		table := p.CurrentTable
@@ -402,10 +426,10 @@ func renderBar(p ProgressInfo) string {
 	return line
 }
 
-// humanRows 行数人性化（1.2万 / 3456）
+// humanRows 行数人性化（1.2万 / 3456；en 下 1.2K）
 func humanRows(n int64) string {
 	if n >= 10000 {
-		return fmt.Sprintf("%.1f万", float64(n)/10000)
+		return sprintf(cliTextsFor(cliLang()).rowsThousand, float64(n)/10000)
 	}
-	return fmt.Sprintf("%d", n)
+	return sprintf("%d", n)
 }

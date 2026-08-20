@@ -27,18 +27,6 @@ export function emptyConn(): DBConn {
   return { Type: "mysql", SubType: "mysql", Host: "", Port: 3306, Un: "", Pw: "", DBName: "" }
 }
 
-// 数据库子类型展示名：SubType 非版本号，而是兼容数据库产品；值等于类型名时为原生标准库
-export const DB_SUBTYPE_LABEL: Record<string, string> = {
-  mysql: "MySQL（原生）",
-  oceanbase: "OceanBase",
-  mariadb: "MariaDB",
-  postgresql: "PostgreSQL（原生）",
-  gaussdb: "GaussDB",
-  kingbase: "KingbaseES",
-  oracle: "Oracle（原生）",
-  dameng: "达梦 Dameng",
-}
-
 // ---- 选项 ----
 
 // 数据库及其表/对象清单（树形结构；未配置库时后端遍历所有库）
@@ -107,6 +95,7 @@ export interface DictionaryOptions {
   databases?: string[]
   tables?: string[]
   compress: boolean
+  lang?: string // 产物文案语言（zh/en），缺省后端回退 zh
 }
 
 export interface ImportOptions {
@@ -325,13 +314,14 @@ export interface ImportFileInfo {
   descs?: Record<string, ExportDesc> // 库名 → 导出描述
 }
 
+// 任务类型 → i18n key（文案见 locales: app.taskType.*），渲染时 t(TASK_TYPE_LABEL[x])
 export const TASK_TYPE_LABEL: Record<string, string> = {
-  export: "导出",
-  import: "导入",
-  migrate: "迁移",
-  compare: "对比",
-  dictionary: "数据字典",
-  snapshot_compare: "快照对比",
+  export: "app.taskType.export",
+  import: "app.taskType.import",
+  migrate: "app.taskType.migrate",
+  compare: "app.taskType.compare",
+  dictionary: "app.taskType.dictionary",
+  snapshot_compare: "app.taskType.snapshot_compare",
 }
 
 // ---- 快照 ----
@@ -387,10 +377,11 @@ export interface SnapshotCompareOptions {
   tables?: string[]
 }
 
+// 重置模式 → i18n key（文案见 locales: app.resetMode.*），渲染时 t(RESET_MODE_LABEL[x])
 export const RESET_MODE_LABEL: Record<string, string> = {
-  "": "不重置（直接追加数据）",
-  truncate: "清空表（TRUNCATE，保留表结构）",
-  drop: "删除重建（DROP + CREATE）",
+  "": "app.resetMode.none",
+  truncate: "app.resetMode.truncate",
+  drop: "app.resetMode.drop",
 }
 
 // ---- SQL 查询终端 ----
@@ -409,9 +400,10 @@ export type GenSQLKind =
 //   raw       = 原样执行：按用户所写原样发库，不限制行数（用于特殊语法兜底，由用户自行负责）
 export type SQLExecMode = "transform" | "raw"
 
+// SQL 执行模式 → i18n key（文案见 locales: app.execMode.*），渲染时 t(SQL_EXEC_MODE_LABEL[x])
 export const SQL_EXEC_MODE_LABEL: Record<SQLExecMode, string> = {
-  transform: "规范执行",
-  raw: "原样执行",
+  transform: "app.execMode.transform",
+  raw: "app.execMode.raw",
 }
 
 export interface SQLQueryRequest {

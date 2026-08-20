@@ -29,17 +29,18 @@ func init() {
 	rootCmd.AddCommand(historyCmd)
 }
 
-// cliStatus 状态中文展示
+// cliStatus 状态词双语展示（zh/en 查 cliTexts 注册表）
 func cliStatus(status string) string {
+	txt := cliTextsFor(cliLang())
 	switch status {
 	case "done":
-		return "成功"
+		return txt.statusDone
 	case "error":
-		return "失败"
+		return txt.statusError
 	case "cancelled":
-		return "已取消"
+		return txt.statusCancelled
 	case "running":
-		return "运行中"
+		return txt.statusRunning
 	}
 	return status
 }
@@ -56,10 +57,11 @@ var historyListCmd = &cobra.Command{
 		taskType, _ := cmd.Flags().GetString("type")
 		records := svc.ListHistory(taskType, "")
 		if len(records) == 0 {
-			fmt.Println("（无执行历史）")
+			fmt.Println(cliTextsFor(cliLang()).histNone)
 			return nil
 		}
-		fmt.Printf("%-26s %-8s %-8s %-19s %s\n", "ID", "类型", "状态", "开始时间", "摘要")
+		txt := cliTextsFor(cliLang())
+		printf("%-26s %-8s %-8s %-19s %s\n", txt.hdrID, txt.hdrType, txt.hdrStatus, txt.hdrStartedAt, txt.hdrSummary)
 		for _, r := range records {
 			summary := r.Summary
 			if r.Status == "error" && r.ErrorMsg != "" {
@@ -70,7 +72,7 @@ var historyListCmd = &cobra.Command{
 			} else if r.Target != "" {
 				summary = r.Target
 			}
-			fmt.Printf("%-26s %-8s %-8s %-19s %s\n",
+			printf("%-26s %-8s %-8s %-19s %s\n",
 				r.ID, r.TaskType, cliStatus(r.Status),
 				time.UnixMilli(r.StartedAt).Format("2006-01-02 15:04:05"), summary)
 		}
@@ -91,37 +93,38 @@ var historyGetCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Printf("ID:       %s\n", r.ID)
-		fmt.Printf("类型:     %s\n", r.TaskType)
-		fmt.Printf("状态:     %s\n", cliStatus(r.Status))
-		fmt.Printf("开始:     %s\n", time.UnixMilli(r.StartedAt).Format("2006-01-02 15:04:05"))
+		txt := cliTextsFor(cliLang())
+		printf(txt.histID+"\n", r.ID)
+		printf(txt.histType+"\n", r.TaskType)
+		printf(txt.histStatus+"\n", cliStatus(r.Status))
+		printf(txt.histStarted+"\n", time.UnixMilli(r.StartedAt).Format("2006-01-02 15:04:05"))
 		if r.FinishedAt > 0 {
-			fmt.Printf("结束:     %s\n", time.UnixMilli(r.FinishedAt).Format("2006-01-02 15:04:05"))
+			printf(txt.histFinished+"\n", time.UnixMilli(r.FinishedAt).Format("2006-01-02 15:04:05"))
 		}
 		if r.Duration > 0 {
-			fmt.Printf("耗时:     %s\n", time.Duration(r.Duration)*time.Millisecond)
+			printf(txt.histDuration+"\n", time.Duration(r.Duration)*time.Millisecond)
 		}
 		if r.Target != "" {
-			fmt.Printf("目标:     %s\n", r.Target)
+			printf(txt.histTarget+"\n", r.Target)
 		}
-		fmt.Printf("进度:     %d/%d 项", r.DoneUnits, r.TotalUnits)
+		printf(txt.histProgress, r.DoneUnits, r.TotalUnits)
 		if r.TotalRows > 0 {
-			fmt.Printf("，%d 行", r.TotalRows)
+			printf(txt.histRows, r.TotalRows)
 		}
 		fmt.Println()
 		if r.Summary != "" {
-			fmt.Printf("摘要:     %s\n", r.Summary)
+			printf(txt.histSummary+"\n", r.Summary)
 		}
 		if r.OutputPath != "" {
-			fmt.Printf("输出文件: %s\n", r.OutputPath)
+			printf(txt.histOutput+"\n", r.OutputPath)
 		}
 		if r.ErrorMsg != "" {
-			fmt.Printf("错误:     %s\n", r.ErrorMsg)
+			printf(txt.histError+"\n", r.ErrorMsg)
 		}
 		if len(r.Logs) > 0 {
-			fmt.Println("日志:")
+			fmt.Println(txt.histLogs)
 			for _, line := range r.Logs {
-				fmt.Printf("  %s\n", line)
+				printf("  %s\n", line)
 			}
 		}
 		return nil
@@ -141,7 +144,7 @@ var historyDeleteCmd = &cobra.Command{
 		if err := svc.DeleteHistory(id); err != nil {
 			return err
 		}
-		fmt.Println("记录已删除")
+		fmt.Println(cliTextsFor(cliLang()).histDeleted)
 		return nil
 	},
 }

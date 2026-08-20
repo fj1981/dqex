@@ -1,29 +1,31 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronRight, Database, FileCode2, FolderTree, FunctionSquare, Loader2, Table2, View } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { useTranslation } from "react-i18next"
+import { ChevronRight, Database, FileCode2, FunctionSquare, Loader2, Table2, View } from "lucide-react"
+import DBErrorCard from "@/components/DBErrorCard"
 import { Input } from "@/components/ui/input"
 import { useObjectTreeStore } from "@/stores/objectTreeStore"
 import { cn } from "@/lib/utils"
+import { tKey } from "@/lib/i18n"
 import type { ObjectNode } from "@/types"
 
 type ObjType = ObjectNode["type"]
 
-const TYPE_ICON: Record<ObjType, { icon: typeof Table2; cls: string; label: string }> = {
-  db: { icon: Database, cls: "text-blue-600", label: "数据库" },
-  table: { icon: Table2, cls: "text-emerald-600", label: "表" },
-  view: { icon: View, cls: "text-cyan-600", label: "视图" },
-  function: { icon: FunctionSquare, cls: "text-violet-600", label: "函数" },
-  procedure: { icon: FileCode2, cls: "text-orange-600", label: "存储过程" },
-  other: { icon: FileCode2, cls: "text-muted-foreground", label: "对象" },
+const TYPE_ICON: Record<ObjType, { icon: typeof Table2; cls: string; labelKey: string }> = {
+  db: { icon: Database, cls: "text-blue-600", labelKey: "objectTree.type.db" },
+  table: { icon: Table2, cls: "text-emerald-600", labelKey: "objectTree.type.table" },
+  view: { icon: View, cls: "text-cyan-600", labelKey: "objectTree.type.view" },
+  function: { icon: FunctionSquare, cls: "text-violet-600", labelKey: "objectTree.type.function" },
+  procedure: { icon: FileCode2, cls: "text-orange-600", labelKey: "objectTree.type.procedure" },
+  other: { icon: FileCode2, cls: "text-muted-foreground", labelKey: "objectTree.type.other" },
 }
 
 // 库下对象的分组展示顺序（表/视图/函数/存储过程），分组标题在每类对象前
-const GROUP_ORDER: { type: ObjType; label: string }[] = [
-  { type: "table", label: "表" },
-  { type: "view", label: "视图" },
-  { type: "function", label: "函数" },
-  { type: "procedure", label: "存储过程" },
-  { type: "other", label: "其他对象" },
+const GROUP_ORDER: { type: ObjType; labelKey: string }[] = [
+  { type: "table", labelKey: "objectTree.group.table" },
+  { type: "view", labelKey: "objectTree.group.view" },
+  { type: "function", labelKey: "objectTree.group.function" },
+  { type: "procedure", labelKey: "objectTree.group.procedure" },
+  { type: "other", labelKey: "objectTree.group.other" },
 ]
 
 interface Props {
@@ -37,6 +39,7 @@ function LeafNode({ node, depth, dbName, onOpenObject }: {
   dbName: string
   onOpenObject: Props["onOpenObject"]
 }) {
+  const { t } = useTranslation()
   const { selected, selectNode } = useObjectTreeStore()
   const meta = TYPE_ICON[node.type] || TYPE_ICON.other
   const Icon = meta.icon
@@ -50,7 +53,7 @@ function LeafNode({ node, depth, dbName, onOpenObject }: {
         active ? "bg-primary/10 text-primary" : "text-foreground/85 hover:bg-accent",
       )}
       style={{ paddingLeft: depth * 14 + 6 }}
-      title={meta.label}
+      title={tKey(meta.labelKey)}
       onClick={() => {
         selectNode(node.name)
         onOpenObject(node.name, dbName, node.type)
@@ -63,12 +66,13 @@ function LeafNode({ node, depth, dbName, onOpenObject }: {
 }
 
 function GroupNode({ group, node, depth, dbName, onOpenObject }: {
-  group: { type: ObjType; label: string }
+  group: { type: ObjType; labelKey: string }
   node: ObjectNode
   depth: number
   dbName: string
   onOpenObject: Props["onOpenObject"]
 }) {
+  const { t } = useTranslation()
   const { expanded, toggleNode } = useObjectTreeStore()
   const [filter, setFilter] = useState("")
   const groupKey = `${node.name}:${group.type}`
@@ -97,7 +101,7 @@ function GroupNode({ group, node, depth, dbName, onOpenObject }: {
           onClick={() => toggleNode(groupKey)}
         >
           <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-90")} />
-          <span className="truncate font-medium text-muted-foreground">{group.label}</span>
+          <span className="truncate font-medium text-muted-foreground">{tKey(group.labelKey)}</span>
           <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">{children.length}</span>
         </button>
       </div>
@@ -106,7 +110,7 @@ function GroupNode({ group, node, depth, dbName, onOpenObject }: {
           {needFilter && (
             <div className="px-3 pb-1">
               <Input
-                placeholder="过滤..."
+                placeholder={t("objectTree.filter")}
                 className="h-6 text-[11px]"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
@@ -158,28 +162,26 @@ function DbNode({ node, onOpenObject }: { node: ObjectNode; onOpenObject: Props[
 
 // 左侧对象树：库 → 表/视图/函数/存储过程（按类型分组），懒加载；点击叶子对象触发回调
 export default function ObjectTree({ onOpenObject }: Props) {
-  const { nodes, loading, error } = useObjectTreeStore()
+  const { t } = useTranslation()
+  const { nodes, loading, error, connId, loadTree } = useObjectTreeStore()
 
   if (loading) {
     return (
       <div className="flex items-center gap-2 p-4 text-xs text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> 加载对象树...
+        <Loader2 className="h-4 w-4 animate-spin" /> {t("objectTree.loading")}
       </div>
     )
   }
   if (error) {
     return (
-      <div className="flex flex-col items-center gap-2 p-4 text-center text-xs text-destructive">
-        <FolderTree className="h-5 w-5" />
-        <span>{error}</span>
-        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => window.location.reload()}>
-          重试
-        </Button>
+      // 加载失败：友好化错误卡（标题/原因/排查建议 + 折叠原始错误 + 重试重新加载）
+      <div className="flex flex-col items-center gap-3 p-4">
+        <DBErrorCard error={error} onRetry={() => void loadTree(connId)} />
       </div>
     )
   }
   if (nodes.length === 0) {
-    return <div className="p-4 text-center text-xs text-muted-foreground">无可用库，请检查连接</div>
+    return <div className="p-4 text-center text-xs text-muted-foreground">{t("objectTree.noDb")}</div>
   }
 
   return (

@@ -33,19 +33,20 @@ var configCmd = &cobra.Command{
 			return err
 		}
 		dirs := ResolveDirs(webArgs.DataDir, cfg)
+		txt := cliTextsFor(cliLang())
 		if cfgPath == "" {
-			fmt.Println("配置文件: （未发现，使用默认值；dbx config --gen 可生成模板）")
+			fmt.Println(txt.cfgNotFound)
 		} else {
-			fmt.Printf("配置文件:     %s\n", cfgPath)
+			printf(txt.cfgPath+"\n", cfgPath)
 		}
-		fmt.Printf("配置保存目录: %s\n", dirs.Data)
-		fmt.Printf("任务临时目录: %s\n", dirs.Tmp)
-		fmt.Printf("上传临时目录: %s\n", dirs.Uploads)
-		fmt.Printf("最终产物目录: %s\n", dirs.Exports)
+		printf(txt.cfgDirData+"\n", dirs.Data)
+		printf(txt.cfgDirTmp+"\n", dirs.Tmp)
+		printf(txt.cfgDirUploads+"\n", dirs.Uploads)
+		printf(txt.cfgDirExports+"\n", dirs.Exports)
 		if len(cfg.Web.Allow) > 0 {
-			fmt.Printf("访问来源白名单: %s（本机回环始终放行）\n", strings.Join(cfg.Web.Allow, ", "))
+			printf(txt.cfgAllow+"\n", strings.Join(cfg.Web.Allow, ", "))
 		} else {
-			fmt.Println("访问来源白名单: （未配置，不限制来源）")
+			fmt.Println(txt.cfgAllowNone)
 		}
 		return nil
 	},

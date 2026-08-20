@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -125,14 +127,14 @@ func TestBuildSchemaTextFullKeepsSensitive(t *testing.T) {
 		},
 	}
 	// 完整版（get_schema 工具用）：敏感列必须保留
-	out := BuildSchemaTextFull([]TableInfo{ti}, 1, 0)
+	out := BuildSchemaTextFull("zh", []TableInfo{ti}, 1, 0)
 	for _, name := range []string{"password_salt", "password_hash", "email", "mobile", "password_reset"} {
 		if !strings.Contains(out, "`"+name+"`") {
 			t.Fatalf("完整版应保留敏感列 %s:\n%s", name, out)
 		}
 	}
 	// 默认版：仍应过滤敏感列（兼容旧静态注入语义）
-	out2 := BuildSchemaText([]TableInfo{ti}, 1, 0)
+	out2 := BuildSchemaText("zh", []TableInfo{ti}, 1, 0)
 	for _, name := range []string{"password_salt", "password_hash", "email", "mobile", "password_reset"} {
 		if strings.Contains(out2, "`"+name+"`") {
 			t.Fatalf("默认版应过滤敏感列 %s:\n%s", name, out2)
@@ -141,7 +143,7 @@ func TestBuildSchemaTextFullKeepsSensitive(t *testing.T) {
 }
 
 func TestBuildSchemaTextEmpty(t *testing.T) {
-	if s := BuildSchemaText(nil, 0, 0); s != "" {
+	if s := BuildSchemaText("zh", nil, 0, 0); s != "" {
 		t.Fatalf("空表列表应返回空串，实际 %q", s)
 	}
 }
@@ -152,7 +154,7 @@ func TestBuildSchemaTextMaxTables(t *testing.T) {
 		{Table: "b", Columns: []ColumnInfo{mkCol("x", "int", false, "")}},
 		{Table: "c", Columns: []ColumnInfo{mkCol("x", "int", false, "")}},
 	}
-	out := BuildSchemaText(tables, 2, 0)
+	out := BuildSchemaText("zh", tables, 2, 0)
 	if !strings.Contains(out, "其余表结构已省略") {
 		t.Fatalf("超出 maxTables 应输出省略标记:\n%s", out)
 	}
@@ -165,7 +167,7 @@ func TestBuildSchemaTextMaxChars(t *testing.T) {
 	tables := []TableInfo{
 		{Table: "中文表", Columns: []ColumnInfo{mkCol("列", "varchar(255)", false, "中文注释")}},
 	}
-	out := BuildSchemaText(tables, 0, 40)
+	out := BuildSchemaText("zh", tables, 0, 40)
 	if !strings.Contains(out, "（已裁剪）") {
 		t.Fatalf("超出 maxChars 应输出裁剪标记:\n%s", out)
 	}
@@ -184,18 +186,115 @@ func TestRenderSystemPrompt(t *testing.T) {
 	schema := "# 表 `t`\n`a` int\n"
 	// 自定义模板含 {schema}
 	custom := "你是 DBA，方言 {dialect}。\n{schema}\n结尾"
-	got := RenderSystemPrompt(custom, "mysql", schema)
+	got := RenderSystemPrompt("zh", custom, "mysql", schema)
 	if !strings.Contains(got, "方言 mysql") || !strings.Contains(got, "# 表 `t`") {
 		t.Fatalf("自定义模板替换失败:\n%s", got)
 	}
 	// 自定义模板不含 {schema}：追加在末尾
-	got2 := RenderSystemPrompt("你是 DBA。", "mysql", schema)
+	got2 := RenderSystemPrompt("zh", "你是 DBA。", "mysql", schema)
 	if !strings.Contains(got2, "可用表结构（schema）：\n"+schema) {
 		t.Fatalf("缺失 {schema} 时未追加:\n%s", got2)
 	}
 	// 空自定义模板：用默认模板
-	got3 := RenderSystemPrompt("", "postgresql", schema)
+	got3 := RenderSystemPrompt("zh", "", "postgresql", schema)
 	if !strings.Contains(got3, "资深 postgresql DBA") {
 		t.Fatalf("默认模板未生效:\n%s", got3)
+	}
+}
+
+func TestRenderSystemPromptEn(t *testing.T) {
+	schema := "# Table `t`\n"
+	got := RenderSystemPrompt("en", "", "mysql", schema)
+	if !strings.Contains(got, "senior mysql DBA") {
+		t.Fatalf("en 默认模板未生效:\n%s", got)
+	}
+	// 语言归一：en-US → en，未知语言回退 zh
+	if g := RenderSystemPrompt("en-US", "", "mysql", schema); !strings.Contains(g, "senior mysql DBA") {
+		t.Fatalf("en-US 应归一为 en:\n%s", g)
+	}
+	if g := RenderSystemPrompt("ja", "", "mysql", schema); !strings.Contains(g, "资深 mysql DBA") {
+		t.Fatalf("未知语言应回退 zh:\n%s", g)
+	}
+}
+
+func TestActionPromptLang(t *testing.T) {
+	zh := ActionPrompt("zh", "explain", "SELECT 1")
+	en := ActionPrompt("en", "explain", "SELECT 1")
+	if !strings.Contains(zh, "解释以下 SQL") {
+		t.Fatalf("zh 动作指令未生效:\n%s", zh)
+	}
+	if !strings.Contains(en, "Explain the purpose") {
+		t.Fatalf("en 动作指令未生效:\n%s", en)
+	}
+	if !strings.HasSuffix(en, "SELECT 1") {
+		t.Fatalf("需求文本应追加在指令末尾:\n%s", en)
+	}
+}
+
+func TestKnownTables(t *testing.T) {
+	names := []string{"a", "b", "c"}
+	got := KnownTables("zh", "mydb", names)
+	if !strings.Contains(got, "已知元数据") || !strings.Contains(got, "- mydb: a, b, c") {
+		t.Fatalf("名录渲染错误:\n%s", got)
+	}
+	en := KnownTables("en", "mydb", names)
+	if !strings.Contains(en, "Known metadata") {
+		t.Fatalf("en 名录未生效:\n%s", en)
+	}
+	// 超上限省略并提示
+	many := make([]string, knownTablesMaxList+5)
+	for i := range many {
+		many[i] = "t"
+	}
+	got2 := KnownTables("zh", "mydb", many)
+	if !strings.Contains(got2, "共 35 张表") {
+		t.Fatalf("名录超限未提示总数:\n%s", got2)
+	}
+	if strings.Count(got2, "t,") != knownTablesMaxList-1 {
+		t.Fatalf("名录应仅列出前 %d 张表:\n%s", knownTablesMaxList, got2)
+	}
+}
+
+func TestAgentRules(t *testing.T) {
+	zh := AgentRules("zh", "mydb")
+	if !strings.Contains(zh, "必须先查表结构") || !strings.Contains(zh, "数据库 \"mydb\" 内") {
+		t.Fatalf("zh 规则段错误:\n%s", zh)
+	}
+	en := AgentRules("en", "mydb")
+	if !strings.Contains(en, "query real table structures first") || !strings.Contains(en, `database "mydb"`) {
+		t.Fatalf("en 规则段错误:\n%s", en)
+	}
+}
+
+func TestToolTextsFor(t *testing.T) {
+	zh := ToolTextsFor("zh")
+	if !strings.Contains(zh.ListDBsDesc, "列出当前连接可访问的所有数据库") {
+		t.Fatalf("zh list_databases 描述错误: %s", zh.ListDBsDesc)
+	}
+	if got := fmt.Sprintf(zh.DBNotFound, "db1", "db1, db2"); got != "数据库 \"db1\" 不存在。可用数据库：db1, db2" {
+		t.Fatalf("zh 库不存在提示错误: %s", got)
+	}
+	if got := fmt.Sprintf(zh.TableNotFound, "t", "db1", "a, b"); !strings.Contains(got, "表 \"t\" 在库 \"db1\" 中不存在") {
+		t.Fatalf("zh 表不存在提示错误: %s", got)
+	}
+
+	en := ToolTextsFor("en-US") // 语言归一
+	if !strings.Contains(en.ListTablesDesc, "List all table names") {
+		t.Fatalf("en list_tables 描述错误: %s", en.ListTablesDesc)
+	}
+	if got := fmt.Sprintf(en.DBNotFoundSchema, "db1", "db1, db2"); !strings.Contains(got, "does not exist") || !strings.Contains(got, "retry get_schema") {
+		t.Fatalf("en 库不存在提示错误: %s", got)
+	}
+	if got := fmt.Sprintf(en.TableNotFound, "t", "db1", "a, b"); !strings.Contains(got, "Table \"t\" does not exist in database \"db1\"") {
+		t.Fatalf("en 表不存在提示错误: %s", got)
+	}
+
+	ja := ToolTextsFor("ja") // 未知语言回退 zh
+	if ja.ListDBsDesc != zh.ListDBsDesc {
+		t.Fatalf("未知语言应回退 zh 工具文本")
+	}
+	// 错误文本模板可被 fmt.Errorf 消费（%w 占位符）
+	if err := fmt.Errorf(zh.ErrListDBs, errors.New("boom")); !strings.Contains(err.Error(), "列出数据库失败: boom") {
+		t.Fatalf("zh 工具错误文本错误: %v", err)
 	}
 }

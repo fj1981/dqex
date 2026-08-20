@@ -17,7 +17,7 @@ import (
 
 func outputTable(r *queryResult) {
 	if r.Error != "" {
-		fmt.Fprintf(os.Stderr, "%s\n", red(r.Error))
+		fprintf(os.Stderr, "%s\n", red(r.Error))
 		return
 	}
 	if len(r.Columns) == 0 {
@@ -25,18 +25,18 @@ func outputTable(r *queryResult) {
 		if !r.IsWrite {
 			fmt.Println(dim("Empty set"))
 			if showTiming {
-				fmt.Printf("%s\n", dim(fmt.Sprintf("(%s)", formatDuration(r.Elapsed))))
+				printf("%s\n", dim(sprintf("(%s)", formatDuration(r.Elapsed))))
 			}
 			return
 		}
 		if r.AffectedRows > 0 {
 			if showTiming {
-				fmt.Printf("Query OK, %d rows affected (%s)\n", r.AffectedRows, formatDuration(r.Elapsed))
+				printf("Query OK, %d rows affected (%s)\n", r.AffectedRows, formatDuration(r.Elapsed))
 			} else {
-				fmt.Printf("Query OK, %d rows affected\n", r.AffectedRows)
+				printf("Query OK, %d rows affected\n", r.AffectedRows)
 			}
 		} else if showTiming {
-			fmt.Printf("Query OK (%s)\n", formatDuration(r.Elapsed))
+			printf("Query OK (%s)\n", formatDuration(r.Elapsed))
 		} else {
 			fmt.Println("Query OK")
 		}
@@ -45,7 +45,7 @@ func outputTable(r *queryResult) {
 	if len(r.Rows) == 0 {
 		fmt.Println(dim("Empty set"))
 		if showTiming {
-			fmt.Printf("%s\n", dim(fmt.Sprintf("(%s)", formatDuration(r.Elapsed))))
+			printf("%s\n", dim(sprintf("(%s)", formatDuration(r.Elapsed))))
 		}
 		return
 	}
@@ -78,7 +78,7 @@ func outputTable(r *queryResult) {
 	table.Render()
 
 	if showTiming {
-		fmt.Printf("%d rows in set (%s)\n", r.RowCount, formatDuration(r.Elapsed))
+		printf("%d rows in set (%s)\n", r.RowCount, formatDuration(r.Elapsed))
 	}
 }
 
@@ -88,14 +88,14 @@ func formatCell(val any) string {
 	}
 	switch v := val.(type) {
 	case []byte:
-		return dim(fmt.Sprintf("<BLOB %s>", formatBytes(len(v))))
+		return dim(sprintf("<BLOB %s>", formatBytes(len(v))))
 	case string:
 		if len(v) > 500 {
-			return v[:200] + dim(fmt.Sprintf("…(共 %d 字符)", len(v)))
+			return v[:200] + dim(sprintf(cliTextsFor(cliLang).tableTruncChars, len(v)))
 		}
 		return v
 	case int64, int, int32, float64, float32:
-		return fmt.Sprintf("%v", v)
+		return sprintf("%v", v)
 	case bool:
 		if v {
 			return green("true")
@@ -104,18 +104,18 @@ func formatCell(val any) string {
 	case time.Time:
 		return v.Format("2006-01-02 15:04:05")
 	default:
-		return fmt.Sprintf("%v", v)
+		return sprintf("%v", v)
 	}
 }
 
 func formatBytes(n int) string {
 	switch {
 	case n >= 1<<20:
-		return fmt.Sprintf("%.1fMB", float64(n)/(1<<20))
+		return sprintf("%.1fMB", float64(n)/(1<<20))
 	case n >= 1<<10:
-		return fmt.Sprintf("%.1fKB", float64(n)/(1<<10))
+		return sprintf("%.1fKB", float64(n)/(1<<10))
 	default:
-		return fmt.Sprintf("%dB", n)
+		return sprintf("%dB", n)
 	}
 }
 
@@ -124,12 +124,12 @@ func formatDuration(d time.Duration) string {
 		return "0ms"
 	}
 	if d < time.Millisecond {
-		return fmt.Sprintf("%.3fms", float64(d.Microseconds())/1000)
+		return sprintf("%.3fms", float64(d.Microseconds())/1000)
 	}
 	if d < time.Second {
-		return fmt.Sprintf("%.0fms", float64(d.Milliseconds()))
+		return sprintf("%.0fms", float64(d.Milliseconds()))
 	}
-	return fmt.Sprintf("%.3fs", d.Seconds())
+	return sprintf("%.3fs", d.Seconds())
 }
 
 // ---- 执行计划着色 ----
@@ -154,7 +154,7 @@ func isExplainResult(columns []string) bool {
 
 func explainFormat(col string, val any) string {
 	colLower := strings.ToLower(col)
-	s := fmt.Sprintf("%v", val)
+	s := sprintf("%v", val)
 	switch colLower {
 	case "type":
 		switch strings.ToLower(s) {
@@ -199,17 +199,17 @@ var showTiming = true
 
 func outputVertical(r *queryResult) {
 	for i, row := range r.Rows {
-		fmt.Printf("*************************** %d. row ***************************\n", i+1)
+		printf("*************************** %d. row ***************************\n", i+1)
 		for j, col := range r.Columns {
 			val := ""
 			if j < len(row) {
 				val = formatCell(row[j])
 			}
-			fmt.Printf("%20s: %s\n", col, val)
+			printf("%20s: %s\n", col, val)
 		}
 	}
 	if showTiming {
-		fmt.Printf("%d rows in set (%s)\n", r.RowCount, formatDuration(r.Elapsed))
+		printf("%d rows in set (%s)\n", r.RowCount, formatDuration(r.Elapsed))
 	}
 }
 
@@ -261,11 +261,11 @@ func maybePage(r *queryResult) {
 	}
 	if termW > 0 && len(r.Columns) > 1 && estimateTableWidth(r) > termW {
 		if r.RowCount <= verticalAutoMaxRows {
-			fmt.Fprintln(os.Stderr, dim("⚠ 表格宽度超过终端，已自动切换为垂直显示（每行一个字段）"))
+			fmt.Fprintln(os.Stderr, dim(cliTextsFor(cliLang).tableAutoVertical))
 			outputVertical(r)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "%s\n", yellow(fmt.Sprintf("⚠ 表格宽度超过终端（%d 列），建议用 \\G 垂直显示", len(r.Columns))))
+		fprintf(os.Stderr, "%s\n", yellow(sprintf(cliTextsFor(cliLang).tableTooWide, len(r.Columns))))
 	}
 	outputTable(r)
 }
@@ -283,7 +283,7 @@ func auditWrite(info *engine.DBConnInfo, sql string, affected int64, elapsed tim
 	if len(auditSQL) > 500 {
 		auditSQL = auditSQL[:500]
 	}
-	entry := fmt.Sprintf("[%s] %s@%s:%d/%s | %s | affected=%d | %s\n",
+	entry := sprintf("[%s] %s@%s:%d/%s | %s | affected=%d | %s\n",
 		time.Now().Format("2006-01-02 15:04:05"),
 		info.Un, info.Host, info.Port, info.DBName,
 		auditSQL, affected, formatDuration(elapsed),
@@ -320,11 +320,11 @@ func auditLogPath() string {
 }
 
 func rotateAuditLogs(basePath string) {
-	oldest := fmt.Sprintf("%s.%d", basePath, auditMaxBackups)
+	oldest := sprintf("%s.%d", basePath, auditMaxBackups)
 	os.Remove(oldest)
 	for i := auditMaxBackups; i > 1; i-- {
-		old := fmt.Sprintf("%s.%d", basePath, i-1)
-		new_ := fmt.Sprintf("%s.%d", basePath, i)
+		old := sprintf("%s.%d", basePath, i-1)
+		new_ := sprintf("%s.%d", basePath, i)
 		os.Rename(old, new_)
 	}
 	os.Rename(basePath, basePath+".1")

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 import { Check, Eye, EyeOff, Loader2, PlugZap, Plus, Trash2 } from "lucide-react"
 import {
   Dialog,
@@ -24,16 +25,24 @@ import {
 import * as api from "@/api"
 import { useAppStore } from "@/stores/app"
 import { cn } from "@/lib/utils"
-import { emptyConn, DB_SUBTYPE_LABEL, type DBConn } from "@/types"
+import i18n from "@/lib/i18n"
+import zh from "@/locales/zh"
+import { emptyConn, type DBConn } from "@/types"
 
 type Env = "prod" | "staging" | "test" | "dev"
 
-const ENV_OPTIONS: { value: Env; label: string; emoji: string; tone: string }[] = [
-  { value: "prod",    label: "生产 prod",    emoji: "●", tone: "bg-red-100 text-red-700 border-red-200" },
-  { value: "staging", label: "预发 staging", emoji: "●", tone: "bg-blue-100 text-blue-700 border-blue-200" },
-  { value: "test",    label: "测试 test",    emoji: "●", tone: "bg-amber-100 text-amber-700 border-amber-200" },
-  { value: "dev",     label: "开发 dev",     emoji: "●", tone: "bg-emerald-100 text-emerald-700 border-emerald-200" },
-]
+const ENV_OPTIONS = [
+  { value: "prod",    labelKey: "conn.envProd",    tone: "bg-red-100 text-red-700 border-red-200" },
+  { value: "staging", labelKey: "conn.envStaging", tone: "bg-blue-100 text-blue-700 border-blue-200" },
+  { value: "test",    labelKey: "conn.envTest",    tone: "bg-amber-100 text-amber-700 border-amber-200" },
+  { value: "dev",     labelKey: "conn.envDev",     tone: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+] as const
+
+// 数据库子类型展示名：动态 key 翻译（未收录的类型原样显示）
+const subtypeLabel = (s: string) => {
+  const key = `dbSubtype.${s}`
+  return key in zh.dbSubtype ? i18n.t(key as "dbSubtype.mysql") : s
+}
 
 function envTone(env?: string) {
   return ENV_OPTIONS.find((e) => e.value === env)?.tone || "bg-muted text-muted-foreground border-transparent"
@@ -47,6 +56,7 @@ const DEFAULT_PORTS: Record<string, number> = {
 
 // 连接管理弹窗：上方为已保存连接列表（点击载入表单），下方为连接配置表单
 export default function ConnectionDrawer() {
+  const { t } = useTranslation()
   const { drawerOpen, closeDrawer, editingConn, connections, dbTypes, saveConnection, removeConnection, loadDBTypes } = useAppStore()
   const [name, setName] = useState("")
   const [shortName, setShortName] = useState("")
@@ -113,9 +123,9 @@ export default function ConnectionDrawer() {
     setTesting(true)
     try {
       await api.testConnection({ conn })
-      toast.success("连接成功!")
+      toast.success(t("conn.testOk") + "!")
     } catch (e) {
-      toast.error(`连接失败: ${(e as Error).message}`)
+      toast.error(t("conn.testFailMsg", { msg: (e as Error).message }))
     } finally {
       setTesting(false)
     }
@@ -123,26 +133,26 @@ export default function ConnectionDrawer() {
 
   const doSave = async () => {
     if (!name.trim()) {
-      toast.error("请填写连接名称")
+      toast.error(t("conn.nameRequiredMsg"))
       return
     }
     if (!conn.Host && conn.Type !== "oracle") {
-      toast.error("请填写主机地址")
+      toast.error(t("conn.hostRequiredMsg"))
       return
     }
     // 短名校验：仅允许字母、数字、连字符、下划线
     const sn = shortName.trim()
     if (sn && !/^[a-zA-Z0-9_-]+$/.test(sn)) {
-      toast.error("短名仅允许字母、数字、连字符、下划线")
+      toast.error(t("conn.shortNameInvalid"))
       return
     }
     setSaving(true)
     try {
       await saveConnection(loadedId || undefined, name.trim(), sn, env, conn)
-      toast.success("连接已保存")
+      toast.success(t("conn.savedMsg"))
       closeDrawer()
     } catch (e) {
-      toast.error(`保存失败: ${(e as Error).message}`)
+      toast.error(t("conn.saveFailMsg", { msg: (e as Error).message }))
     } finally {
       setSaving(false)
     }
@@ -150,14 +160,14 @@ export default function ConnectionDrawer() {
 
   const doDelete = async (id: string, n: string) => {
     // 删除前确认，防止误点
-    if (!(await confirm({ title: "删除连接", description: `确定删除连接「${n}」吗？`, confirmText: "删除", danger: true }))) return
+    if (!(await confirm({ title: t("conn.deleteConfirmTitle"), description: t("conn.deleteConfirmDesc", { name: n }), confirmText: t("common.delete"), danger: true }))) return
     try {
       await removeConnection(id)
-      toast.success(`已删除连接 ${n}`)
+      toast.success(t("conn.deletedMsg", { name: n }))
       // 若删除的正是当前正在编辑的连接，清空表单
       if (id === loadedId) resetForm()
     } catch (e) {
-      toast.error(`删除失败: ${(e as Error).message}`)
+      toast.error(t("conn.deleteFailMsg", { msg: (e as Error).message }))
     }
   }
 
@@ -170,7 +180,7 @@ export default function ConnectionDrawer() {
       <DialogContent className="flex max-h-[85vh] min-h-[560px] flex-col overflow-hidden sm:max-w-[720px] md:max-w-[780px]">
         <DialogHeader>
           <div className="flex items-center gap-2">
-            <DialogTitle>连接管理</DialogTitle>
+            <DialogTitle>{t("conn.drawerTitle")}</DialogTitle>
             <span className="text-xs text-muted-foreground">({connections.length})</span>
           </div>
         </DialogHeader>
@@ -178,10 +188,10 @@ export default function ConnectionDrawer() {
         {/* 左右分栏（Navicat 式）：左侧列表 + 右侧表单 */}
         <div className="-mx-1 grid min-h-0 flex-1 grid-cols-[200px_1fr] items-stretch gap-4">
           <div className="flex flex-col overflow-hidden rounded-md border bg-muted/20">
-            <div className="border-b bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground">已保存连接</div>
+            <div className="border-b bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground">{t("conn.savedConns")}</div>
             <ScrollArea className="scrollbar-thin min-h-0 flex-1">
               {connections.length === 0 && (
-                <div className="px-3 py-8 text-center text-xs text-muted-foreground">暂无连接，点击下方新建</div>
+                <div className="px-3 py-8 text-center text-xs text-muted-foreground">{t("conn.noConnsNew")}</div>
               )}
               {connections.map((c) => {
                 const active = c.id === loadedId
@@ -205,7 +215,7 @@ export default function ConnectionDrawer() {
                         variant="ghost"
                         size="icon"
                         className="h-5 w-5 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                        title="删除连接"
+                        title={t("conn.deleteConn")}
                         onClick={(e) => {
                           e.stopPropagation()
                           doDelete(c.id, c.name)
@@ -225,7 +235,7 @@ export default function ConnectionDrawer() {
             </ScrollArea>
             <div className="border-t bg-background p-2">
               <Button variant="outline" size="sm" className="w-full" onClick={resetForm}>
-                <Plus className="mr-1 h-4 w-4" /> 新建连接
+                <Plus className="mr-1 h-4 w-4" /> {t("conn.addTitle")}
               </Button>
             </div>
           </div>
@@ -235,7 +245,7 @@ export default function ConnectionDrawer() {
             {/* 表头：当前模式（新建/编辑）+ 环境标识 */}
             <div className="flex items-center justify-between border-b pb-2">
               <div className="flex items-center gap-2 text-sm">
-                <span className="text-muted-foreground">{isNew ? "新建连接" : "编辑连接"}</span>
+                <span className="text-muted-foreground">{isNew ? t("conn.addTitle") : t("conn.editTitle")}</span>
                 {!isNew && (
                   <span className="font-mono text-xs text-muted-foreground">· {loadedName}</span>
                 )}
@@ -252,26 +262,26 @@ export default function ConnectionDrawer() {
               {/* 基础（第一行）：名称 + 短名 + 环境 — 留足宽度避免标签换行/控件截断 */}
               <div className="grid grid-cols-12 gap-3">
                 <div className="col-span-5 space-y-1.5">
-                  <Label htmlFor="conn-name" className="whitespace-nowrap">连接名称</Label>
-                  <Input id="conn-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="如：MySQL-生产" />
+                  <Label htmlFor="conn-name" className="whitespace-nowrap">{t("conn.nameLabel")}</Label>
+                  <Input id="conn-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("conn.namePlaceholder")} />
                 </div>
                 <div className="col-span-3 space-y-1.5">
                   <Label htmlFor="conn-short-name" className="whitespace-nowrap">
-                    短名
-                    <span className="ml-1 text-xs font-normal text-muted-foreground" title="命令行快速引用，仅允许字母数字连字符下划线">可选</span>
+                    {t("conn.shortNameLabel")}
+                    <span className="ml-1 text-xs font-normal text-muted-foreground" title={t("conn.shortNameHint")}>{t("conn.shortNameOptional")}</span>
                   </Label>
                   <Input
                     id="conn-short-name"
                     value={shortName}
                     onChange={(e) => setShortName(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ""))}
-                    placeholder="如 prod"
+                    placeholder={t("conn.shortNamePlaceholder")}
                     className="font-mono text-sm"
                   />
                 </div>
                 <div className="col-span-4 space-y-1.5">
-                  <Label className="whitespace-nowrap">环境</Label>
+                  <Label className="whitespace-nowrap">{t("conn.envLabel")}</Label>
                   <Select value={env} onValueChange={setEnv}>
-                    <SelectTrigger><SelectValue placeholder="选择环境..." /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder={t("conn.envPlaceholder")} /></SelectTrigger>
                     <SelectContent>
                       {ENV_OPTIONS.map((e) => (
                         <SelectItem
@@ -282,7 +292,7 @@ export default function ConnectionDrawer() {
                         >
                           <span className="flex items-center gap-2">
                             <span className={cn("inline-block h-2 w-2 rounded-full", e.tone.split(" ")[0])} />
-                            {e.label}
+                            {t(e.labelKey)}
                           </span>
                         </SelectItem>
                       ))}
@@ -294,7 +304,7 @@ export default function ConnectionDrawer() {
               {/* 基础（第二行）：数据库类型 + 可选产品 — 独占一行避免 Select 截断 */}
               <div className="grid grid-cols-12 gap-3">
                 <div className={cn("space-y-1.5", subTypes.length > 1 ? "col-span-6" : "col-span-12")}>
-                  <Label className="whitespace-nowrap">数据库类型</Label>
+                  <Label className="whitespace-nowrap">{t("conn.typeLabel")}</Label>
                   <Select value={conn.Type} onValueChange={changeType}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -306,12 +316,12 @@ export default function ConnectionDrawer() {
                 </div>
                 {subTypes.length > 1 && (
                   <div className="col-span-6 space-y-1.5">
-                    <Label className="whitespace-nowrap">产品</Label>
+                    <Label className="whitespace-nowrap">{t("conn.productLabel")}</Label>
                     <Select value={conn.SubType || ""} onValueChange={(v) => set({ SubType: v })}>
-                      <SelectTrigger><SelectValue placeholder="选择兼容数据库产品" /></SelectTrigger>
+                      <SelectTrigger><SelectValue placeholder={t("conn.productPlaceholder")} /></SelectTrigger>
                       <SelectContent>
                         {subTypes.map((s) => (
-                          <SelectItem key={s} value={s}>{DB_SUBTYPE_LABEL[s] || s}</SelectItem>
+                          <SelectItem key={s} value={s}>{subtypeLabel(s)}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -324,11 +334,11 @@ export default function ConnectionDrawer() {
               {/* 网络：主机 + 端口 */}
               <div className="grid grid-cols-12 gap-3">
                 <div className="col-span-7 space-y-1.5">
-                  <Label>主机</Label>
-                  <Input value={conn.Host} onChange={(e) => set({ Host: e.target.value })} placeholder="127.0.0.1" />
+                  <Label>{t("conn.hostLabel")}</Label>
+                  <Input value={conn.Host} onChange={(e) => set({ Host: e.target.value })} placeholder={t("conn.hostPlaceholder")} />
                 </div>
                 <div className="col-span-5 space-y-1.5">
-                  <Label>端口</Label>
+                  <Label>{t("conn.portLabel")}</Label>
                   <Input
                     type="number"
                     value={conn.Port || ""}
@@ -340,11 +350,11 @@ export default function ConnectionDrawer() {
               {/* 凭据：用户名 + 密码 */}
               <div className="grid grid-cols-12 gap-3">
                 <div className="col-span-7 space-y-1.5">
-                  <Label>用户名</Label>
+                  <Label>{t("conn.userLabel")}</Label>
                   <Input value={conn.Un} onChange={(e) => set({ Un: e.target.value })} />
                 </div>
                 <div className="col-span-5 space-y-1.5">
-                  <Label>密码</Label>
+                  <Label>{t("conn.passwordLabel")}</Label>
                   <div className="relative">
                     <Input
                       type={showPw ? "text" : "password"}
@@ -355,7 +365,7 @@ export default function ConnectionDrawer() {
                     <button
                       type="button"
                       tabIndex={-1}
-                      title={showPw ? "隐藏密码" : "显示密码"}
+                      title={showPw ? t("conn.hidePassword") : t("conn.showPassword")}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                       onClick={() => setShowPw((v) => !v)}
                     >
@@ -372,19 +382,19 @@ export default function ConnectionDrawer() {
                 <div className="col-span-12 space-y-1.5">
                   {isOracle ? (
                     <>
-                      <Label>Service Name</Label>
+                      <Label>{t("conn.serviceLabel")}</Label>
                       <Input value={conn.Service || ""} onChange={(e) => set({ Service: e.target.value })} placeholder="ORCL" />
                     </>
                   ) : (
                     <>
                       <Label>
-                        数据库
-                        <span className="ml-1 text-xs font-normal text-muted-foreground">（可选）</span>
+                        {t("conn.dbLabel")}
+                        <span className="ml-1 text-xs font-normal text-muted-foreground">{t("conn.dbOptional")}</span>
                       </Label>
                       <Input
                         value={conn.DBName || ""}
                         onChange={(e) => set({ DBName: e.target.value })}
-                        placeholder="库名，留空时按库选择"
+                        placeholder={t("conn.dbPlaceholder")}
                       />
                     </>
                   )}
@@ -418,17 +428,17 @@ export default function ConnectionDrawer() {
         <div className="flex items-center justify-between border-t pt-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <PlugZap className="h-3.5 w-3.5" />
-            <span>支持 MySQL / PostgreSQL / Oracle</span>
+            <span>{t("conn.supportHint")}</span>
           </div>
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={closeDrawer}>取消</Button>
+            <Button variant="ghost" onClick={closeDrawer}>{t("common.cancel")}</Button>
             <Button variant="outline" onClick={doTest} disabled={testing}>
               {testing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <PlugZap className="mr-1 h-4 w-4" />}
-              {testing ? "测试中..." : "测试连接"}
+              {testing ? t("conn.testing") : t("conn.testConn")}
             </Button>
             <Button onClick={doSave} disabled={saving || !name.trim()}>
               {saving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Check className="mr-1 h-4 w-4" />}
-              {saving ? "保存中..." : isNew ? "新建" : "保存"}
+              {saving ? t("common.saving") : isNew ? t("conn.saveNew") : t("common.save")}
             </Button>
           </div>
         </div>

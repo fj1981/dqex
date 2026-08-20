@@ -19,13 +19,13 @@ import (
 // ---- 快照管理 ----
 
 // CreateSnapshot 创建快照（同步，CLI 使用）。dbNames 支持多库；空库名回退到连接默认库。
-// sampleLimit：每表采样行数上限；<=0 走引擎默认值。
-func (s *Service) CreateSnapshot(ctx context.Context, connID string, dbNames []string, name, description string, includeSamples bool, sampleLimit int, cb ProgressFunc) (*Snapshot, error) {
+// sampleLimit：每表采样行数上限；<=0 走引擎默认值。lang：进度日志语言（zh/en）。
+func (s *Service) CreateSnapshot(ctx context.Context, connID string, dbNames []string, name, description string, includeSamples bool, sampleLimit int, lang string, cb ProgressFunc) (*Snapshot, error) {
 	conn, err := s.resolveConn(connID, nil)
 	if err != nil {
 		return nil, err
 	}
-	opts := CreateSnapshotOptions{IncludeSamples: includeSamples, SampleLimit: sampleLimit}
+	opts := CreateSnapshotOptions{IncludeSamples: includeSamples, SampleLimit: sampleLimit, Lang: lang}
 
 	dbs := make([]engine.SnapshotDatabase, 0, len(dbNames))
 	var totalTables int

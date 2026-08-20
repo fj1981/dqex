@@ -114,7 +114,7 @@ type ConnRecord struct {
 	ID        string     `json:"id"`
 	Name      string     `json:"name"`
 	ShortName string     `json:"shortName,omitempty"` // 命令行简写（如 prod/my-dev），可选；不填时用 Name 匹配
-	Env       string     `json:"env,omitempty"`        // dev/test/staging/prod，留空视为 prod
+	Env       string     `json:"env,omitempty"`       // dev/test/staging/prod，留空视为 prod
 	Conn      DBConnInfo `json:"conn"`
 }
 
@@ -134,9 +134,9 @@ type ConnInfo struct {
 type SQLFavorite struct {
 	ID        string `json:"id"`
 	ConnID    string `json:"connId"`
-	Title     string `json:"title"`    // 用户可重命名，默认取 SQL 去注释后首行前 40 字符
-	DB        string `json:"db"`       // 执行上下文：目标库（仅 replace_all 回填时还原）
-	Mode      string `json:"mode"`     // 执行模式 transform/raw（仅 replace_all 回填时还原）
+	Title     string `json:"title"` // 用户可重命名，默认取 SQL 去注释后首行前 40 字符
+	DB        string `json:"db"`    // 执行上下文：目标库（仅 replace_all 回填时还原）
+	Mode      string `json:"mode"`  // 执行模式 transform/raw（仅 replace_all 回填时还原）
 	SQL       string `json:"sql"`
 	CreatedAt int64  `json:"createdAt"` // Unix 毫秒
 }
@@ -194,7 +194,7 @@ type WebAccessInfo struct {
 // QueryKind/ObjectKind 用 kind 判别；具体字段见 QueryTab / ObjectTab。
 type WorkspaceTab struct {
 	ID    string `json:"id"`
-	Kind  string `json:"kind"` // "query" | "object"
+	Kind  string `json:"kind"`            // "query" | "object"
 	Seq   int    `json:"seq,omitempty"`   // 查询序号（query tab 专用）
 	Title string `json:"title,omitempty"` // 展示标题（query tab 重命名后）
 	DB    string `json:"db,omitempty"`    // 目标库名（空 = 连接默认库）
@@ -210,8 +210,8 @@ type WorkspaceTab struct {
 
 // WorkspaceState 某连接的工作区状态。
 type WorkspaceState struct {
-	Tabs    []WorkspaceTab `json:"tabs"`
-	ActiveID string        `json:"activeId"`
+	Tabs     []WorkspaceTab `json:"tabs"`
+	ActiveID string         `json:"activeId"`
 }
 
 // ---- AI 会话（对话历史，按连接持久化到 SQLite） ----
@@ -225,6 +225,7 @@ type AISessionRecord struct {
 	TabID     string `json:"tabId"`     // 所属 query tab（按 tab 隔离对话；空 = 不隔离）
 	DB        string `json:"db"`        // 目标库名
 	Dialect   string `json:"dialect"`   // 方言标签
+	Lang      string `json:"lang"`      // 会话语言（恢复时沿用，历史会话不回溯）
 	Messages  []any  `json:"messages"`  // 对话消息（schema.Message 序列化，含 system/user/assistant/tool）
 	Usage     any    `json:"usage"`     // 累计 token（llm.Usage）
 	CreatedAt int64  `json:"createdAt"` // Unix 毫秒

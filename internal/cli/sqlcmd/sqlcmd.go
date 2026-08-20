@@ -5,6 +5,7 @@ package sqlcmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -164,7 +165,7 @@ func run(_ *cobra.Command, opts *options, args []string) error {
 			sql = string(data)
 		}
 		if sql == "" {
-			return fmt.Errorf("请通过 -e / -f / 位置参数提供 SQL")
+			return errors.New(cliTextsFor(cliLang).noSQLProvided)
 		}
 		return executeOnce(connInfo, sql, opts)
 	}
@@ -191,7 +192,7 @@ func resolveConn(opts *options) (*engine.DBConnInfo, error) {
 	if info := opts.cf.toConn(); info != nil {
 		return info, nil
 	}
-	return nil, fmt.Errorf("请指定连接: -c <已保存连接> 或内联 --type/--host/--port/--un/--pw/--db")
+	return nil, errors.New(cliTextsFor(cliLang).needConn)
 }
 
 func executeOnce(info *engine.DBConnInfo, sql string, opts *options) error {
@@ -202,10 +203,10 @@ func executeOnce(info *engine.DBConnInfo, sql string, opts *options) error {
 
 	if isWrite {
 		if opts.asJSON && !opts.allowWrite {
-			return fmt.Errorf("JSON 模式下不允许写操作，请使用 --allow-write 确认")
+			return errors.New(cliTextsFor(cliLang).jsonNoWrite)
 		}
 		if opts.file != "" && !opts.allowWrite {
-			return fmt.Errorf("文件执行含写操作，请使用 --allow-write 确认")
+			return errors.New(cliTextsFor(cliLang).fileNoWrite)
 		}
 	}
 
@@ -353,7 +354,7 @@ func shouldAddLimit(sql string) bool {
 }
 
 func addLimit(sql string, n int) string {
-	return fmt.Sprintf("%s LIMIT %d", sql, n)
+	return sprintf("%s LIMIT %d", sql, n)
 }
 
 // ---- 危险函数检测 ----
@@ -362,24 +363,26 @@ var dangerousFuncs = []string{"SLEEP(", "BENCHMARK("}
 var forbiddenFuncs = []string{"LOAD_FILE(", "INTO OUTFILE", "INTO DUMPFILE"}
 
 func checkDangerous(sql string) (warnings []string, forbidden []string) {
+	txt := cliTextsFor(cliLang)
 	if stmt, err := cydb.ParseMySQL(sql); err == nil && stmt != nil {
 		return checkDangerousAST(stmt)
 	}
 	sqlUpper := strings.ToUpper(sql)
 	for _, f := range dangerousFuncs {
 		if strings.Contains(sqlUpper, f) {
-			warnings = append(warnings, fmt.Sprintf("检测到危险函数: %s", f))
+			warnings = append(warnings, sprintf(txt.dangerFunc, f))
 		}
 	}
 	for _, f := range forbiddenFuncs {
 		if strings.Contains(sqlUpper, f) {
-			forbidden = append(forbidden, fmt.Sprintf("检测到禁止函数: %s", f))
+			forbidden = append(forbidden, sprintf(txt.forbidFunc, f))
 		}
 	}
 	return
 }
 
 func checkDangerousAST(stmt cydb.SQLBuilder) (warnings []string, forbidden []string) {
+	txt := cliTextsFor(cliLang)
 	s := (*ss.SQLStmt)(stmt)
 	if s.SelectClause != nil {
 		for _, sel := range s.SelectClause.Items {
@@ -387,12 +390,12 @@ func checkDangerousAST(stmt cydb.SQLBuilder) (warnings []string, forbidden []str
 				visitFuncName(sel.Expr, func(name string) {
 					for _, f := range dangerousFuncs {
 						if strings.EqualFold(name, strings.TrimSuffix(f, "(")) {
-							warnings = append(warnings, fmt.Sprintf("检测到危险函数: %s", f))
+							warnings = append(warnings, sprintf(txt.dangerFunc, f))
 						}
 					}
 					for _, f := range forbiddenFuncs {
 						if strings.EqualFold(name, strings.TrimSuffix(f, "(")) {
-							forbidden = append(forbidden, fmt.Sprintf("检测到禁止函数: %s", f))
+							forbidden = append(forbidden, sprintf(txt.forbidFunc, f))
 						}
 					}
 				})

@@ -10,11 +10,14 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import TableIcon from "@/components/ui/table-icon"
 import CellEditor from "@/components/CellEditor"
+import DBErrorCard from "@/components/DBErrorCard"
 import * as api from "@/api"
 import { deleteTableRows, exportTableExcel, fetchTableData, fetchTableCellValue, generateSQL, getObjectDDL, insertTableRow, updateTableCell, type GenSQLPayload } from "@/api/sql"
 import GenSQLDialog from "@/components/GenSQLDialog"
 import { buildCellPayload, buildFilterPayload, buildRowPayload, type GenSQLContext } from "@/lib/sqlgen"
 import { useQueryStore } from "@/stores/queryStore"
+import { useTranslation } from "react-i18next"
+import { tKey } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { useGridColors } from "@/lib/theme"
 import { computeColWidths, computeColumnStat, copyCellValue, copyToClipboard, downloadText, FILTER_OP_LABEL, FILTER_OPS, fmtNum, isNullCell, renderCellText, rowsToCSV, rowToTSV, rowsToTSV } from "@/lib/table"
@@ -38,12 +41,12 @@ interface Props {
   onClearPersistFailed?: () => void
 }
 
-// 对象类型 → 图标/文案
+// 对象类型 → 图标/文案（label 存 i18n key，渲染处 tKey 翻译）
 const TYPE_META: Record<ObjectDDLType, { icon: typeof Table2; label: string; cls: string }> = {
-  table: { icon: Table2, label: "表", cls: "text-emerald-600" },
-  view: { icon: View, label: "视图", cls: "text-cyan-600" },
-  function: { icon: FunctionSquare, label: "函数", cls: "text-violet-600" },
-  procedure: { icon: FunctionSquare, label: "存储过程", cls: "text-orange-600" },
+  table: { icon: Table2, label: "objectTree.type.table", cls: "text-emerald-600" },
+  view: { icon: View, label: "objectTree.type.view", cls: "text-cyan-600" },
+  function: { icon: FunctionSquare, label: "objectTree.type.function", cls: "text-violet-600" },
+  procedure: { icon: FunctionSquare, label: "objectTree.type.procedure", cls: "text-orange-600" },
 }
 
 // 大字段类型（列表查询时省略，点击单元格按需加载）：mediumtext 及以上 + 二进制 + 大对象。
@@ -63,6 +66,7 @@ function isBigField(dataType: string): boolean {
 export default function TableBrowser({ connId, db, name, objType, subTab, page, viewLayout, onSubTabChange, onPageChange, onViewLayoutChange, running, persistFailed, onClearPersistFailed }: Props) {
   // 网格底色：随主题切换响应式重算（见 lib/theme.ts）
   const grid = useGridColors()
+  const { t } = useTranslation()
   const [columns, setColumns] = useState<string[]>([])
   const [rows, setRows] = useState<unknown[][]>([])
   // 页大小：从持久化布局恢复（默认 100）
@@ -406,7 +410,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
       if (colName === undefined || !row) return
       // 无主键无法安全 UPDATE
       if (pkColumns.length === 0) {
-        setSaveError("该表无主键，无法定位行进行更新")
+        setSaveError(t("tableBrowser.noPKUpdate"))
         return
       }
       // 构造主键值（按列顺序取该行的主键列值）。
@@ -416,7 +420,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
       for (const pk of pkColumns) {
         const idx = columns.findIndex((c) => c.toLowerCase() === pk.toLowerCase())
         if (idx < 0) {
-          setSaveError(`无法定位主键列「${pk}」的值，已取消更新`)
+          setSaveError(t("tableBrowser.noPKValue", { pk }))
           return
         }
         pkValues.push(row[idx])
@@ -441,7 +445,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
         setSaving(false)
       }
     },
-    [editing, columns, rows, pkColumns, connId, db, name, loadData],
+    [editing, columns, rows, pkColumns, connId, db, name, loadData, t],
   )
 
   // 就地编辑保存：与弹窗保存共用主键定位 + updateTableCell，但值类型转换更轻量。
@@ -454,7 +458,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
     const row = rows[inlineEdit.rowIndex]
     if (colName === undefined || !row) return
     if (pkColumns.length === 0) {
-      setSaveError("该表无主键，无法定位行进行更新")
+      setSaveError(t("tableBrowser.noPKUpdate"))
       setInlineEdit(null)
       return
     }
@@ -463,7 +467,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
     for (const pk of pkColumns) {
       const idx = columns.findIndex((c) => c.toLowerCase() === pk.toLowerCase())
       if (idx < 0) {
-        setSaveError(`无法定位主键列「${pk}」的值，已取消更新`)
+        setSaveError(t("tableBrowser.noPKValue", { pk }))
         setInlineEdit(null)
         return
       }
@@ -503,7 +507,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
       inlineSavingRef.current = false
       setInlineSaving(false)
     }
-  }, [inlineEdit, inlineValue, columns, rows, pkColumns, connId, db, name, colMetaMap, loadData])
+  }, [inlineEdit, inlineValue, columns, rows, pkColumns, connId, db, name, colMetaMap, loadData, t])
 
   // 就地编辑取消（Esc / 失焦）
   const cancelInlineEdit = useCallback(() => {
@@ -523,7 +527,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
       // 已有缓存：不再请求
       if (bigValueMap.has(key)) return
       if (pkColumns.length === 0) {
-        setBigError("该表无主键，无法定位行获取完整值")
+        setBigError(t("tableBrowser.noPKFull"))
         return
       }
       // 构造主键值（大小写不敏感匹配列索引）
@@ -531,7 +535,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
       for (const pk of pkColumns) {
         const idx = columns.findIndex((c) => c.toLowerCase() === pk.toLowerCase())
         if (idx < 0) {
-          setBigError(`无法定位主键列「${pk}」的值`)
+          setBigError(t("tableBrowser.noPKValueShort", { pk }))
           return
         }
         pkValues.push(row[idx])
@@ -551,7 +555,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
         setBigLoading(false)
       }
     },
-    [columns, rows, pkColumns, connId, db, name, bigValueMap],
+    [columns, rows, pkColumns, connId, db, name, bigValueMap, t],
   )
 
   // 构造某行的主键值数组（按 pkColumns 顺序，大小写不敏感匹配列索引）
@@ -584,7 +588,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
     async (keys: string[]) => {
       if (keys.length === 0) return
       if (pkColumns.length === 0) {
-        setSaveError("该表无主键，无法定位行进行删除")
+        setSaveError(t("tableBrowser.noPKDelete"))
         return
       }
       // key → 主键值数组（JSON 反序列化）
@@ -593,23 +597,28 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
         try {
           payloadRows.push(JSON.parse(k) as unknown[])
         } catch {
-          setSaveError("选中数据异常，已取消删除")
+          setSaveError(t("tableBrowser.dataInvalid"))
           return
         }
       }
       // 构造确认文案：带上库表名 + 每行主键定位，避免用户误删
       const pkDetail = payloadRows
         .map((vals) => {
-          const parts = pkColumns.map((pk, j) => `${pk} = ${vals[j] === null ? "NULL" : String(vals[j])}`).join("、")
-          return `主键 ${parts}`
+          const parts = pkColumns.map((pk, j) => `${pk} = ${vals[j] === null ? "NULL" : String(vals[j])}`).join(t("tableBrowser.pkSep"))
+          return t("tableBrowser.pkPrefix", { parts })
         })
         .slice(0, 5) // 最多展示前 5 行，避免过多撑爆弹窗
         .join("\n")
-      const more = keys.length > 5 ? `\n… 等共 ${keys.length} 行` : ""
+      const more = keys.length > 5 ? t("tableBrowser.moreRows", { n: keys.length }) : ""
       const ok = await confirm({
-        title: "删除行",
-        description: `目标表：${db ? `${db}.` : ""}${name}\n共 ${keys.length} 行\n\n${pkDetail}${more}\n\n此操作不可恢复，确认删除？`,
-        confirmText: "删除",
+        title: t("tableBrowser.deleteTitle"),
+        description: t("tableBrowser.deleteDesc", {
+          table: `${db ? `${db}.` : ""}${name}`,
+          n: keys.length,
+          detail: pkDetail,
+          more,
+        }),
+        confirmText: t("common.delete"),
         danger: true,
       })
       if (!ok) return
@@ -630,7 +639,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
         setDeleting(false)
       }
     },
-    [pkColumns, connId, db, name, loadData],
+    [pkColumns, connId, db, name, loadData, t],
   )
 
   // ---- 快速生成 SQL：组装参数（lib/sqlgen）→ 请求后端 → 打开预览弹窗 ----
@@ -677,22 +686,22 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
     if (!payload) return
     const label = { insert: "INSERT", update: "UPDATE", delete: "DELETE", selectByPk: "SELECT", selectByFilter: "SELECT", whereCell: "SELECT" }[kind]
     const n = rowIndexes.length > 1 ? rowIndexes.length : 1
-    void runGenSQL(payload, `生成 ${label} · ${name}${n > 1 ? `（${n} 行）` : ""}`)
-  }, [genSQLCtx, name, runGenSQL])
+    void runGenSQL(payload, n > 1 ? t("tableBrowser.genTitleRows", { label, name, n }) : t("tableBrowser.genTitle", { label, name }))
+  }, [genSQLCtx, name, runGenSQL, t])
 
   // 单元格条件生成：SELECT * WHERE 列 = 单元格值
   const handleGenCell = useCallback((rowIndex: number, colIndex: number) => {
     const payload = buildCellPayload(genSQLCtx, rowIndex, colIndex)
     if (!payload) return
-    void runGenSQL(payload, `生成 SELECT（WHERE ${payload.columns[0]}）· ${name}`)
-  }, [genSQLCtx, name, runGenSQL])
+    void runGenSQL(payload, t("tableBrowser.genSelectWhere", { col: payload.columns[0], name }))
+  }, [genSQLCtx, name, runGenSQL, t])
 
   // 过滤条件生成：按当前过滤 + 排序 SELECT
   const handleGenFilter = useCallback(() => {
     const payload = buildFilterPayload(genSQLCtx)
     if (!payload) return
-    void runGenSQL(payload, `生成 SELECT（当前过滤条件）· ${name}`)
-  }, [genSQLCtx, name, runGenSQL])
+    void runGenSQL(payload, t("tableBrowser.genSelectFilter", { name }))
+  }, [genSQLCtx, name, runGenSQL, t])
 
   // 弹窗动作：复制 / 发送到查询页（回填 SQL 到 query tab，库上下文一并还原）
   const closeGenSQL = useCallback(() => setGenPayload(null), [])
@@ -718,7 +727,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
       vals.push(raw)
     }
     if (cols.length === 0) {
-      setSaveError("请至少填写一个字段")
+      setSaveError(t("tableBrowser.needField"))
       return
     }
     setInsertingSaving(true)
@@ -1125,7 +1134,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
           <Icon className={cn("h-3.5 w-3.5", meta.cls)} />
         </span>
         <span className="min-w-0 truncate font-medium">{name}</span>
-        <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px] font-normal">{meta.label}</Badge>
+        <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px] font-normal">{tKey(meta.label)}</Badge>
         {db && <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px] font-normal">{db}</Badge>}
 
         <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -1140,7 +1149,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                   className="h-7 gap-1 px-2 text-xs"
                   onClick={() => { setInserting(true); setInsertValues({}); setSaveError("") }}
                 >
-                  <Plus className="h-3.5 w-3.5" /> 新增行
+                  <Plus className="h-3.5 w-3.5" /> {t("tableBrowser.addRow")}
                 </Button>
               )}
               {/* 删除选中：写入操作，选中行时常驻显示 */}
@@ -1153,7 +1162,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                   onClick={() => handleDeleteRows(Array.from(selectedRows))}
                 >
                   {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-                  删除 {selectedRows.size} 行
+                  {t("tableBrowser.deleteCount", { n: selectedRows.size })}
                 </Button>
               )}
               {/* 「更多」菜单：导出 / 重置视图 */}
@@ -1162,7 +1171,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                  title="更多操作"
+                  title={t("tableBrowser.moreOps")}
                   onClick={() => setMoreMenuOpen((v) => !v)}
                 >
                   <MoreHorizontal className="h-4 w-4" />
@@ -1175,7 +1184,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                       disabled={!hasViewState}
                       onClick={() => { resetView(); setMoreMenuOpen(false) }}
                     >
-                      <RotateCcw className="h-3.5 w-3.5" /> 重置视图
+                      <RotateCcw className="h-3.5 w-3.5" /> {t("tableBrowser.resetView")}
                     </button>
                     <button
                       type="button"
@@ -1192,7 +1201,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                         setMoreMenuOpen(false)
                       }}
                     >
-                      <Download className="h-3.5 w-3.5" /> 导出 CSV（当前页）
+                      <Download className="h-3.5 w-3.5" /> {t("tableBrowser.exportCSVPage")}
                     </button>
                     <button
                       type="button"
@@ -1215,7 +1224,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                         }
                       }}
                     >
-                      <FileSpreadsheet className="h-3.5 w-3.5" /> 导出 Excel（全表）
+                      <FileSpreadsheet className="h-3.5 w-3.5" /> {t("tableBrowser.exportExcelAll")}
                     </button>
                   </div>
                 )}
@@ -1234,7 +1243,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                 )}
                 onClick={() => onSubTabChange("data")}
               >
-                数据
+                {t("tableBrowser.dataTab")}
               </button>
               <button
                 type="button"
@@ -1244,7 +1253,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                 )}
                 onClick={() => onSubTabChange("struct")}
               >
-                结构
+                {t("tableBrowser.structTab")}
               </button>
             </>
           )}
@@ -1267,24 +1276,15 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
           {loadingData && !loadedOnce ? (
             // 首次加载：尚无旧数据可展示，显示居中 loading
             <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> 加载数据...
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> {t("tableBrowser.loadingData")}
             </div>
           ) : error ? (
-            // 错误条：数据视图居中展示，左侧图标 + 错误标题 + 详细信息 + 刷新按钮
+            // 错误条：数据视图居中展示，友好化错误卡（标题/原因/排查建议 + 折叠原始错误 + 刷新）
             <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-sm">
-              <div className="flex max-w-md items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-4">
-                <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-destructive">加载失败</div>
-                  <div className="mt-0.5 break-words text-foreground/80">{error}</div>
-                </div>
-              </div>
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void loadData()}>
-                <RefreshCw className="h-3.5 w-3.5" /> 刷新
-              </Button>
+              <DBErrorCard error={error} onRetry={() => void loadData()} retryLabel={t("common.refresh")} />
             </div>
           ) : columns.length === 0 ? (
-            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">无数据</div>
+            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">{t("tableBrowser.noData")}</div>
           ) : (
             <div className="relative flex min-h-0 flex-1 flex-col">
               {/* 刷新中：保留旧数据，顶部叠加细进度条，避免整表闪烁 */}
@@ -1298,10 +1298,10 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                 <div className="mb-1.5 flex shrink-0 items-center gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-xs text-destructive">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                   <span className="min-w-0 flex-1 break-words">
-                    列结构加载失败，编辑与大字段查看暂不可用：{structError}
+                    {t("tableBrowser.structFailed", { err: structError })}
                   </span>
                   <Button variant="outline" size="sm" className="h-6 shrink-0 gap-1 px-2 text-xs" onClick={() => void retryStruct()}>
-                    <RefreshCw className="h-3 w-3" /> 重试
+                    <RefreshCw className="h-3 w-3" /> {t("common.retry")}
                   </Button>
                 </div>
               )}
@@ -1309,11 +1309,11 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
               {filters.length > 0 && (
                 <div className="mb-1.5 flex shrink-0 flex-wrap items-center gap-1.5 rounded-md border border-primary/20 bg-primary/5 px-2 py-1.5">
                   <Filter className="h-3.5 w-3.5 shrink-0 text-primary" />
-                  <span className="text-xs font-medium text-primary">已应用 {filters.length} 个过滤条件</span>
+                  <span className="text-xs font-medium text-primary">{t("grid.filtersApplied", { n: filters.length })}</span>
                   {filters.map((f, i) => (
                     <span key={i} className="flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
                       <span className="font-medium">{f.column}</span>
-                      <span className="text-muted-foreground">{FILTER_OP_LABEL[f.op]}</span>
+                      <span className="text-muted-foreground">{tKey(FILTER_OP_LABEL[f.op])}</span>
                       {f.value !== undefined && f.value !== null && f.value !== "" && (
                         <span className="max-w-[120px] truncate">“{String(f.value)}”</span>
                       )}
@@ -1323,7 +1323,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                     </span>
                   ))}
                   <button type="button" className="ml-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" onClick={clearAllFilters}>
-                    清除全部
+                    {t("grid.clearAll")}
                   </button>
                 </div>
               )}
@@ -1355,7 +1355,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                                 "flex h-6 w-6 cursor-pointer items-center justify-center rounded hover:bg-muted-foreground/10",
                                 allSelected ? "text-primary" : "text-muted-foreground/60",
                               )}
-                              title={allSelected ? "取消全选" : "全选当前页"}
+                              title={allSelected ? t("tableBrowser.deselectAll") : t("tableBrowser.selectAllPage")}
                               onClick={toggleSelectAll}
                             >
                               {allSelected ? (
@@ -1375,7 +1375,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                                 "flex h-5 w-5 items-center justify-center rounded hover:bg-muted-foreground/10",
                                 (showColumnPanel || hiddenColumns.size > 0) ? "text-primary" : "text-muted-foreground/60",
                               )}
-                              title="显示/隐藏列"
+                              title={t("tableBrowser.toggleCols")}
                               onClick={(e) => {
                                 e.stopPropagation()
                                 setShowColumnPanel((v) => !v)
@@ -1389,9 +1389,9 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 <div className="mb-1 flex items-center justify-between px-1">
-                                  <span className="text-xs font-semibold text-foreground">显示列</span>
+                                  <span className="text-xs font-semibold text-foreground">{t("grid.showColumns")}</span>
                                   <button type="button" className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" onClick={() => setHiddenColumns(new Set())}>
-                                    全部显示
+                                    {t("grid.showAll")}
                                   </button>
                                 </div>
                                 {columns.map((col) => {
@@ -1441,13 +1441,13 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                               style={{ width: `${colWidths[i]}px`, ...(frozenLeft !== undefined ? { left: frozenLeft } : {}) }}
                               title={
                                 big
-                                  ? "大字段不支持排序"
+                                  ? t("tableBrowser.bigNoSort")
                                   : [
-                                      meta?.dataType ? `类型 ${meta.dataType}` : "",
-                                      isPK && "主键",
-                                      isUnique && "唯一约束",
-                                      isIndexed && "索引",
-                                      `点击排序：${c}（Shift+点击叠加多列排序）`,
+                                      meta?.dataType ? t("tableBrowser.colType", { type: meta.dataType }) : "",
+                                      isPK && t("tableBrowser.colPK"),
+                                      isUnique && t("tableBrowser.colUnique"),
+                                      isIndexed && t("tableBrowser.colIndex"),
+                                      t("grid.sortHint", { col: c }),
                                     ]
                                       .filter(Boolean)
                                       .join(" · ")
@@ -1467,7 +1467,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                                   "absolute right-0 top-0 z-10 h-full w-1 cursor-col-resize",
                                   resizingCol === c ? "bg-primary/40" : "bg-transparent hover:bg-primary/30",
                                 )}
-                                title="拖动调整列宽"
+                                title={t("tableBrowser.resizeCol")}
                                 onMouseDown={(e) => startResize(e, c, colWidths[i])}
                                 onDoubleClick={(e) => {
                                   // 双击手柄：重置该列为自适应宽度
@@ -1499,7 +1499,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                                     "flex h-4 w-4 shrink-0 items-center justify-center rounded hover:bg-primary/10",
                                     filtered ? "text-primary" : "text-muted-foreground/50 hover:text-muted-foreground",
                                   )}
-                                  title={filtered ? "已过滤，点击编辑" : "筛选此列"}
+                                  title={filtered ? t("grid.filteredEdit") : t("grid.filterColumn")}
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     openFilterPanel(c)
@@ -1527,14 +1527,14 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                                     </SelectTrigger>
                                     <SelectContent>
                                       {FILTER_OPS.map((f) => (
-                                        <SelectItem key={f.op} value={f.op}>{f.label}</SelectItem>
+                                        <SelectItem key={f.op} value={f.op}>{tKey(f.label)}</SelectItem>
                                       ))}
                                     </SelectContent>
                                   </Select>
                                   {FILTER_OPS.find((f) => f.op === filterDraft.op)?.needValue && (
                                     <Input
                                       className="mt-1.5 h-7 text-xs"
-                                      placeholder="输入过滤值"
+                                      placeholder={t("grid.filterValue")}
                                       value={filterDraft.value}
                                       autoFocus
                                       onChange={(e) => setFilterDraft((d) => ({ ...d, value: e.target.value }))}
@@ -1544,11 +1544,11 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                                   <div className="mt-2 flex justify-end gap-1">
                                     {filtered && (
                                       <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => clearColumnFilter(c)}>
-                                        清除
+                                        {t("grid.clear")}
                                       </Button>
                                     )}
                                     <Button size="sm" className="h-7 px-2 text-xs" onClick={() => applyFilter(c)}>
-                                      应用
+                                      {t("grid.apply")}
                                     </Button>
                                   </div>
                                 </div>
@@ -1560,51 +1560,51 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                             {!big && (
                               <>
                                 <ContextMenuItem onSelect={() => { setSortSpecs((p) => p.some((s) => s.column === c && s.order === "asc") ? p.filter((s) => s.column !== c) : [...p.filter((s) => s.column !== c), { column: c, order: "asc" }]); if (page !== 1) onPageChange(1) }}>
-                                  <ArrowUp className="mr-2 h-3.5 w-3.5" /> 升序排序
+                                  <ArrowUp className="mr-2 h-3.5 w-3.5" /> {t("grid.sortAsc")}
                                 </ContextMenuItem>
                                 <ContextMenuItem onSelect={() => { setSortSpecs((p) => p.some((s) => s.column === c && s.order === "desc") ? p.filter((s) => s.column !== c) : [...p.filter((s) => s.column !== c), { column: c, order: "desc" }]); if (page !== 1) onPageChange(1) }}>
-                                  <ArrowDown className="mr-2 h-3.5 w-3.5" /> 降序排序
+                                  <ArrowDown className="mr-2 h-3.5 w-3.5" /> {t("grid.sortDesc")}
                                 </ContextMenuItem>
                                 {sortSpec && (
                                   <ContextMenuItem onSelect={() => setSortSpecs((p) => p.filter((s) => s.column !== c))}>
-                                    <ChevronsUpDown className="mr-2 h-3.5 w-3.5" /> 取消排序
+                                    <ChevronsUpDown className="mr-2 h-3.5 w-3.5" /> {t("grid.sortCancel")}
                                   </ContextMenuItem>
                                 )}
                                 <ContextMenuSeparator />
                               </>
                             )}
                             <ContextMenuItem onSelect={() => openFilterPanel(c)}>
-                              <Filter className="mr-2 h-3.5 w-3.5" /> 筛选此列
+                              <Filter className="mr-2 h-3.5 w-3.5" /> {t("grid.filterColumn")}
                             </ContextMenuItem>
                             <ContextMenuItem onSelect={() => { setFilters((p) => p.filter((f) => f.column !== c).concat({ column: c, op: "isNull" })); if (page !== 1) onPageChange(1) }}>
-                              <Filter className="mr-2 h-3.5 w-3.5" /> 只看空值
+                              <Filter className="mr-2 h-3.5 w-3.5" /> {t("grid.onlyNull")}
                             </ContextMenuItem>
                             <ContextMenuItem onSelect={() => { setFilters((p) => p.filter((f) => f.column !== c).concat({ column: c, op: "isNotNull" })); if (page !== 1) onPageChange(1) }}>
-                              <Filter className="mr-2 h-3.5 w-3.5" /> 只看非空
+                              <Filter className="mr-2 h-3.5 w-3.5" /> {t("grid.onlyNotNull")}
                             </ContextMenuItem>
                             <ContextMenuItem onSelect={() => toggleColumn(c)}>
-                              <EyeOff className="mr-2 h-3.5 w-3.5" /> 隐藏此列
+                              <EyeOff className="mr-2 h-3.5 w-3.5" /> {t("grid.hideColumn")}
                             </ContextMenuItem>
                             <ContextMenuSeparator />
                             {/* 冻结列：固定到当前列（含左侧所有可见列）；右键当前边界列时显示「取消固定」（撤销自定义，恢复默认主键冻结） */}
                             {effectiveFrozenUntil === c ? (
                               <ContextMenuItem onSelect={clearFrozen}>
-                                <PinOff className="mr-2 h-3.5 w-3.5" /> 取消固定
+                                <PinOff className="mr-2 h-3.5 w-3.5" /> {t("grid.unpin")}
                               </ContextMenuItem>
                             ) : (
                               <>
                                 <ContextMenuItem onSelect={() => setFrozen(c)}>
-                                  <Pin className="mr-2 h-3.5 w-3.5" /> 固定到此列
+                                  <Pin className="mr-2 h-3.5 w-3.5" /> {t("grid.pinHere")}
                                 </ContextMenuItem>
                                 {effectiveFrozenUntil !== null && (
                                   <ContextMenuItem onSelect={clearFrozen}>
-                                    <PinOff className="mr-2 h-3.5 w-3.5" /> 取消固定
+                                    <PinOff className="mr-2 h-3.5 w-3.5" /> {t("grid.unpin")}
                                   </ContextMenuItem>
                                 )}
                               </>
                             )}
                             <ContextMenuItem onSelect={() => copyToClipboard(c)}>
-                              <Copy className="mr-2 h-3.5 w-3.5" /> 复制列名
+                              <Copy className="mr-2 h-3.5 w-3.5" /> {t("grid.copyColName")}
                             </ContextMenuItem>
                           </ContextMenuContent>
                         </ContextMenu>
@@ -1616,7 +1616,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                   {rows.length === 0 && (
                     <tr onContextMenu={(e) => e.stopPropagation()}>
                       <td colSpan={1 + visibleCols.length} className="px-2 py-8 text-center text-sm text-muted-foreground">
-                        {filters.length > 0 ? `无匹配数据（已应用 ${filters.length} 个过滤条件，可通过表头漏斗或上方清除）` : "无数据"}
+                        {filters.length > 0 ? t("tableBrowser.noMatchFilter", { n: filters.length }) : t("tableBrowser.noData")}
                       </td>
                     </tr>
                   )}
@@ -1631,7 +1631,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                               <td
                                 className="sticky left-0 z-10 cursor-pointer select-none px-2 py-1 frozen-col"
                                 style={{ backgroundColor: selected ? grid.selected : ri % 2 === 1 ? grid.zebra : grid.base }}
-                                title={selected ? "取消选中" : "选中该行"}
+                                title={selected ? t("tableBrowser.deselectRow") : t("tableBrowser.selectRow")}
                                 onClick={(e) => {
                                   e.stopPropagation()
                                   toggleRow(ri)
@@ -1689,7 +1689,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                                         ? grid.zebra
                                         : grid.base,
                                   }}
-                                  title={isBig ? "点击加载完整内容" : objType === "table" ? "双击就地编辑" : undefined}
+                                  title={isBig ? t("tableBrowser.clickLoad") : objType === "table" ? t("tableBrowser.dblEdit") : undefined}
                                   onMouseDown={() => {
                                     // 记录此刻是否有浮层打开：有则本次点击只关浮层，不聚焦单元格
                                     dismissingOverlayRef.current = moreMenuOpen || showColumnPanel || filterCol !== null
@@ -1763,7 +1763,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                                         <button
                                           type="button"
                                           className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/cell:opacity-100"
-                                          title="编辑（完整编辑器）"
+                                          title={t("tableBrowser.editFull")}
                                           onClick={(e) => {
                                             e.stopPropagation()
                                             setEditing({ rowIndex: ri, colIndex: ci })
@@ -1816,11 +1816,11 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                           >
                             {st.numeric ? (
                               <span className="tabular-nums">
-                                Σ {fmtNum(st.sum)} · avg {fmtNum(st.avg)}
-                                {st.nullCount > 0 ? ` · ${st.nullCount} 空` : ""}
+                                {t("grid.statsSum", { sum: fmtNum(st.sum), avg: fmtNum(st.avg) })}
+                                {st.nullCount > 0 ? ` · ${t("grid.nullCount", { n: st.nullCount })}` : ""}
                               </span>
                             ) : (
-                              <span className="tabular-nums">{st.nullCount > 0 ? `${st.nullCount} 空` : "—"}</span>
+                              <span className="tabular-nums">{st.nullCount > 0 ? t("grid.nullCount", { n: st.nullCount }) : "—"}</span>
                             )}
                           </td>
                         )
@@ -1866,20 +1866,20 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
               {/* 就绪/执行中状态指示 */}
               {running ? (
                 <span className="flex items-center gap-1 text-primary">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> 执行中…
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("tableBrowser.running")}
                 </span>
               ) : (
-                <span className="text-muted-foreground/70">就绪</span>
+                <span className="text-muted-foreground/70">{t("tableBrowser.ready")}</span>
               )}
               {/* 工作区保存失败（持久化错误；只有从 WorkspaceLayout 透传才显示） */}
               {persistFailed && (
                 <button
                   type="button"
                   className="flex items-center gap-1 text-destructive hover:underline"
-                  title="工作区保存失败，请检查连接后重试；点击关闭提示"
+                  title={t("tableBrowser.persistFailedTitle")}
                   onClick={onClearPersistFailed}
                 >
-                  <AlertTriangle className="h-3.5 w-3.5" /> 工作区保存失败
+                  <AlertTriangle className="h-3.5 w-3.5" /> {t("tableBrowser.persistFailed")}
                 </button>
               )}
               {/* 数据视图：总行数 / 当前加载时间 */}
@@ -1887,7 +1887,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                 <>
                   <span className="h-3 w-px shrink-0 bg-border" />
                   <span className="tabular-nums text-muted-foreground">
-                    {total >= 0 ? `共 ${total} 行` : "总行数未知"}
+                    {total >= 0 ? t("tableBrowser.totalRows", { n: total }) : t("tableBrowser.totalUnknown")}
                   </span>
                 </>
               )}
@@ -1923,7 +1923,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                   </Button>
 
                   <div className="ml-2 flex items-center gap-1">
-                    <span className="text-xs text-muted-foreground">跳至</span>
+                    <span className="text-xs text-muted-foreground">{t("grid.jumpTo")}</span>
                     <Input
                       className="h-7 w-14 px-1.5 text-center text-xs tabular-nums"
                       value={jumpInput}
@@ -1933,11 +1933,11 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                       onKeyDown={(e) => e.key === "Enter" && commitJump()}
                       onBlur={commitJump}
                     />
-                    <span className="text-xs text-muted-foreground">/ {pages > 0 ? pages : "-"} 页</span>
+                    <span className="text-xs text-muted-foreground">{t("grid.ofPages", { n: pages > 0 ? pages : "-" })}</span>
                   </div>
 
                   <div className="ml-2 flex items-center gap-1">
-                    <span className="text-xs text-muted-foreground">每页</span>
+                    <span className="text-xs text-muted-foreground">{t("tableBrowser.perPage")}</span>
                     <Select value={String(pageSize)} onValueChange={(v) => handlePageSizeChange(Number(v))}>
                       <SelectTrigger className="h-7 w-[64px] px-2 text-xs">
                         <SelectValue />
@@ -1955,10 +1955,10 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                     variant={showStats ? "secondary" : "ghost"}
                     size="sm"
                     className="ml-1 h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
-                    title="显示/隐藏当前页每列的统计（合计/平均值/空值数）"
+                    title={t("tableBrowser.statsTitle")}
                     onClick={() => setShowStats((v) => !v)}
                   >
-                    <BarChart3 className="h-3.5 w-3.5" /> 统计
+                    <BarChart3 className="h-3.5 w-3.5" /> {t("grid.stats")}
                   </Button>
                 </>
               ) : (
@@ -1976,12 +1976,12 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
             )}>
               <DialogHeader className="shrink-0 pr-8">
                 <DialogTitle className="flex items-center gap-2">
-                  <span className="flex-1">{editing?.readonly ? "查看单元格" : "编辑单元格"}</span>
+                  <span className="flex-1">{editing?.readonly ? t("tableBrowser.viewCell") : t("tableBrowser.editCell")}</span>
                   <Button
                     variant="ghost"
                     size="sm"
                     className="h-6 w-6 p-0"
-                    title={maximized ? "还原" : "最大化"}
+                    title={maximized ? t("tableBrowser.restore") : t("tableBrowser.maximize")}
                     onClick={() => setMaximized((m) => !m)}
                   >
                     {maximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
@@ -2005,7 +2005,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                     {/* 大字段懒加载中的 loading 占位（在 CellEditor 上方，避免与 readonly 渲染冲突） */}
                     {isBig && bigLoading && !bigValueMap.has(key) && (
                       <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
-                        <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> 加载完整内容...
+                        <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> {t("tableBrowser.loadingFull")}
                       </div>
                     )}
                     {/* 大字段加载错误 */}
@@ -2042,7 +2042,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
           <Dialog open={inserting} onOpenChange={(open) => { if (!open) setInserting(false) }}>
             <DialogContent className="max-w-[560px]">
               <DialogHeader>
-                <DialogTitle>新增行 · {name}</DialogTitle>
+                <DialogTitle>{t("tableBrowser.addRowTitle", { name })}</DialogTitle>
               </DialogHeader>
               <div className="scrollbar-thin max-h-[60vh] overflow-auto pr-1">
                 <div className="space-y-2">
@@ -2052,7 +2052,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                       return (
                         <div key={col} className="flex items-center gap-2 text-xs text-muted-foreground">
                           <span className="w-40 shrink-0 truncate font-medium text-foreground">{col}</span>
-                          <span className="text-muted-foreground">（自增，自动生成）</span>
+                          <span className="text-muted-foreground">{t("tableBrowser.autoInc")}</span>
                         </div>
                       )
                     }
@@ -2064,7 +2064,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                         </span>
                         <Input
                           className="h-8 flex-1 text-xs"
-                          placeholder={meta?.dataType ? `类型 ${meta.dataType}，可留空` : "可留空（NULL）"}
+                          placeholder={meta?.dataType ? t("tableBrowser.typePlaceholder", { type: meta.dataType }) : t("tableBrowser.nullPlaceholder")}
                           value={insertValues[col] ?? ""}
                           onChange={(e) => setInsertValues((v) => ({ ...v, [col]: e.target.value }))}
                         />
@@ -2075,10 +2075,10 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                 {saveError && <div className="mt-2 text-xs text-destructive">{saveError}</div>}
               </div>
               <div className="mt-2 flex justify-end gap-2">
-                <Button variant="ghost" size="sm" onClick={() => setInserting(false)}>取消</Button>
+                <Button variant="ghost" size="sm" onClick={() => setInserting(false)}>{t("common.cancel")}</Button>
                 <Button size="sm" disabled={insertingSaving} onClick={handleInsertRow}>
                   {insertingSaving ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Plus className="mr-1 h-3.5 w-3.5" />}
-                  插入
+                  {t("tableBrowser.insert")}
                 </Button>
               </div>
             </DialogContent>
@@ -2101,27 +2101,27 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
         <div className="scrollbar-thin min-h-0 flex-1 overflow-auto p-2">
           {loadingStruct ? (
             <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> 加载结构...
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> {t("tableBrowser.loadingStruct")}
             </div>
           ) : error ? (
-            // 结构视图错误条：内容居中，下方接刷新按钮（重试当前子视图加载）
+            // 结构视图错误条：友好化错误卡（标题/原因/排查建议 + 折叠原始错误 + 刷新）
             <div className="m-2 flex flex-col items-center justify-center gap-3 p-6 text-sm">
-              <div className="flex max-w-md items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-4">
-                <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-destructive">加载失败</div>
-                  <div className="mt-0.5 break-words text-foreground/80">{error}</div>
-                </div>
-              </div>
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void loadStruct()}>
-                <RefreshCw className="h-3.5 w-3.5" /> 刷新
-              </Button>
+              <DBErrorCard error={error} onRetry={() => void loadStruct()} retryLabel={t("common.refresh")} />
             </div>
           ) : (
             <table className="w-full border-separate border-spacing-0 text-[12px]">
               <thead>
                 <tr className="bg-muted text-left">
-                  {["列名", "类型", "可空", "主键", "唯一", "索引", "自增", "默认值"].map((h, i) => (
+                  {[
+                    t("tableBrowser.structHead.colName"),
+                    t("tableBrowser.structHead.type"),
+                    t("tableBrowser.structHead.nullable"),
+                    t("tableBrowser.structHead.primaryKey"),
+                    t("tableBrowser.structHead.unique"),
+                    t("tableBrowser.structHead.index"),
+                    t("tableBrowser.structHead.autoInc"),
+                    t("tableBrowser.structHead.default"),
+                  ].map((h, i) => (
                     <th key={i} className="sticky top-0 z-20 border-b border-r bg-muted px-2 py-1.5 font-medium text-muted-foreground">{h}</th>
                   ))}
                 </tr>
@@ -2131,7 +2131,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                   <tr key={i} className="border-b">
                     <td className={cn("border-r px-2 py-1 font-medium", i % 2 === 1 && "bg-muted/40")}>{col.name}</td>
                     <td className={cn("border-r px-2 py-1 text-muted-foreground", i % 2 === 1 && "bg-muted/40")}>{col.dataType}</td>
-                    <td className={cn("border-r px-2 py-1", i % 2 === 1 && "bg-muted/40")}>{col.nullable ? "是" : "否"}</td>
+                    <td className={cn("border-r px-2 py-1", i % 2 === 1 && "bg-muted/40")}>{col.nullable ? t("common.yes") : t("common.no")}</td>
                     <td className={cn("border-r px-2 py-1", i % 2 === 1 && "bg-muted/40")}>{col.primaryKey ? <TableIcon icon={KeyRound} className="text-amber-500" /> : ""}</td>
                     <td className={cn("border-r px-2 py-1", i % 2 === 1 && "bg-muted/40")}>{col.unique ? <TableIcon icon={ShieldCheck} className="text-blue-500" /> : ""}</td>
                     <td className={cn("border-r px-2 py-1", i % 2 === 1 && "bg-muted/40")}>{col.indexed ? <TableIcon icon={ListOrdered} className="text-muted-foreground/70" /> : ""}</td>
@@ -2148,26 +2148,17 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
         <div className="scrollbar-thin min-h-0 flex-1 overflow-auto p-2">
           {loadingDDL ? (
             <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> 加载建表语句...
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> {t("tableBrowser.loadingDDL")}
             </div>
           ) : error ? (
-            // DDL 视图错误条：居中展示 + 下方刷新按钮
+            // DDL 视图错误条：友好化错误卡（标题/原因/排查建议 + 折叠原始错误 + 刷新）
             <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-sm">
-              <div className="flex max-w-md items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-4">
-                <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-destructive">加载失败</div>
-                  <div className="mt-0.5 break-words text-foreground/80">{error}</div>
-                </div>
-              </div>
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void loadDDL()}>
-                <RefreshCw className="h-3.5 w-3.5" /> 刷新
-              </Button>
+              <DBErrorCard error={error} onRetry={() => void loadDDL()} retryLabel={t("common.refresh")} />
             </div>
           ) : ddl ? (
             <pre className="whitespace-pre-wrap break-words rounded-md bg-muted/40 p-3 font-mono text-[12px] leading-relaxed">{ddl}</pre>
           ) : (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">未获取到创建语句</div>
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{t("tableBrowser.noDDL")}</div>
           )}
         </div>
       )}
@@ -2195,6 +2186,7 @@ const TableBrowserRowMenu = forwardRef<RowMenuHandle, {
   onGenCell: (rowIndex: number, colIndex: number) => void
   onGenFilter: () => void
 }>(({ columns, rows, bigFieldCols, objType, selectedRows, rowKey, page, pageSize, pkColumns, onQuickFilter, onDeleteRows, onGenRow, onGenCell, onGenFilter }, ref) => {
+  const { t } = useTranslation()
   const [cell, setCell] = useState<{ rowIndex: number; colIndex: number | null } | null>(null)
   useImperativeHandle(ref, () => ({
     show: (c) => setCell(c),
@@ -2216,20 +2208,20 @@ const TableBrowserRowMenu = forwardRef<RowMenuHandle, {
               {colIndex !== null && columns[colIndex] !== undefined ? (
                 <>
                   <ContextMenuItem onSelect={() => copyToClipboard(copyCellValue(row[colIndex]))}>
-                    <Copy className="mr-2 h-3.5 w-3.5" /> 复制单元格值
+                    <Copy className="mr-2 h-3.5 w-3.5" /> {t("grid.copyCellValue")}
                   </ContextMenuItem>
                   <ContextMenuItem onSelect={() => copyToClipboard(rowToTSV(row))}>
-                    <Copy className="mr-2 h-3.5 w-3.5" /> 复制整行 (TSV)
+                    <Copy className="mr-2 h-3.5 w-3.5" /> {t("grid.copyRowTSV")}
                   </ContextMenuItem>
                   <ContextMenuItem onSelect={() => copyToClipboard(columns[colIndex])}>
-                    <Copy className="mr-2 h-3.5 w-3.5" /> 复制列名
+                    <Copy className="mr-2 h-3.5 w-3.5" /> {t("grid.copyColName")}
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                 </>
               ) : (
                 <>
                   <ContextMenuItem onSelect={() => copyToClipboard(rowToTSV(row))}>
-                    <Copy className="mr-2 h-3.5 w-3.5" /> 复制整行 (TSV)
+                    <Copy className="mr-2 h-3.5 w-3.5" /> {t("grid.copyRowTSV")}
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                 </>
@@ -2245,10 +2237,10 @@ const TableBrowserRowMenu = forwardRef<RowMenuHandle, {
                   return (
                     <>
                       <ContextMenuItem onSelect={() => onQuickFilter(col, cellVal, "isNotNull")}>
-                        <Filter className="mr-2 h-3.5 w-3.5" /> 筛选：非空
+                        <Filter className="mr-2 h-3.5 w-3.5" /> {t("tableBrowser.filterNotNull")}
                       </ContextMenuItem>
                       <ContextMenuItem onSelect={() => onQuickFilter(col, cellVal, "isNull")}>
-                        <Filter className="mr-2 h-3.5 w-3.5" /> 筛选：为空
+                        <Filter className="mr-2 h-3.5 w-3.5" /> {t("tableBrowser.filterNull")}
                       </ContextMenuItem>
                     </>
                   )
@@ -2256,13 +2248,13 @@ const TableBrowserRowMenu = forwardRef<RowMenuHandle, {
                 return (
                   <>
                     <ContextMenuItem onSelect={() => onQuickFilter(col, cellVal, "eq")}>
-                      <Filter className="mr-2 h-3.5 w-3.5" /> 等于此值：<span className="ml-1 max-w-[120px] truncate text-muted-foreground">{val}</span>
+                      <Filter className="mr-2 h-3.5 w-3.5" /> {t("grid.equalsValue")}<span className="ml-1 max-w-[120px] truncate text-muted-foreground">{val}</span>
                     </ContextMenuItem>
                     <ContextMenuItem onSelect={() => onQuickFilter(col, cellVal, "neq")}>
-                      <Filter className="mr-2 h-3.5 w-3.5" /> 不等于此值
+                      <Filter className="mr-2 h-3.5 w-3.5" /> {t("grid.notEqualsValue")}
                     </ContextMenuItem>
                     <ContextMenuItem onSelect={() => onQuickFilter(col, cellVal, "contains")}>
-                      <Filter className="mr-2 h-3.5 w-3.5" /> 包含此值
+                      <Filter className="mr-2 h-3.5 w-3.5" /> {t("grid.containsValue")}
                     </ContextMenuItem>
                   </>
                 )
@@ -2272,7 +2264,7 @@ const TableBrowserRowMenu = forwardRef<RowMenuHandle, {
                 <>
                   <ContextMenuSeparator />
                   <ContextMenuItem onSelect={() => onGenCell(ri, colIndex)}>
-                    <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 SELECT：WHERE 此值
+                    <Terminal className="mr-2 h-3.5 w-3.5" /> {t("tableBrowser.genSelectWhereCell")}
                   </ContextMenuItem>
                 </>
               )}
@@ -2288,14 +2280,14 @@ const TableBrowserRowMenu = forwardRef<RowMenuHandle, {
                         })
                         copyToClipboard(rowsToTSV(columns, selRows))
                       }}>
-                        <Copy className="mr-2 h-3.5 w-3.5" /> 复制选中的 {selectedRows.size} 行 (TSV)
+                        <Copy className="mr-2 h-3.5 w-3.5" /> {t("tableBrowser.copySelected", { n: selectedRows.size })}
                       </ContextMenuItem>
                       <ContextMenuSeparator />
                     </>
                   )}
                   {/* 生成 SQL：按当前过滤条件 + 排序（无过滤时生成全表 SELECT） */}
                   <ContextMenuItem onSelect={() => onGenFilter()}>
-                    <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 SELECT：当前过滤条件
+                    <Terminal className="mr-2 h-3.5 w-3.5" /> {t("tableBrowser.genSelectFilterMenu")}
                   </ContextMenuItem>
                   {objType === "table" && (
                     <>
@@ -2306,14 +2298,14 @@ const TableBrowserRowMenu = forwardRef<RowMenuHandle, {
                           const rk2 = rowKey(i)
                           return rk2 !== null && selectedRows.has(rk2)
                         }))}>
-                          <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 INSERT：选中 {selectedRows.size} 行
+                          <Terminal className="mr-2 h-3.5 w-3.5" /> {t("tableBrowser.genInsertSelected", { n: selectedRows.size })}
                         </ContextMenuItem>
                       )}
                       <ContextMenuItem onSelect={() => onGenRow("insert", [ri])}>
-                        <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 INSERT 语句
+                        <Terminal className="mr-2 h-3.5 w-3.5" /> {t("tableBrowser.genInsert")}
                       </ContextMenuItem>
                       <ContextMenuItem disabled={pkColumns.length === 0} onSelect={() => onGenRow("update", [ri])}>
-                        <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 UPDATE 语句
+                        <Terminal className="mr-2 h-3.5 w-3.5" /> {t("tableBrowser.genUpdate")}
                       </ContextMenuItem>
                       {/* 选中多行时 DELETE 批量生成（后端合并为 IN 条件），INSERT 同样支持批量 */}
                       {selected && selectedRows.size > 1 && (
@@ -2321,14 +2313,14 @@ const TableBrowserRowMenu = forwardRef<RowMenuHandle, {
                           const rk2 = rowKey(i)
                           return rk2 !== null && selectedRows.has(rk2)
                         }))}>
-                          <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 DELETE：选中 {selectedRows.size} 行
+                          <Terminal className="mr-2 h-3.5 w-3.5" /> {t("tableBrowser.genDeleteSelected", { n: selectedRows.size })}
                         </ContextMenuItem>
                       )}
                       <ContextMenuItem disabled={pkColumns.length === 0} onSelect={() => onGenRow("delete", [ri])}>
-                        <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 DELETE 语句
+                        <Terminal className="mr-2 h-3.5 w-3.5" /> {t("tableBrowser.genDelete")}
                       </ContextMenuItem>
                       <ContextMenuItem disabled={pkColumns.length === 0} onSelect={() => onGenRow("selectByPk", [ri])}>
-                        <Terminal className="mr-2 h-3.5 w-3.5" /> 生成 SELECT：按主键
+                        <Terminal className="mr-2 h-3.5 w-3.5" /> {t("tableBrowser.genSelectByPK")}
                       </ContextMenuItem>
                       <ContextMenuSeparator />
                       <ContextMenuItem
@@ -2337,8 +2329,8 @@ const TableBrowserRowMenu = forwardRef<RowMenuHandle, {
                       >
                         <Trash2 className="mr-2 h-3.5 w-3.5 text-destructive" />
                         {selected && selectedRows.size > 1
-                          ? `删除选中的 ${selectedRows.size} 行`
-                          : `删除第 ${(page - 1) * pageSize + ri + 1} 行`}
+                          ? t("tableBrowser.deleteSelected", { n: selectedRows.size })
+                          : t("tableBrowser.deleteRow", { n: (page - 1) * pageSize + ri + 1 })}
                       </ContextMenuItem>
                     </>
                   )}
@@ -2348,7 +2340,7 @@ const TableBrowserRowMenu = forwardRef<RowMenuHandle, {
           )
         })()
       ) : (
-        <ContextMenuItem disabled>未选中行</ContextMenuItem>
+        <ContextMenuItem disabled>{t("tableBrowser.noRowSelected")}</ContextMenuItem>
       )}
     </ContextMenuContent>
   )

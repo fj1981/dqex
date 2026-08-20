@@ -5,6 +5,7 @@ import type { SqlEditorInstance } from "@/components/SqlEditor"
 import { useAppStore } from "@/stores/app"
 import { useQueryStore } from "@/stores/queryStore"
 import { toast } from "sonner"
+import i18n from "@/lib/i18n"
 
 // 连接类型 → sql-formatter 方言模块名映射
 const DIALECT_MAP: Record<string, string> = {
@@ -44,7 +45,7 @@ export async function formatEditorSQL(ed: SqlEditorInstance): Promise<void> {
   const hasSelection = selection && !selection.isEmpty()
   const rawSQL = hasSelection ? model.getValueInRange(selection!) : model.getValue()
   if (!rawSQL.trim()) {
-    toast.info("编辑器中没有可格式化的 SQL")
+    toast.info(i18n.t("sqlFormat.noSQL"))
     return
   }
   try {
@@ -68,6 +69,6 @@ export async function formatEditorSQL(ed: SqlEditorInstance): Promise<void> {
       ed.setPosition(newPos)
     }
   } catch (e) {
-    toast.error(`SQL 格式化失败: ${(e as Error).message}`)
+    toast.error(i18n.t("sqlFormat.formatFailed", { msg: (e as Error).message }))
   }
 }

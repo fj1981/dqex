@@ -15,10 +15,68 @@ import (
 
 // 数据字典 Excel 常量
 const (
-	dictOverviewSheet = "总览"
-	dictMaxSheetRows  = 1048576 // Excel 单 sheet 行数上限
-	dictFontFamily    = "微软雅黑"
+	dictMaxSheetRows = 1048576 // Excel 单 sheet 行数上限
+	dictFontFamily   = "微软雅黑"
 )
+
+// dictTexts 数据字典产物文案（按语言索引，新增语言只加 map 条目）
+type dictTexts struct {
+	overview      string   // 总览 sheet 名
+	detailCols    []string // 明细列头（序号/列名/类型/可空/主键/自增/默认值/注释）
+	groupFailed   string   // 分组标题后缀：结构获取失败
+	groupColCount string   // 分组标题后缀：(%d 列)
+	metaFailed    string   // 失败占位行前缀：元数据获取失败
+	overviewTitle string   // 封面标题
+	overviewMeta  string   // 任务/来源/生成时间（含 %s 占位）
+	overviewTotal string   // 共 %d 个数据库，%d 张表
+	overviewCols  []string // 总览列头（库名/表名/表注释/列数）
+	yes           string   // 布尔“是”
+}
+
+// dictTextsMap 语言注册表：缺失语言回退 zh
+var dictTextsMap = map[string]dictTexts{
+	"zh": {
+		overview:      "总览",
+		detailCols:    []string{"序号", "列名", "数据类型", "可空", "主键", "自增", "默认值", "注释"},
+		groupFailed:   "(结构获取失败)",
+		groupColCount: "(%d 列)",
+		metaFailed:    "元数据获取失败",
+		overviewTitle: "数据字典",
+		overviewMeta:  "任务: %s　|　来源: %s　|　生成时间: %s",
+		overviewTotal: "共 %d 个数据库，%d 张表",
+		overviewCols:  []string{"库名", "表名", "表注释", "列数"},
+		yes:           "是",
+	},
+	"en": {
+		overview:      "Overview",
+		detailCols:    []string{"No.", "Column", "Data Type", "Nullable", "PK", "Auto Inc", "Default", "Comment"},
+		groupFailed:   "(structure fetch failed)",
+		groupColCount: "(%d columns)",
+		metaFailed:    "Failed to fetch metadata",
+		overviewTitle: "Data Dictionary",
+		overviewMeta:  "Task: %s | Source: %s | Generated: %s",
+		overviewTotal: "%d databases, %d tables in total",
+		overviewCols:  []string{"Database", "Table", "Comment", "Columns"},
+		yes:           "Yes",
+	},
+}
+
+// dictTextsFor 按语言代码取文案（zh/en 前缀归一，未知回退 zh）
+func dictTextsFor(lang string) dictTexts {
+	l := strings.ToLower(strings.TrimSpace(lang))
+	switch {
+	case strings.HasPrefix(l, "zh"):
+		l = "zh"
+	case strings.HasPrefix(l, "en"):
+		l = "en"
+	default:
+		l = "zh"
+	}
+	if t, ok := dictTextsMap[l]; ok {
+		return t
+	}
+	return dictTextsMap["zh"]
+}
 
 // dictTable 单表元数据（采集阶段产物）
 type dictTable struct {
@@ -45,7 +103,8 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 	if opts.Source == nil {
 		return nil, fmt.Errorf("未提供源数据库连接")
 	}
-	t := newTracker(cb)
+	txt := dictTextsFor(opts.Lang) // 产物文案语言（发起时确定，历史产物不回改）
+	t := newTracker(cb, opts.Lang)
 
 	outputDir := opts.OutputDir
 	if outputDir == "" {
@@ -101,7 +160,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 		}
 		tables := filterTables(all, opts.Tables, db)
 		if len(tables) == 0 {
-			t.log("库 %s 无选中的表，跳过", db)
+			t.log(engineTextsFor(t.lang).dictNoTables, db)
 			continue
 		}
 		sort.Strings(tables)
@@ -116,7 +175,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 		totalTables += len(p.tables)
 	}
 	t.p.TotalUnits = totalTables
-	t.log("开始生成数据字典: %d 个库, %d 张表", len(plan), totalTables)
+	t.log(engineTextsFor(t.lang).dictStart, len(plan), totalTables)
 
 	// 3. 逐库采集表/列元数据（单表失败仅占位不阻断，交付物优先完整性）
 	var infos []*dictDBInfo
@@ -138,11 +197,11 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 			ti, err := cli.GetTableInfo(tb)
 			if err != nil {
 				dt.failed = err.Error()
-				t.log("获取表 %s.%s 结构失败（将写入占位行）: %v", p.db, tb, err)
+				t.log(engineTextsFor(t.lang).dictStructFail, p.db, tb, err)
 			} else {
 				dt.comment = ti.GetComment()
 				dt.cols = ti.GetColumns()
-				t.log("%s.%s 元数据采集完成 (%d 列)", p.db, tb, len(dt.cols))
+				t.log(engineTextsFor(t.lang).dictCols, p.db, tb, len(dt.cols))
 			}
 			info.tables = append(info.tables, dt)
 			t.p.DoneUnits++
@@ -155,7 +214,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 	f := excelize.NewFile()
 	defer f.Close()
 	srcLabel := fmt.Sprintf("%s@%s:%d", opts.Source.Un, opts.Source.Host, opts.Source.Port)
-	if err := buildDictionaryWorkbook(f, infos, taskName, srcLabel, t); err != nil {
+	if err := buildDictionaryWorkbook(f, infos, taskName, srcLabel, txt, t); err != nil {
 		return nil, err
 	}
 
@@ -168,7 +227,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 	result := &ExportResult{OutputDir: baseDir, TotalTables: totalTables}
 	if opts.Compress {
 		zipPath := filepath.Join(outputDir, fmt.Sprintf("%s_%s.zip", taskName, ts))
-		t.log("打包 zip: %s", zipPath)
+		t.log(engineTextsFor(t.lang).zipPack, zipPath)
 		if err := zipDir(baseDir, zipPath); err != nil {
 			return nil, fmt.Errorf("打包 zip 失败: %w", err)
 		}
@@ -180,7 +239,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 
 	t.p.OutputPath = result.OutputPath
 	t.finish()
-	t.log("数据字典生成完成: %d 库 %d 表 → %s", len(infos), totalTables, result.OutputPath)
+	t.log(engineTextsFor(t.lang).dictDone, len(infos), totalTables, result.OutputPath)
 	return result, nil
 }
 
@@ -296,22 +355,19 @@ func newDictStyles(f *excelize.File) (*dictStyles, error) {
 	return st, nil
 }
 
-// dictDetailCols 明细 sheet 列头
-var dictDetailCols = []string{"序号", "列名", "数据类型", "可空", "主键", "自增", "默认值", "注释"}
-
 // buildDictionaryWorkbook 构建完整工作簿：明细 sheet（收集定义名称）→ 总览 sheet
-func buildDictionaryWorkbook(f *excelize.File, infos []*dictDBInfo, taskName, srcLabel string, t *tracker) error {
+func buildDictionaryWorkbook(f *excelize.File, infos []*dictDBInfo, taskName, srcLabel string, txt dictTexts, t *tracker) error {
 	st, err := newDictStyles(f)
 	if err != nil {
 		return fmt.Errorf("创建 Excel 样式失败: %w", err)
 	}
 
 	// 默认 Sheet1 重命名为总览（保持其为第一个 sheet），明细 sheet 依次追加
-	if err := f.SetSheetName("Sheet1", dictOverviewSheet); err != nil {
+	if err := f.SetSheetName("Sheet1", txt.overview); err != nil {
 		return err
 	}
 
-	usedSheets := map[string]bool{dictOverviewSheet: true}
+	usedSheets := map[string]bool{txt.overview: true}
 	usedNames := map[string]bool{}
 	// 表 → 定义名称（总览超链接跳转目标），key 为 库名\x00表名
 	definedNames := make(map[string]string)
@@ -321,7 +377,7 @@ func buildDictionaryWorkbook(f *excelize.File, infos []*dictDBInfo, taskName, sr
 		if _, err := f.NewSheet(sheet); err != nil {
 			return fmt.Errorf("创建工作表 %s 失败: %w", sheet, err)
 		}
-		names, err := writeDictDetailSheet(f, st, sheet, dbi, usedNames)
+		names, err := writeDictDetailSheet(f, st, sheet, dbi, usedNames, txt)
 		if err != nil {
 			return fmt.Errorf("生成库 %s 的明细工作表失败: %w", dbi.name, err)
 		}
@@ -330,7 +386,7 @@ func buildDictionaryWorkbook(f *excelize.File, infos []*dictDBInfo, taskName, sr
 		}
 	}
 
-	if err := writeDictOverviewSheet(f, st, infos, taskName, srcLabel, definedNames); err != nil {
+	if err := writeDictOverviewSheet(f, st, infos, taskName, srcLabel, definedNames, txt); err != nil {
 		return err
 	}
 
@@ -339,12 +395,12 @@ func buildDictionaryWorkbook(f *excelize.File, infos []*dictDBInfo, taskName, sr
 }
 
 // writeDictDetailSheet 写入单库字段明细 sheet，返回 表名 → 定义名称 映射
-func writeDictDetailSheet(f *excelize.File, st *dictStyles, sheet string, dbi *dictDBInfo, usedNames map[string]bool) (map[string]string, error) {
+func writeDictDetailSheet(f *excelize.File, st *dictStyles, sheet string, dbi *dictDBInfo, usedNames map[string]bool, txt dictTexts) (map[string]string, error) {
 	const cols = "H" // 明细列数固定 8 列（A~H）
 	names := make(map[string]string, len(dbi.tables))
 
 	// 首行全局列头（冻结 + 筛选依赖其固定在首行）
-	if err := f.SetSheetRow(sheet, "A1", &dictDetailCols); err != nil {
+	if err := f.SetSheetRow(sheet, "A1", &txt.detailCols); err != nil {
 		return nil, err
 	}
 	if err := f.SetCellStyle(sheet, "A1", cols+"1", st.header); err != nil {
@@ -375,9 +431,9 @@ func writeDictDetailSheet(f *excelize.File, st *dictStyles, sheet string, dbi *d
 			title += "　" + tb.comment
 		}
 		if tb.failed != "" {
-			title += "　(结构获取失败)"
+			title += "　" + txt.groupFailed
 		} else {
-			title += fmt.Sprintf("　(%d 列)", len(tb.cols))
+			title += "　" + fmt.Sprintf(txt.groupColCount, len(tb.cols))
 		}
 		groupCell := fmt.Sprintf("A%d", row)
 		if err := f.SetCellValue(sheet, groupCell, title); err != nil {
@@ -404,8 +460,8 @@ func writeDictDetailSheet(f *excelize.File, st *dictStyles, sheet string, dbi *d
 		// ---- 字段行（占位行：结构获取失败时标注原因）----
 		if tb.failed != "" {
 			row++
-			writeDictRow(f, sheet, row, st, 0, []any{"", "—", "元数据获取失败: " + tb.failed, "", "", "", "", ""})
-			track(2, "元数据获取失败: "+tb.failed)
+			writeDictRow(f, sheet, row, st, 0, []any{"", "—", txt.metaFailed + ": " + tb.failed, "", "", "", "", ""}, txt)
+			track(2, txt.metaFailed+": "+tb.failed)
 			continue
 		}
 		for i, col := range tb.cols {
@@ -419,12 +475,12 @@ func writeDictDetailSheet(f *excelize.File, st *dictStyles, sheet string, dbi *d
 				i + 1,
 				col.GetName(),
 				col.GetOrginalDataType(),
-				boolMark(!col.IsNotNull()),
-				boolMark(pk),
-				boolMark(col.IsAutoIncrement()),
+				boolMark(!col.IsNotNull(), txt),
+				boolMark(pk, txt),
+				boolMark(col.IsAutoIncrement(), txt),
 				defVal,
 				col.GetComment(),
-			})
+			}, txt)
 			track(1, col.GetName())
 			track(2, col.GetOrginalDataType())
 			track(6, defVal)
@@ -459,7 +515,7 @@ func writeDictDetailSheet(f *excelize.File, st *dictStyles, sheet string, dbi *d
 }
 
 // writeDictRow 写入一行字段明细并按列套用样式（斑马纹按表分区重置：idx 为表内行序）
-func writeDictRow(f *excelize.File, sheet string, row int, st *dictStyles, idx int, values []any) {
+func writeDictRow(f *excelize.File, sheet string, row int, st *dictStyles, idx int, values []any, txt dictTexts) {
 	zebra := idx%2 == 1
 	cell := func(col string) string { return fmt.Sprintf("%s%d", col, row) }
 	for i, v := range values {
@@ -477,7 +533,7 @@ func writeDictRow(f *excelize.File, sheet string, row int, st *dictStyles, idx i
 	pair("B", st.normal, st.zebra)
 	pair("C", st.normal, st.zebra)
 	pair("D", st.center, st.centerZebra)
-	if len(values) > 4 && values[4] == "是" {
+	if len(values) > 4 && values[4] == txt.yes {
 		_ = f.SetCellStyle(sheet, cell("E"), cell("E"), st.pk) // 主键高亮优先于斑马纹
 	} else {
 		pair("E", st.center, st.centerZebra)
@@ -488,8 +544,8 @@ func writeDictRow(f *excelize.File, sheet string, row int, st *dictStyles, idx i
 }
 
 // writeDictOverviewSheet 写入总览 sheet：封面标题区 + 全实例表清单（超链接跳转明细）
-func writeDictOverviewSheet(f *excelize.File, st *dictStyles, infos []*dictDBInfo, taskName, srcLabel string, definedNames map[string]string) error {
-	sheet := dictOverviewSheet
+func writeDictOverviewSheet(f *excelize.File, st *dictStyles, infos []*dictDBInfo, taskName, srcLabel string, definedNames map[string]string, txt dictTexts) error {
+	sheet := txt.overview
 	now := time.Now().Format("2006-01-02 15:04:05")
 
 	totalTables := 0
@@ -498,7 +554,7 @@ func writeDictOverviewSheet(f *excelize.File, st *dictStyles, infos []*dictDBInf
 	}
 
 	// 封面标题区（交付物首页）
-	_ = f.SetCellValue(sheet, "A1", "数据字典")
+	_ = f.SetCellValue(sheet, "A1", txt.overviewTitle)
 	if err := f.MergeCell(sheet, "A1", "D1"); err != nil {
 		return err
 	}
@@ -507,11 +563,11 @@ func writeDictOverviewSheet(f *excelize.File, st *dictStyles, infos []*dictDBInf
 	}
 	_ = f.SetRowHeight(sheet, 1, 36)
 
-	_ = f.SetCellValue(sheet, "A2", fmt.Sprintf("任务: %s　|　来源: %s　|　生成时间: %s", taskName, srcLabel, now))
+	_ = f.SetCellValue(sheet, "A2", fmt.Sprintf(txt.overviewMeta, taskName, srcLabel, now))
 	if err := f.MergeCell(sheet, "A2", "D2"); err != nil {
 		return err
 	}
-	_ = f.SetCellValue(sheet, "A3", fmt.Sprintf("共 %d 个数据库，%d 张表", len(infos), totalTables))
+	_ = f.SetCellValue(sheet, "A3", fmt.Sprintf(txt.overviewTotal, len(infos), totalTables))
 	if err := f.MergeCell(sheet, "A3", "D3"); err != nil {
 		return err
 	}
@@ -525,7 +581,7 @@ func writeDictOverviewSheet(f *excelize.File, st *dictStyles, infos []*dictDBInf
 
 	// 表清单列头（第 5 行）
 	const headerRow = 5
-	if err := f.SetSheetRow(sheet, fmt.Sprintf("A%d", headerRow), &[]any{"库名", "表名", "表注释", "列数"}); err != nil {
+	if err := f.SetSheetRow(sheet, fmt.Sprintf("A%d", headerRow), &txt.overviewCols); err != nil {
 		return err
 	}
 	if err := f.SetCellStyle(sheet, fmt.Sprintf("A%d", headerRow), fmt.Sprintf("D%d", headerRow), st.header); err != nil {
@@ -586,10 +642,10 @@ func writeDictOverviewSheet(f *excelize.File, st *dictStyles, infos []*dictDBInf
 	return f.AutoFilter(sheet, fmt.Sprintf("A%d:D%d", headerRow, row), []excelize.AutoFilterOptions{})
 }
 
-// boolMark 布尔列展示文案：真=是，假=—
-func boolMark(b bool) string {
+// boolMark 布尔列展示文案：真=是（按语言），假=—
+func boolMark(b bool, txt dictTexts) string {
 	if b {
-		return "是"
+		return txt.yes
 	}
 	return "—"
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Camera, Database, Info, Loader2, Sparkles, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -25,6 +26,7 @@ import {
 } from "@/components/ui/select"
 import * as api from "@/api"
 import { useAppStore } from "@/stores/app"
+import { tKey } from "@/lib/i18n"
 
 interface Props {
   open: boolean
@@ -34,11 +36,11 @@ interface Props {
 
 // 常用快照用途 — 一键带入名称与备注，便于复用
 const SCENE_PRESETS: { key: string; label: string; suffix: string }[] = [
-  { key: "pre-release", label: "上线前", suffix: "上线前" },
-  { key: "post-release", label: "上线后", suffix: "上线后" },
-  { key: "daily", label: "日常巡检", suffix: "日常巡检" },
-  { key: "incident", label: "问题排查", suffix: "问题排查" },
-  { key: "backup", label: "数据备份", suffix: "数据备份" },
+  { key: "pre-release", label: "createSnapshot.scenePreRelease", suffix: "createSnapshot.scenePreRelease" },
+  { key: "post-release", label: "createSnapshot.scenePostRelease", suffix: "createSnapshot.scenePostRelease" },
+  { key: "daily", label: "createSnapshot.sceneDaily", suffix: "createSnapshot.sceneDaily" },
+  { key: "incident", label: "createSnapshot.sceneIncident", suffix: "createSnapshot.sceneIncident" },
+  { key: "backup", label: "createSnapshot.sceneBackup", suffix: "createSnapshot.sceneBackup" },
 ]
 
 // 库名摘要：单库直接返回；多库用 `+` 连接，最多保留 N 个（避免过长）
@@ -79,6 +81,7 @@ function generateSnapshotName(opts: {
 
 // 新建快照对话框：选择连接 + 数据库 + 自动命名 + 可选采样
 export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: Props) {
+  const { t } = useTranslation()
   const { connections } = useAppStore()
   const [connId, setConnId] = useState("")
   const [selectedDBs, setSelectedDBs] = useState<string[]>([]) // 多选；空=使用连接默认库
@@ -122,7 +125,7 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
         setDatabases(res.databases.map((d) => d.name))
       })
       .catch((e) => {
-        if (!cancelled) toast.error(`加载数据库失败: ${(e as Error).message}`)
+        if (!cancelled) toast.error(t("createSnapshot.loadDBsFailed", { err: (e as Error).message }))
       })
       .finally(() => {
         if (!cancelled) setLoadingDBs(false)
@@ -130,7 +133,7 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
     return () => {
       cancelled = true
     }
-  }, [connId])
+  }, [connId, t])
 
   const selectedConn = useMemo(() => connections.find((c) => c.id === connId), [connections, connId])
   // 环境标签直接从连接属性读取（用户在录入连接时手动选择），未设置则兜底 prod
@@ -180,7 +183,7 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
     if (!preset) return
     // 仅当用户还没自定义过名称或描述时填充（防止覆盖）
     if (!nameDirty) regenerateName()
-    if (!description.trim()) setDescription(preset.suffix)
+    if (!description.trim()) setDescription(tKey(preset.suffix))
   }
 
   const doSubmit = async () => {
@@ -195,7 +198,7 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
         includeSamples,
         sampleLimit: includeSamples ? sampleRows : 0, // 未开启采样时显式传 0（走后端默认也行）
       })
-      toast.success("快照创建成功")
+      toast.success(t("createSnapshot.created"))
       onCreated(id)
       // 重置可复用输入（连接保留、库选择保留，便于连续创建）
       setNameDirty(false)
@@ -204,7 +207,7 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
       regenerateName(true)
       onOpenChange(false)
     } catch (e) {
-      toast.error(`创建失败: ${(e as Error).message}`)
+      toast.error(t("createSnapshot.createFailed", { err: (e as Error).message }))
     } finally {
       setSubmitting(false)
     }
@@ -216,7 +219,7 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
         <DialogHeader>
           <div className="flex items-center gap-2">
             <Camera className="h-4 w-4 text-primary" />
-            <DialogTitle>新建快照</DialogTitle>
+            <DialogTitle>{t("createSnapshot.title")}</DialogTitle>
             {selectedConn && (
               <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal uppercase">
                 {selectedConn.conn.Type}
@@ -224,7 +227,7 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
             )}
           </div>
           <DialogDescription>
-            冻结当前数据库结构与数据摘要，用于后续对比变化
+            {t("createSnapshot.desc")}
           </DialogDescription>
         </DialogHeader>
 
@@ -233,12 +236,12 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
           <div className="space-y-3 md:col-span-2">
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium">数据库连接</label>
+                <label className="text-sm font-medium">{t("createSnapshot.conn")}</label>
                 {selectedConn && (
                   <Badge
                     variant={env === "prod" ? "destructive" : env === "staging" ? "default" : "secondary"}
                     className="px-1.5 py-0 text-[10px] font-normal uppercase"
-                    title={`根据连接名/主机自动识别（${selectedConn?.conn.Host}:${selectedConn?.conn.Port}）`}
+                    title={t("createSnapshot.envHint", { host: selectedConn?.conn.Host, port: selectedConn?.conn.Port })}
                   >
                     {env}
                   </Badge>
@@ -246,11 +249,11 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
               </div>
               <Select value={connId} onValueChange={setConnId}>
                 <SelectTrigger className="h-9">
-                  <SelectValue placeholder="选择连接..." />
+                  <SelectValue placeholder={t("createSnapshot.connPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
                   {connections.length === 0 && (
-                    <div className="px-2 py-4 text-center text-sm text-muted-foreground">暂无连接</div>
+                    <div className="px-2 py-4 text-center text-sm text-muted-foreground">{t("createSnapshot.noConnections")}</div>
                   )}
                   {connections.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
@@ -268,8 +271,8 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
                 <p className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Info className="h-3 w-3" />
                   {selectedConn.conn.Host}:{selectedConn.conn.Port}
-                  {selectedConn.conn.DBName && ` · 默认 ${selectedConn.conn.DBName}`}
-                  {!selectedConn.conn.DBName && !selectedConn.conn.Service && " · 未指定默认库"}
+                  {selectedConn.conn.DBName && t("createSnapshot.defaultDB", { db: selectedConn.conn.DBName })}
+                  {!selectedConn.conn.DBName && !selectedConn.conn.Service && t("createSnapshot.noDefaultDB")}
                 </p>
               )}
             </div>
@@ -277,23 +280,23 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium">
-                  数据库<span className="ml-1 text-xs font-normal text-muted-foreground">（可多选）</span>
+                  {t("createSnapshot.databases")}<span className="ml-1 text-xs font-normal text-muted-foreground">{t("createSnapshot.multiSelect")}</span>
                 </label>
                 {databases.length > 1 && (
                   <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={toggleAllDBs}>
-                    {selectedDBs.length === databases.length ? "全不选" : "全选"}
+                    {selectedDBs.length === databases.length ? t("createSnapshot.selectNone") : t("createSnapshot.selectAll")}
                   </Button>
                 )}
               </div>
               <div className="scrollbar-thin max-h-52 space-y-0.5 overflow-y-auto rounded-md border p-1.5">
                 {loadingDBs && (
                   <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> 加载中...
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("common.loading")}
                   </div>
                 )}
                 {!loadingDBs && databases.length === 0 && (
                   <p className="px-1 py-3 text-sm text-muted-foreground">
-                    {connId ? "无可访问的库（将使用连接默认库）" : "请先选择连接"}
+                    {connId ? t("createSnapshot.noDBs") : t("createSnapshot.needConn")}
                   </p>
                 )}
                 {databases.map((d) => (
@@ -309,8 +312,8 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
               </div>
               <p className="text-xs text-muted-foreground">
                 {selectedDBs.length === 0
-                  ? "未选则使用连接默认库"
-                  : `已选 ${selectedDBs.length} 个：${selectedDBs.slice(0, 3).join(", ")}${selectedDBs.length > 3 ? "…" : ""}`}
+                  ? t("createSnapshot.useDefaultDB")
+                  : t("createSnapshot.selectedCount", { n: selectedDBs.length, names: selectedDBs.slice(0, 3).join(", ") + (selectedDBs.length > 3 ? "…" : "") })}
               </p>
             </div>
           </div>
@@ -320,7 +323,7 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium">
-                  快照名称 <span className="text-destructive">*</span>
+                  {t("createSnapshot.name")} <span className="text-destructive">*</span>
                 </label>
                 <Button
                   type="button"
@@ -331,9 +334,9 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
                     setNameDirty(false)
                     regenerateName(true)
                   }}
-                  title="按当前连接/库重新生成名称"
+                  title={t("createSnapshot.regenerateTitle")}
                 >
-                  <Sparkles className="mr-1 h-3 w-3" /> 重新生成
+                  <Sparkles className="mr-1 h-3 w-3" /> {t("createSnapshot.regenerate")}
                 </Button>
               </div>
               <div className="relative">
@@ -355,20 +358,20 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
                       regenerateName(true)
                     }}
                     className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                    aria-label="清空名称"
+                    aria-label={t("createSnapshot.clearName")}
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
                 )}
               </div>
               <p className="text-xs text-muted-foreground">
-                生成规则：<code className="rounded bg-muted px-1 py-0.5 text-[11px]">{'{env}-{库摘要}-YYYYMMDD-NN'}</code>
-                ，同日序号自增避免重名
+                {t("createSnapshot.genRulePre")}<code className="rounded bg-muted px-1 py-0.5 text-[11px]">{t("createSnapshot.genRuleCode")}</code>
+                {t("createSnapshot.genRuleSuffix")}
               </p>
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">备注说明<span className="ml-1 text-xs font-normal text-muted-foreground">（可选）</span></label>
+              <label className="text-sm font-medium">{t("createSnapshot.descLabel")}<span className="ml-1 text-xs font-normal text-muted-foreground">{t("createSnapshot.optional")}</span></label>
               <div className="flex flex-wrap gap-1.5">
                 {SCENE_PRESETS.map((p) => (
                   <Button
@@ -379,14 +382,14 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
                     className="h-7 px-2 text-xs"
                     onClick={() => onSelectScene(p.key)}
                   >
-                    {p.label}
+                    {tKey(p.label)}
                   </Button>
                 ))}
               </div>
               <Input
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="如 上线前基准快照"
+                placeholder={t("createSnapshot.descPlaceholder")}
                 className="text-sm"
               />
             </div>
@@ -399,21 +402,21 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex items-center gap-1.5 text-sm font-medium">
                     <Info className="h-3.5 w-3.5 text-muted-foreground" />
-                    保存前数据采样
+                    {t("createSnapshot.sampling")}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    每表采样前 <span className="font-mono">{sampleRows}</span> 行，便于预览内容；仅存快照文件，不影响源库
+                    {t("createSnapshot.samplingDescPre")}<span className="font-mono">{sampleRows}</span>{t("createSnapshot.samplingDescPost")}
                   </p>
                 </div>
                 <Switch
                   checked={includeSamples}
                   onCheckedChange={(v) => setIncludeSamples(v === true)}
-                  aria-label="是否采样数据"
+                  aria-label={t("createSnapshot.samplingAria")}
                 />
               </div>
               {includeSamples && (
                 <div className="mt-2 flex items-center gap-2 border-t pt-2">
-                  <label className="text-xs text-muted-foreground">采样行数</label>
+                  <label className="text-xs text-muted-foreground">{t("createSnapshot.sampleRows")}</label>
                   <Input
                     type="number"
                     min={1}
@@ -422,7 +425,7 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
                     onChange={(e) => setSampleRows(Math.max(1, Math.min(100, parseInt(e.target.value || "10", 10))))}
                     className="h-7 w-20 text-xs"
                   />
-                  <span className="text-xs text-muted-foreground">行 / 表（1-100）</span>
+                  <span className="text-xs text-muted-foreground">{t("createSnapshot.rowsPerTable")}</span>
                 </div>
               )}
             </Card>
@@ -431,7 +434,7 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
 
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
-            取消
+            {t("common.cancel")}
           </Button>
           <Button onClick={doSubmit} disabled={!canSubmit}>
             {submitting ? (
@@ -439,7 +442,7 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
             ) : (
               <Camera className="mr-1 h-4 w-4" />
             )}
-            {submitting ? "创建中..." : "创建快照"}
+            {submitting ? t("createSnapshot.creating") : t("createSnapshot.create")}
           </Button>
         </DialogFooter>
       </DialogContent>

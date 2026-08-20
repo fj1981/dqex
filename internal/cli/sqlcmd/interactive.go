@@ -13,6 +13,7 @@ import (
 )
 
 func runInteractive(info *engine.DBConnInfo) error {
+	txt := cliTextsFor(cliLang)
 	sess, err := newSession(info)
 	if err != nil {
 		return fmt.Errorf("连接数据库失败: %w", err)
@@ -42,9 +43,9 @@ func runInteractive(info *engine.DBConnInfo) error {
 
 	go sess.refreshMetadata()
 
-	fmt.Printf("dbx sql - 交互式 SQL 终端\n")
-	fmt.Printf("连接: %s @ %s:%d/%s\n", info.Type, info.Host, info.Port, info.DBName)
-	fmt.Printf("输入 \\h 查看帮助，\\q 退出\n\n")
+	printf("%s\n", txt.bannerTitle)
+	printf(txt.bannerConn+"\n", info.Type, info.Host, info.Port, info.DBName)
+	printf("%s\n\n", txt.bannerHint)
 
 	var buffer string
 	for {
@@ -65,7 +66,7 @@ func runInteractive(info *engine.DBConnInfo) error {
 				return nil
 			}
 			if err.Error() == "liner: internal error" {
-				fmt.Fprintf(os.Stderr, "\n%s\n", red("交互模式需要真实终端，请使用 -e 或 --json"))
+				fprintf(os.Stderr, "\n%s\n", red(cliTextsFor(cliLang).needTTY))
 				return fmt.Errorf("liner: %w", err)
 			}
 			fmt.Println()
@@ -125,6 +126,7 @@ func runInteractive(info *engine.DBConnInfo) error {
 }
 
 func (s *session) executeSQL(line *liner.State, sql string, useVertical bool) {
+	txt := cliTextsFor(cliLang)
 	// 无论成功失败，都先记录到历史和 lastSQL（带分号）
 	s.lastSQL = sql
 	line.AppendHistory(sql + ";")
@@ -133,19 +135,19 @@ func (s *session) executeSQL(line *liner.State, sql string, useVertical bool) {
 
 	warnings, forbidden := checkDangerous(sql)
 	if len(forbidden) > 0 {
-		fmt.Fprintf(os.Stderr, "%s\n", red(strings.Join(forbidden, "; ")))
+		fprintf(os.Stderr, "%s\n", red(strings.Join(forbidden, "; ")))
 		return
 	}
 	for _, w := range warnings {
-		fmt.Fprintf(os.Stderr, "%s\n", yellow(w))
+		fprintf(os.Stderr, "%s\n", yellow(w))
 	}
 
 	if isWrite {
-		fmt.Printf("确认执行写操作? [y/N] ")
+		fmt.Print(txt.confirmWrite)
 		var answer string
 		fmt.Scanln(&answer)
 		if strings.ToLower(strings.TrimSpace(answer)) != "y" {
-			fmt.Println(dim("已取消"))
+			fmt.Println(dim(txt.cancelled))
 			return
 		}
 	}
@@ -156,8 +158,8 @@ func (s *session) executeSQL(line *liner.State, sql string, useVertical bool) {
 
 	if err != nil {
 		s.lastErr = err.Error()
-		fmt.Fprintf(os.Stderr, "%s\n", red(fmt.Sprintf("错误: %v", err)))
-		fmt.Fprintln(os.Stderr, dim("提示: 输入 \\ai fix 可让 AI 根据该报错自动修复 SQL"))
+		fprintf(os.Stderr, "%s\n", red(sprintf(txt.errorPrefix, err)))
+		fmt.Fprintln(os.Stderr, dim(txt.aiFixHint))
 		return
 	}
 
@@ -165,11 +167,11 @@ func (s *session) executeSQL(line *liner.State, sql string, useVertical bool) {
 	if !isWrite && result.RowCount >= 1000 {
 		limitInfo := ""
 		if !hasLimitClause(sql) {
-			limitInfo = "（已自动追加 LIMIT " + fmt.Sprintf("%d", defaultMaxRows) + "）"
+			limitInfo = sprintf(txt.autoLimit, defaultMaxRows)
 		}
-		fmt.Fprintf(os.Stderr, "%s\n", yellow(fmt.Sprintf("⚠ 已返回 %d 行%s", result.RowCount, limitInfo)))
+		fprintf(os.Stderr, "%s\n", yellow(sprintf(txt.rowsReturned, result.RowCount, limitInfo)))
 		if result.RowCount >= 10000 {
-			fmt.Fprintln(os.Stderr, dim("提示：使用 LIMIT n 指定返回行数，或加 WHERE 条件缩小范围"))
+			fmt.Fprintln(os.Stderr, dim(txt.rowsTip))
 		}
 	}
 
@@ -189,9 +191,9 @@ func (s *session) promptString() string {
 	if len(dbType) > 6 {
 		dbType = dbType[:6]
 	}
-	addr := fmt.Sprintf("%s:%d/%s", s.connInfo.Host, s.connInfo.Port, s.currentDB)
+	addr := sprintf("%s:%d/%s", s.connInfo.Host, s.connInfo.Port, s.currentDB)
 	// liner 不支持 ANSI 颜色，用纯文本提示符避免光标错位
-	return fmt.Sprintf("dbx (%s @ %s) > ", dbType, addr)
+	return sprintf("dbx (%s @ %s) > ", dbType, addr)
 }
 
 func (s *session) refreshMetadata() {

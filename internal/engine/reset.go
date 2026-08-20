@@ -38,7 +38,7 @@ func backupTable(cli *cydb.DBCli, table string, t *tracker) error {
 	if _, err := cli.DirectExecute(sql); err != nil {
 		return fmt.Errorf("创建备份表失败: %w", err)
 	}
-	t.log("已创建备份表 %s", bak)
+	t.log(engineTextsFor(t.lang).rstBackup, bak)
 	return nil
 }
 
@@ -71,23 +71,16 @@ func resetTable(cli *cydb.DBCli, table string, mode ResetMode, backup bool, t *t
 		if _, err := cli.DirectExecute(fmt.Sprintf("TRUNCATE TABLE %s", escaped)); err != nil {
 			return backup, fmt.Errorf("清空表 %s 失败: %w", table, err)
 		}
-		t.log("已清空表 %s", table)
+		t.log(engineTextsFor(t.lang).rstTrunc, table)
 	case ResetDrop:
 		if err := dropTableIfExists(cli, table); err != nil {
 			return backup, fmt.Errorf("删除表 %s 失败: %w", table, err)
 		}
-		t.log("已删除表 %s（等待重建）", table)
+		t.log(engineTextsFor(t.lang).rstDrop, table)
 	}
 	return backup, nil
 }
 
-func resetDesc(mode ResetMode) string {
-	switch mode {
-	case ResetTruncate:
-		return "清空表"
-	case ResetDrop:
-		return "删除重建"
-	default:
-		return "不重置"
-	}
+func resetDesc(mode ResetMode, lang string) string {
+	return engineTextsFor(lang).resetDesc[mode]
 }

@@ -1,9 +1,11 @@
+import { useTranslation } from "react-i18next"
 import { AlertTriangle } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { RESET_MODE_LABEL, type ResetMode } from "@/types"
+import { tKey } from "@/lib/i18n"
 
 interface Props {
   resetMode: ResetMode
@@ -14,11 +16,12 @@ interface Props {
 
 // 重置数据选项（导入/迁移共用）
 export default function ResetOptions({ resetMode, backup, onResetModeChange, onBackupChange }: Props) {
+  const { t } = useTranslation()
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="text-sm font-medium">重置数据</h3>
-        <p className="mt-1 text-xs text-muted-foreground">导入前对目标表的处理策略，默认直接追加</p>
+        <h3 className="text-sm font-medium">{t("resetOptions.title")}</h3>
+        <p className="mt-1 text-xs text-muted-foreground">{t("resetOptions.desc")}</p>
       </div>
       <RadioGroup
         value={resetMode === "" ? "none" : resetMode}
@@ -28,7 +31,7 @@ export default function ResetOptions({ resetMode, backup, onResetModeChange, onB
           <div key={m || "none"} className="flex items-center space-x-2">
             <RadioGroupItem value={m || "none"} id={`reset-${m || "none"}`} />
             <Label htmlFor={`reset-${m || "none"}`} className="font-normal">
-              {RESET_MODE_LABEL[m]}
+              {tKey(RESET_MODE_LABEL[m])}
             </Label>
           </div>
         ))}
@@ -38,14 +41,14 @@ export default function ResetOptions({ resetMode, backup, onResetModeChange, onB
         <>
           <label className="flex items-center space-x-2 pt-1">
             <Checkbox checked={backup} onCheckedChange={(v) => onBackupChange(v === true)} />
-            <span className="text-sm">重置前自动创建备份表（导入成功后自动清理）</span>
+            <span className="text-sm">{t("resetOptions.backup")}</span>
           </label>
           <Alert>
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription>
               {resetMode === "truncate"
-                ? "“清空表”将删除目标库中相关表的所有现有数据，保留表结构。"
-                : "“删除重建”将删除目标库中现有表并重新创建表结构。"}
+                ? t("resetOptions.truncateWarn")
+                : t("resetOptions.dropWarn")}
             </AlertDescription>
           </Alert>
         </>
