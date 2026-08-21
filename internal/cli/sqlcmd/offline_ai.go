@@ -10,18 +10,18 @@ import (
 
 // SQLTemplate 预定义SQL模板
 type SQLTemplate struct {
-	ID          string   // 模板ID (如 "top_n", "recent_days")
-	Name        string   // 模板名称 (中文/英文)
-	Description string   // 模板描述
-	Pattern     string   // SQL模式 (含占位符 {table}, {column}, {n}, {days})
-	Example     string   // 使用示例
-	Category    string   // 分类: query/aggregation/filter/join
+	ID          string // 模板ID (如 "top_n", "recent_days")
+	Name        string // 模板名称 (中文/英文)
+	Description string // 模板描述
+	Pattern     string // SQL模式 (含占位符 {table}, {column}, {n}, {days})
+	Example     string // 使用示例
+	Category    string // 分类: query/aggregation/filter/join
 }
 
 // OfflineAssistant 离线SQL助手
 type OfflineAssistant struct {
-	templates map[string]SQLTemplate
-	tableCache []string  // 当前库的表列表
+	templates  map[string]SQLTemplate
+	tableCache []string // 当前库的表列表
 }
 
 // NewOfflineAssistant 创建离线助手实例
@@ -51,7 +51,7 @@ func buildTemplateLibrary() map[string]SQLTemplate {
 			Example:     "\\template select_columns \"id,name,email\" users 100",
 			Category:    "query",
 		},
-		
+
 		// ===== 聚合统计类 =====
 		"count_rows": {
 			ID:          "count_rows",
@@ -101,7 +101,7 @@ func buildTemplateLibrary() map[string]SQLTemplate {
 			Example:     "\\template sum_value amount orders",
 			Category:    "aggregation",
 		},
-		
+
 		// ===== 时间范围类 =====
 		"recent_days": {
 			ID:          "recent_days",
@@ -127,7 +127,7 @@ func buildTemplateLibrary() map[string]SQLTemplate {
 			Example:     "\\template date_range orders created_at 2024-01-01 2024-12-31",
 			Category:    "filter",
 		},
-		
+
 		// ===== 条件过滤类 =====
 		"where_equal": {
 			ID:          "where_equal",
@@ -161,7 +161,7 @@ func buildTemplateLibrary() map[string]SQLTemplate {
 			Example:     "\\template where_between products price 10 100",
 			Category:    "filter",
 		},
-		
+
 		// ===== JOIN 关联查询类 =====
 		"join_two_tables": {
 			ID:          "join_two_tables",
@@ -179,7 +179,7 @@ func buildTemplateLibrary() map[string]SQLTemplate {
 			Example:     "\\template left_join users orders user_id user_id 100",
 			Category:    "join",
 		},
-		
+
 		// ===== 数据质量检查类 =====
 		"check_null": {
 			ID:          "check_null",
@@ -197,7 +197,7 @@ func buildTemplateLibrary() map[string]SQLTemplate {
 			Example:     "\\template check_duplicate users email",
 			Category:    "aggregation",
 		},
-		
+
 		// ===== 性能优化类 =====
 		"explain_query": {
 			ID:          "explain_query",
@@ -224,9 +224,9 @@ func (oa *OfflineAssistant) ApplyTemplate(templateID string, args []string) (str
 	if !ok {
 		return "", fmt.Errorf("模板 '%s' 不存在，使用 \\templates 查看所有可用模板", templateID)
 	}
-	
+
 	sql := tmpl.Pattern
-	
+
 	// 根据模板类型解析参数
 	switch templateID {
 	case "select_all", "count_rows", "this_month":
@@ -240,7 +240,7 @@ func (oa *OfflineAssistant) ApplyTemplate(templateID string, args []string) (str
 		} else {
 			sql = strings.ReplaceAll(sql, "{n}", "100")
 		}
-		
+
 	case "top_n", "bottom_n", "group_by_count":
 		// 需要表名 + 列名
 		if len(args) < 2 {
@@ -253,7 +253,7 @@ func (oa *OfflineAssistant) ApplyTemplate(templateID string, args []string) (str
 		} else {
 			sql = strings.ReplaceAll(sql, "{n}", "10")
 		}
-		
+
 	case "recent_days":
 		// 需要表名 + 日期列 + 天数
 		if len(args) < 2 {
@@ -266,7 +266,7 @@ func (oa *OfflineAssistant) ApplyTemplate(templateID string, args []string) (str
 		} else {
 			sql = strings.ReplaceAll(sql, "{days}", "30")
 		}
-		
+
 	case "where_equal", "where_like":
 		// 需要表名 + 列名 + 值
 		if len(args) < 3 {
@@ -280,7 +280,7 @@ func (oa *OfflineAssistant) ApplyTemplate(templateID string, args []string) (str
 		} else {
 			sql = strings.ReplaceAll(sql, "{n}", "100")
 		}
-		
+
 	default:
 		// 通用替换逻辑
 		for i, arg := range args {
@@ -288,7 +288,7 @@ func (oa *OfflineAssistant) ApplyTemplate(templateID string, args []string) (str
 			sql = strings.ReplaceAll(sql, placeholder, arg)
 		}
 	}
-	
+
 	return sql, nil
 }
 
@@ -307,26 +307,26 @@ func (oa *OfflineAssistant) ListTemplates(category string) []SQLTemplate {
 func (oa *OfflineAssistant) SuggestTemplate(input string) []SQLTemplate {
 	input = strings.ToLower(strings.TrimSpace(input))
 	var suggestions []SQLTemplate
-	
+
 	// 关键词匹配
 	keywords := map[string][]string{
-		"top":        {"top_n"},
-		"最近":       {"recent_days", "this_month"},
-		"recent":     {"recent_days", "this_month"},
-		"统计":       {"count_rows", "group_by_count", "avg_value", "sum_value"},
-		"count":      {"count_rows", "group_by_count"},
-		"平均":       {"avg_value"},
-		"avg":        {"avg_value"},
-		"重复":       {"check_duplicate"},
-		"duplicate":  {"check_duplicate"},
-		"空值":       {"check_null"},
-		"null":       {"check_null"},
-		"索引":       {"suggest_index", "explain_query"},
-		"index":      {"suggest_index", "explain_query"},
-		"join":       {"join_two_tables", "left_join"},
-		"关联":       {"join_two_tables", "left_join"},
+		"top":       {"top_n"},
+		"最近":        {"recent_days", "this_month"},
+		"recent":    {"recent_days", "this_month"},
+		"统计":        {"count_rows", "group_by_count", "avg_value", "sum_value"},
+		"count":     {"count_rows", "group_by_count"},
+		"平均":        {"avg_value"},
+		"avg":       {"avg_value"},
+		"重复":        {"check_duplicate"},
+		"duplicate": {"check_duplicate"},
+		"空值":        {"check_null"},
+		"null":      {"check_null"},
+		"索引":        {"suggest_index", "explain_query"},
+		"index":     {"suggest_index", "explain_query"},
+		"join":      {"join_two_tables", "left_join"},
+		"关联":        {"join_two_tables", "left_join"},
 	}
-	
+
 	for keyword, templateIDs := range keywords {
 		if strings.Contains(input, keyword) {
 			for _, id := range templateIDs {
@@ -336,7 +336,7 @@ func (oa *OfflineAssistant) SuggestTemplate(input string) []SQLTemplate {
 			}
 		}
 	}
-	
+
 	// 如果没有匹配，返回最常用的5个模板
 	if len(suggestions) == 0 {
 		popularIDs := []string{"select_all", "count_rows", "top_n", "recent_days", "where_equal"}
@@ -346,6 +346,6 @@ func (oa *OfflineAssistant) SuggestTemplate(input string) []SQLTemplate {
 			}
 		}
 	}
-	
+
 	return suggestions
 }

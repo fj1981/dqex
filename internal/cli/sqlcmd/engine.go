@@ -24,9 +24,9 @@ type session struct {
 
 	tableCache  []string
 	lastSQL     string
-	lastErr     string   // 最近一次执行报错（供 \ai fix 自动携带）
-	displayMode string   // 结果展示模式："" / "auto"=超宽自动降级；"table"=强制表格；"vertical"=强制垂直
-	ai          *aiState // AI 会话状态（懒加载；切换数据库时重置）
+	lastErr     string            // 最近一次执行报错（供 \ai fix 自动携带）
+	displayMode string            // 结果展示模式："" / "auto"=超宽自动降级；"table"=强制表格；"vertical"=强制垂直
+	ai          *aiState          // AI 会话状态（懒加载；切换数据库时重置）
 	offlineAI   *OfflineAssistant // 离线SQL智能辅助（规则引擎+模板库）
 }
 
@@ -280,21 +280,21 @@ func (s *session) applyTemplate(args []string) {
 		fmt.Fprintln(os.Stderr, dim("使用 \\templates 查看所有可用模板"))
 		return
 	}
-	
+
 	templateID := args[0]
 	params := args[1:]
-	
+
 	sql, err := s.offlineAI.ApplyTemplate(templateID, params)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, red(err.Error()))
 		return
 	}
-	
+
 	// 显示生成的SQL
 	fmt.Println(green("✓ 生成的SQL:"))
 	fmt.Println(bold(sql))
 	fmt.Println(dim("提示: 使用 \\g 执行，或 \\e 编辑后执行"))
-	
+
 	// 自动加载到缓冲区
 	s.lastSQL = sql
 }
@@ -305,22 +305,22 @@ func (s *session) listTemplates(args []string) {
 	if len(args) > 0 {
 		category = args[0]
 	}
-	
+
 	templates := s.offlineAI.ListTemplates(category)
 	if len(templates) == 0 {
 		fmt.Println(yellow("未找到匹配的模板"))
 		return
 	}
-	
+
 	// 按分类分组显示
 	categories := make(map[string][]SQLTemplate)
 	for _, tmpl := range templates {
 		categories[tmpl.Category] = append(categories[tmpl.Category], tmpl)
 	}
-	
+
 	fmt.Println(bold("📚 可用SQL模板:"))
 	fmt.Println()
-	
+
 	// 定义分类名称映射
 	categoryNames := map[string]string{
 		"query":       "🔍 基础查询",
@@ -328,7 +328,7 @@ func (s *session) listTemplates(args []string) {
 		"filter":      "🎯 条件过滤",
 		"join":        "🔗 关联查询",
 	}
-	
+
 	// 按固定顺序显示分类
 	catOrder := []string{"query", "aggregation", "filter", "join"}
 	for _, cat := range catOrder {
@@ -336,12 +336,12 @@ func (s *session) listTemplates(args []string) {
 		if !ok {
 			continue
 		}
-		
+
 		catName := categoryNames[cat]
 		if catName == "" {
 			catName = cat
 		}
-		
+
 		fmt.Printf("%s:\n", bold(catName))
 		for _, tmpl := range tmpls {
 			fmt.Printf("  %-20s %s\n", cyan(tmpl.ID), tmpl.Description)
@@ -349,7 +349,7 @@ func (s *session) listTemplates(args []string) {
 		}
 		fmt.Println()
 	}
-	
+
 	fmt.Println(dim("使用方法: \\template <模板ID> [参数...]"))
 	fmt.Println(dim("例如:   \\template top_n amount orders 10"))
 }
