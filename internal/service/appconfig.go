@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
+	"github.com/fj1981/infrakit/pkg/cygin"
 )
 
 // DefaultConfigName 全局配置文件默认名（位于默认数据目录 ~/.dqex/ 下）

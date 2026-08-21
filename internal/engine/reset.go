@@ -3,7 +3,7 @@ package engine
 import (
 	"fmt"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
+	"github.com/fj1981/infrakit/pkg/cydb"
 )
 
 // backupTableName 生成备份表名

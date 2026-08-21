@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/xuri/excelize/v2"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
+	"github.com/fj1981/infrakit/pkg/cydb/def"
 )
 
 // 数据字典 Excel 常量

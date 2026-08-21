@@ -95,7 +95,7 @@ make install           # → /usr/local/bin
 
 ## 技术栈
 
-- 后端：Go + [pk-infrakit-g](https://gitlab.mycyclone.com/rpa-platform/pk-infrakit-g)（数据库方言适配）
+- 后端：Go + [infrakit](https://github.com/fj1981/infrakit)（数据库方言适配）
 - 前端：React + TypeScript + Vite + Tailwind CSS + shadcn/ui
 - Excel：excelize（纯 Go，无 CGO）
 

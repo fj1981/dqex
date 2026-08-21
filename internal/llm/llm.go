@@ -13,7 +13,7 @@ import (
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/schema"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
+	"github.com/fj1981/infrakit/pkg/cylog"
 )
 
 // Config 为创建 LLM 客户端所需的配置（来自 AppConfig.AI，已由 service 层取值）。

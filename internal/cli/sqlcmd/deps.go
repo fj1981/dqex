@@ -3,7 +3,7 @@ package sqlcmd
 import (
 	"dqex/internal/engine"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
+	"github.com/fj1981/infrakit/pkg/cydb/def"
 )
 
 // ColorFuncs ANSI 颜色函数。

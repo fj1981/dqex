@@ -1,8 +1,8 @@
 package store
 
 import (
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/migrate"
+	"github.com/fj1981/infrakit/pkg/cydb/def"
+	"github.com/fj1981/infrakit/pkg/cydb/migrate"
 )
 
 // migrateModels 对给定数据库客户端执行全部模型的自动迁移。

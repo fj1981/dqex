@@ -3,8 +3,8 @@ package engine
 import (
 	"strings"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/dialect"
+	"github.com/fj1981/infrakit/pkg/cydb"
+	"github.com/fj1981/infrakit/pkg/cydb/dialect"
 )
 
 // objectKind 数据库对象类型

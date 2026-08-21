@@ -4,7 +4,7 @@
 package engine
 
 import (
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
+	"github.com/fj1981/infrakit/pkg/cydb/def"
 )
 
 // DBConnInfo 应用层连接信息。

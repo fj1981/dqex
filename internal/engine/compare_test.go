@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/dialect"
-	_ "gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/dialect/mysql" // 注册 mysql 方言供归一化测试使用
+	"github.com/fj1981/infrakit/pkg/cydb/def"
+	"github.com/fj1981/infrakit/pkg/cydb/dialect"
+	_ "github.com/fj1981/infrakit/pkg/cydb/dialect/mysql" // 注册 mysql 方言供归一化测试使用
 )
 
 // ---- 值归一化 ----

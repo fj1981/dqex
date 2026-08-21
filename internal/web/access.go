@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
+	"github.com/fj1981/infrakit/pkg/cylog"
 )
 
 // ---- 访问来源白名单（--allow / 配置 web.allow） ----

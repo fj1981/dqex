@@ -9,7 +9,7 @@ import (
 	"dqex/internal/service"
 
 	"github.com/gin-gonic/gin"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
+	"github.com/fj1981/infrakit/pkg/cygin"
 )
 
 // rawRoutes 原生 gin 路由：SSE 进度推送、取消任务、下载、打开目录

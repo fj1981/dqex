@@ -12,7 +12,7 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
+	"github.com/fj1981/infrakit/pkg/cylog"
 )
 
 // maxAgentSteps agent 循环步数上限（默认 12；大库探索 + 1 轮余量）。

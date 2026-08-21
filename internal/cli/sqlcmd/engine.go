@@ -11,7 +11,7 @@ import (
 
 	"dqex/internal/engine"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
+	"github.com/fj1981/infrakit/pkg/cydb"
 )
 
 // ---- 会话 ----

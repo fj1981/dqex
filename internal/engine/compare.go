@@ -13,9 +13,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/dialect"
+	"github.com/fj1981/infrakit/pkg/cydb"
+	"github.com/fj1981/infrakit/pkg/cydb/def"
+	"github.com/fj1981/infrakit/pkg/cydb/dialect"
 )
 
 // DefaultCompareThreshold 数据逐行比较默认阈值：行数不超过该值的表逐行比较，超过仅比较行数

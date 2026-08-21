@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
+	"github.com/fj1981/infrakit/pkg/cydb/def"
+	"github.com/fj1981/infrakit/pkg/cygin"
 	"gopkg.in/yaml.v3"
 )
 

@@ -16,8 +16,8 @@ import (
 
 	"github.com/rs/xid"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
+	"github.com/fj1981/infrakit/pkg/cygin"
+	"github.com/fj1981/infrakit/pkg/cylog"
 )
 
 // Service 业务服务层：Web/CLI 共用，编排引擎 + 连接 + 任务 + 历史 + AI 辅助

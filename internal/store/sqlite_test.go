@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
+	"github.com/fj1981/infrakit/pkg/cydb/def"
 )
 
 // newTestStore 创建临时 SQLite 存储（每个测试独立临时目录）。

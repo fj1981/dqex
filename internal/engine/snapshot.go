@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/rs/xid"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
+	"github.com/fj1981/infrakit/pkg/cydb"
 )
 
 const defaultSampleLimit = 10

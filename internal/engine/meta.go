@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
+	"github.com/fj1981/infrakit/pkg/cydb"
 )
 
 // DBTables 一个数据库（Oracle 为 schema）及其表与对象清单

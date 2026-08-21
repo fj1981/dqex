@@ -14,9 +14,9 @@ import (
 	"dqex/internal/llm"
 
 	"github.com/spf13/cobra"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
+	"github.com/fj1981/infrakit/pkg/cydb/def"
+	"github.com/fj1981/infrakit/pkg/cygin"
+	"github.com/fj1981/infrakit/pkg/cylog"
 	"golang.org/x/term"
 )
 

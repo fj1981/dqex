@@ -4,16 +4,16 @@ import (
 	"fmt"
 	"strings"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/dialect"
+	"github.com/fj1981/infrakit/pkg/cydb"
+	"github.com/fj1981/infrakit/pkg/cydb/dialect"
 
 	// 注册 tidb parser 驱动（DDL 解析必需，否则 parser.New() panic）
 	_ "github.com/pingcap/tidb/parser/test_driver"
 
 	// 注册数据库方言（mysql/postgresql/oracle）
-	_ "gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/dialect/mysql"
-	_ "gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/dialect/oracle"
-	_ "gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/dialect/postgresql"
+	_ "github.com/fj1981/infrakit/pkg/cydb/dialect/mysql"
+	_ "github.com/fj1981/infrakit/pkg/cydb/dialect/oracle"
+	_ "github.com/fj1981/infrakit/pkg/cydb/dialect/postgresql"
 )
 
 // cliPool 为进程级 cli 连接池：相同连接配置（含库名）复用同一 DBCli 实例，

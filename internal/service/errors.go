@@ -1,7 +1,7 @@
 package service
 
 import (
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
+	"github.com/fj1981/infrakit/pkg/cygin"
 )
 
 // 业务错误码（cygin 系统码 1001~1012 之外，本项目从 2001 起）

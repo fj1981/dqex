@@ -14,8 +14,8 @@ import (
 	"dqex/internal/service"
 
 	"github.com/gin-gonic/gin"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
+	"github.com/fj1981/infrakit/pkg/cygin"
+	"github.com/fj1981/infrakit/pkg/cylog"
 )
 
 // StartResp 异步任务启动响应

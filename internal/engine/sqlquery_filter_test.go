@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/ss"
+	"github.com/fj1981/infrakit/pkg/cydb"
+	"github.com/fj1981/infrakit/pkg/cydb/ss"
 )
 
 // TestBuildFilterWheres 验证过滤条件转换：操作符映射、错误处理、大字段限制。

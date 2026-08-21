@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/xuri/excelize/v2"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/ss"
+	"github.com/fj1981/infrakit/pkg/cydb"
+	"github.com/fj1981/infrakit/pkg/cydb/def"
+	"github.com/fj1981/infrakit/pkg/cydb/ss"
 )
 
 // MaxQueryLimit 单次查询返回行数上限（安全护栏，防止拖垮后端）

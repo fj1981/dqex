@@ -10,7 +10,7 @@ import (
 	"dqex/internal/service"
 
 	"github.com/gin-gonic/gin"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
+	"github.com/fj1981/infrakit/pkg/cygin"
 )
 
 // renderErr 按请求语言渲染错误：

@@ -11,12 +11,12 @@ import (
 
 	"dqex/internal/engine"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
+	"github.com/fj1981/infrakit/pkg/cydb"
+	"github.com/fj1981/infrakit/pkg/cydb/def"
+	"github.com/fj1981/infrakit/pkg/cylog"
 
 	// 注册 SQLite 方言（GetSqlDialect 依赖 init 注册）与 sqlx 驱动
-	_ "gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/dialect/sqlite"
+	_ "github.com/fj1981/infrakit/pkg/cydb/dialect/sqlite"
 )
 
 // 表名常量（行模型见 models.go）。

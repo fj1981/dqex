@@ -11,7 +11,7 @@ import (
 	"dqex/internal/service"
 
 	"github.com/cloudwego/eino/schema"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
+	"github.com/fj1981/infrakit/pkg/cydb/def"
 )
 
 // ---- mock 依赖 ----

@@ -7,7 +7,7 @@ import (
 
 	"dqex/internal/store"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
+	"github.com/fj1981/infrakit/pkg/cylog"
 )
 
 // PersistMgr 统一持久化管理：连接配置 + 任务配置 + 执行历史 + SQL 历史 + SQL 审计 + Web 凭证，

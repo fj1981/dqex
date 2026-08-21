@@ -12,8 +12,8 @@ import (
 
 	"dqex/internal/engine"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
+	"github.com/fj1981/infrakit/pkg/cygin"
+	"github.com/fj1981/infrakit/pkg/cylog"
 )
 
 // ---- 快照管理 ----

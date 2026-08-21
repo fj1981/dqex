@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
+	"github.com/fj1981/infrakit/pkg/cydb"
 )
 
 // snapshotDatabases 返回快照的所有库（兼容 v1 单库快照：Databases 为空但 DBName/Tables 存在时包装为单库）

@@ -6,6 +6,7 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/cloudwego/eino v0.9.14
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
+	github.com/fj1981/infrakit v1.0.0
 	github.com/gin-gonic/gin v1.10.1
 	github.com/olekukonko/tablewriter v1.1.4
 	github.com/peterh/liner v1.2.2
@@ -14,7 +15,6 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/pflag v1.0.10
 	github.com/xuri/excelize/v2 v2.11.0
-	gitlab.mycyclone.com/rpa-platform/pk-infrakit-g v0.1.6
 	golang.org/x/term v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
 )

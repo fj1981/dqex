@@ -11,7 +11,7 @@ import (
 	"dqex/internal/service"
 	"dqex/internal/web"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
+	"github.com/fj1981/infrakit/pkg/cylog"
 )
 
 func main() {

@@ -3,7 +3,7 @@ package engine
 import (
 	"testing"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
+	"github.com/fj1981/infrakit/pkg/cydb"
 )
 
 func TestClassifySQL(t *testing.T) {

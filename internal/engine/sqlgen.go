@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"strings"
 
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/ss"
+	"github.com/fj1981/infrakit/pkg/cydb"
+	"github.com/fj1981/infrakit/pkg/cydb/def"
+	"github.com/fj1981/infrakit/pkg/cydb/ss"
 )
 
 // GenSQLKind 快速生成 SQL 的类型（白名单校验，防止前端被篡改后传入未知类型）。

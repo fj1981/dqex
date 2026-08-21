@@ -6,7 +6,7 @@ import (
 	"dqex/internal/service"
 
 	"github.com/gin-gonic/gin"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
+	"github.com/fj1981/infrakit/pkg/cygin"
 )
 
 // SQLRunReq SQL 执行请求（统一查询与写操作，支持多语句批量执行）

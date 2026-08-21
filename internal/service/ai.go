@@ -18,8 +18,8 @@ import (
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
 	"github.com/rs/xid"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
-	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
+	"github.com/fj1981/infrakit/pkg/cygin"
+	"github.com/fj1981/infrakit/pkg/cylog"
 )
 
 // ---- AI 能力状态（Web/CLI 共用，APIKey 永不回显明文） ----
