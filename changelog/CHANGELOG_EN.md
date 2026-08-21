@@ -5,6 +5,9 @@
 - Port occupation detection: automatically checks port availability before Web service startup; supports terminating the occupying process and retrying binding, or opening the existing service directly; works on macOS/Linux/Windows
 - `dqex stop` command: finds and terminates other running dqex processes
 
+### Changed
+- On macOS, reuses existing browser tab if the same URL is already open instead of opening a new one (supports Chrome / Safari / Firefox / Edge / Brave)
+
 ## [0.4.0] - 2026-08-20
 ### Added
 - "Changelog" section in About dialog with per-version accordion display

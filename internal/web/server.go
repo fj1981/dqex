@@ -167,18 +167,88 @@ func isLoopback(host string) bool {
 	return false
 }
 
-// openBrowser 打开系统默认浏览器（失败静默忽略，如远程/无头环境）
+// openBrowser 打开系统默认浏览器（失败静默忽略，如远程/无头环境）。
+// macOS 下优先复用已有标签页：若主流浏览器已打开相同 URL 则直接激活该标签，避免重复开新标签。
 func openBrowser(url string) {
-	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", url)
+		// AppleScript：遍历主流浏览器，查找已有标签页匹配 URL 则激活，否则 open 新开
+		const script = `on run argv
+    set targetURL to item 1 of argv
+    set baseURL to my stripQuery(targetURL)
+
+    set browsers to {"Google Chrome", "Safari", "Firefox", "Microsoft Edge", "Brave Browser"}
+    repeat with b in browsers
+        try
+            if running of application b then
+                set found to my checkBrowser(b, baseURL)
+                if found then return
+            end if
+        end try
+    end repeat
+
+    do shell script "open " & quoted form of targetURL
+end run
+
+on stripQuery(u)
+    -- 剥离查询参数 ?...
+    set AppleScript's text item delimiters to "?"
+    set base to item 1 of (text items of u)
+    -- 剥离片段 #...
+    set AppleScript's text item delimiters to "#"
+    set base to item 1 of (text items of base)
+    set AppleScript's text item delimiters to ""
+    if base ends with "/" then
+        set base to text 1 thru -2 of base
+    end if
+    return base
+end stripQuery
+
+on checkBrowser(browserName, baseURL)
+    if browserName is "Google Chrome" then
+        return my checkTabs("Google Chrome", url of tabs)
+    else if browserName is "Safari" then
+        return my checkTabs("Safari", URL of tabs)
+    else if browserName is "Firefox" then
+        return my checkTabs("Firefox", address of tabs)
+    else if browserName is "Microsoft Edge" then
+        return my checkTabs("Microsoft Edge", URL of tabs)
+    else if browserName is "Brave Browser" then
+        return my checkTabs("Brave Browser", url of tabs)
+    end if
+    return false
+end checkBrowser
+
+on checkTabs(browserName, urlGetter)
+    tell application browserName
+        repeat with w in windows
+            repeat with t in tabs of w
+                set tabURL to my stripQuery(urlGetter of t)
+                if tabURL is baseURL then
+                    set active tab index of w to (index of t)
+                    set index of w to 1
+                    activate
+                    return true
+                end if
+            end repeat
+        end repeat
+        if (count of windows) > 0 then
+            set w to front window
+            set index of w to 1
+            activate
+        end if
+    end tell
+    return false
+end checkTabs`
+		cmd := exec.Command("osascript", "-e", script, url)
+		_ = cmd.Start()
 	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		_ = cmd.Start()
 	default:
-		cmd = exec.Command("xdg-open", url)
+		cmd := exec.Command("xdg-open", url)
+		_ = cmd.Start()
 	}
-	_ = cmd.Start()
 }
 
 // RunWeb 启动 Web 服务。allow 为访问来源白名单（IP/CIDR/域名），空 = 不限制。
