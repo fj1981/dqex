@@ -1,105 +1,178 @@
-# dqex - 数据库工作台
+<p align="center">
+  <img src="docs/banner.png" alt="dqex — AI-Native Database Workbench" width="100%">
+</p>
 
-跨平台数据库导入 / 导出 / 迁移 / 对比 / 快照 / 数据字典 / SQL 查询工具，支持 MySQL、PostgreSQL、Oracle。
+<div align="center">
 
-- **Web 界面**：可视化操作（查询终端 / 表浏览器 / AI 面板 / 快照与对比报告），实时进度，任务配置管理
-- **CLI 命令行**：脚本化 / 定时任务 / 无图形界面服务器（含 Shell 补全）
+# dqex
 
-## 快速开始
+**The AI-Native, Offline-First Database Workbench**
 
-### 下载
+[English](README.md) · [简体中文](README.zh-CN.md)
 
-从 [Releases](../../releases) 下载对应平台 zip 包并解压。
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/badge/Go-1.25-blue)](go.mod)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)]()
+[![Databases](https://img.shields.io/badge/databases-MySQL%20%7C%20PostgreSQL%20%7C%20Oracle-orange)]()
+
+[![Stars](https://img.shields.io/github/stars/fj1981/dqex?style=social&label=Star)](https://github.com/fj1981/dqex/stargazers)
+[![Forks](https://img.shields.io/github/forks/fj1981/dqex?style=social&label=Fork)](https://github.com/fj1981/dqex/network/members)
+
+</div>
+
+---
+
+## 🚀 One Tool. Every Environment. Even the Air-Gapped Ones.
+
+dqex is a cross-platform database workbench that ships as a **single static binary** — no JVM, no Electron, no installers, no network required. It packs **export, import, migration, comparison, snapshots, Excel data dictionaries, a full SQL terminal, and an AI assistant** into one tool, with both a polished Web UI and a scriptable CLI.
+
+- 🪶 **Zero-dependency** — copy it to a USB stick and run it on a bank's air-gapped server
+- ⚡ **Starts in <1s**, ~50–60 MB memory footprint
+- 🤖 **AI-native agent** — explores your *real* schema, writes dialect-correct SQL, and never executes without your confirmation
+- 🧩 **Web + CLI, one engine** — same connections, saved tasks, and history on both sides
+- 🌐 **MySQL · PostgreSQL · Oracle** with automatic dialect conversion for cross-type migration
+- 📋 **Excel data dictionaries & snapshot diff reports** — compliance-ready by design (等保 / GDPR / audits)
+- 🏠 **Take production data home safely** — conditional export + gzip, restore to your local test env in 2 commands
+
+---
+
+## ✨ Feature Highlights
+
+| Feature | Web | CLI | Description |
+|---|---|---|---|
+| Export | ✅ | `export` (`exp`) | Schema + data → SQL file (zip / gzip), conditional & consistent |
+| Import | ✅ | `import` (`imp`) | SQL / zip file → database, auto create tables, batch inserts |
+| Migrate | ✅ | `migrate` (`mig`) | Database → database, **cross-dialect** (e.g. MySQL → PostgreSQL) |
+| Compare | ✅ | `compare` (`cmp`) | Schema & data diff between two databases |
+| Data Dictionary | ✅ | `dictionary` (`dict`) | Tables + comments → styled Excel (.xlsx), audit-ready |
+| Snapshot | ✅ | `snapshot` (`snap`) | Full create / list / show / delete / compare lifecycle |
+| SQL Query | ✅ | `sql` | Web query terminal + table browser; CLI interactive REPL with JSON output |
+| AI-Assisted SQL | ✅ | `\ai` in `sql` | Agent probes real schema, generates SQL per dialect, requires confirmation |
+| Connections | ✅ | `conn` (`cn`) | Save / test / delete database connections |
+| Saved Tasks | ✅ | `task` (`tk`) | Reuse one-click task configs (`--task <ID>`) |
+| History | ✅ | `history` (`his`) | Execution log for troubleshooting & audit export |
+| Shell Completion | — | `completion` | zsh / bash completion scripts |
+
+---
+
+## 🧑‍💻 Quick Start
+
+### Download
+
+Grab the zip for your platform from the [Releases page](https://github.com/fj1981/dqex/releases) and unzip — **no installation required**.
 
 ### Linux / macOS
 
 ```bash
-./install.sh                    # 安装到 /usr/local/bin
-dqex                             # 启动 Web 服务（127.0.0.1:8181）
-# 或直接使用
-./start.sh                      # 前台运行（Ctrl+C 停止）
-./start.sh -d                   # 后台运行
-./stop.sh                       # 停止后台服务
+./install.sh                    # install to /usr/local/bin (optional)
+dqex                            # start Web UI at 127.0.0.1:8181
+# or run without installing:
+./start.sh                      # foreground (Ctrl+C to stop)
+./start.sh -d                   # background daemon
+./stop.sh                       # stop the daemon
 ```
 
 ### Windows
 
-双击或用 cmd 执行：
-
 ```bat
-install.bat                     :: 安装到 %LOCALAPPDATA%\dqex 并加入 PATH
-dqex                             :: 新开终端后启动 Web 服务
-:: 或不安装直接使用：
-start.bat                       :: 前台运行
-start.bat -d                    :: 后台运行
-stop.bat                        :: 停止后台服务
+install.bat                     :: install to %LOCALAPPDATA%\dqex and add to PATH
+dqex                            :: start Web UI in a new terminal
+:: or run without installing:
+start.bat                       :: foreground
+start.bat -d                    :: background
+stop.bat                        :: stop background service
 ```
 
-## 功能
-
-| 功能 | Web | CLI 命令 | CLI 简写 | 说明 |
-|---|---|---|---|---|
-| 导出 | ✅ | export | `exp` | 数据库结构与数据 → SQL 文件（zip/gzip） |
-| 导入 | ✅ | import | `imp` | SQL/zip 文件 → 数据库 |
-| 迁移 | ✅ | migrate | `mig` | 数据库 → 数据库（支持跨类型） |
-| 对比 | ✅ | compare | `cmp` | 两个数据库结构与数据差异 |
-| 数据字典 | ✅ | dictionary | `dict` | 表结构 + 注释 → Excel（.xlsx） |
-| 快照 | ✅ | snapshot | `snap` | 库结构/数据快照，支持 create/list/show/delete/compare（CLI + Web 全链路） |
-| SQL 查询 | ✅ | sql | — | CLI：交互式 REPL / 单次执行 / JSON 输出；Web：查询终端 + 表浏览器；按目标库方言原生执行 |
-| AI 辅助写 SQL | ✅ | sql 内 `\ai` | — | 可选模块：自动查询真实库表结构后生成 SQL（按目标方言），写操作需确认，未配置无入口 |
-| 连接管理 | ✅ | conn | `cn` | 保存/测试/删除数据库连接 |
-| 任务配置 | ✅ | task | `tk` | 保存/复用任务配置（`--task <ID>` 或 Web 一键执行） |
-| 执行历史 | ✅ | history | `his` | 查看/删除执行记录，失败排查 |
-| 全局配置 | ✅ | config | `cfg` | 查看数据目录等全局配置 |
-| 访问链接 | — | url | — | 输出带 token 的 Web 访问链接（供 curl / 脚本） |
-| 版本 | — | version | `v` | 查看版本号 |
-| Shell 补全 | — | completion | — | 生成 zsh / bash 补全脚本 |
-
-**AI 辅助写 SQL（可选模块，CLI `\ai` 与 Web AI 面板功能一致）**：
-
-- **真实表结构**：生成前自动查询库表结构，杜绝凭想象生成；Web 端实时显示查询进度
-- **生成 ≠ 执行**：AI 只产出 SQL 文本，不直接执行；写操作需确认、危险语句被拦截，结果可 `\e` 编辑后执行
-- **补全与应用**：`\ai continue` 基于上文续写；Web 端支持生成 / 解释 / 优化 / 修复，结果 diff 预览后一键应用到编辑器（替换选中 / 插入光标 / 追加）
-- **密钥不出本机**：API Key 存本地，界面仅显示掩码后的端点与模型名
-- **未配置无入口**：BaseURL / API Key / Model 三项配置齐全才启用，不影响任何既有功能
+### CLI in 30 seconds
 
 ```bash
-# CLI 示例
-dqex conn add --name 生产库 --type mysql --host 10.20.16.170 --port 3317 --un root --pw 'xxx'
-dqex exp camunda -s 生产库 -o backup.zip
-dqex dict camunda -s 生产库 -o dict.xlsx
-dqex cmp -s 生产库 -t 测试库 --source-database camunda --target-database camunda --scope both
+# Save a connection once, reuse everywhere
+dqex conn add --name prod --type mysql --host 10.20.16.170 --port 3317 --un root --pw 'xxx'
 
-# SQL 终端（按目标库方言原生执行）
-dqex sql -c 生产库                 # 交互式 REPL
-dqex sql -c 生产库 --json "SELECT id,name FROM users"   # 智能体友好 JSON 输出
+# Export with conditions & gzip → take it home
+dqex exp camunda -s prod -o backup.sql.gz --table-cond "orders:created_at >= '2026-01-01'"
 
-# 快照
-dqex snapshot create -c 生产库 -n 早盘
-dqex snapshot compare -c 生产库 --a 早盘 --b 午盘
+# Restore to your local test database
+dqex imp -t local_test -i backup.sql.gz --reset drop-and-create
+
+# Interactive SQL terminal (native dialect, runs on the target DB)
+dqex sql -c prod
+dqex sql -c prod --json "SELECT id, name FROM users LIMIT 10"   # agent-friendly JSON
+
+# Snapshot & compare — the killer feature for incident tracing
+dqex snapshot create -c prod -n baseline
+dqex snapshot compare -c prod --a baseline --b after-deploy
+
+# Compliance: one command → styled Excel data dictionary
+dqex dict camunda -s prod -o data_dict.xlsx
 ```
 
-## 构建
+---
+
+## 🤖 AI-Assisted SQL (Optional, Offline-Safe)
+
+- **Real schema, not guesses** — the agent queries your actual table structures before generating SQL (Web UI shows live progress)
+- **Generate ≠ Execute** — AI only produces SQL text; write operations require confirmation, dangerous statements are blocked, and you can `\e`-edit before running
+- **Full assist loop** — `\ai continue` for follow-ups; Web UI supports generate / explain / optimize / fix with side-by-side diff preview and one-click apply
+- **Keys stay local** — API key stored on your machine; only masked endpoint & model name are shown
+- **No config, no footprint** — the AI entry only appears after BaseURL / API Key / Model are all configured; everything else keeps working untouched
+- **Offline fallback** — built-in SQL template library (`\template top_n orders amount 10`) works in fully isolated networks
+
+---
+
+## 🛠️ Build from Source
 
 ```bash
-# 开发
-make dev               # Go :8181 + Vite :5281，支持调试
-
-# 构建
-make build             # 单二进制 ./dqex（内嵌前端）
-make release           # 跨平台打包 → release/
-
-# 安装
-make install           # → /usr/local/bin
+make dev                # Go :8181 + Vite :5281 with hot reload & debugging
+make build              # single binary ./dqex (frontend embedded)
+make release            # cross-platform packages → release/
+make install            # → /usr/local/bin
 ```
 
-## 技术栈
+---
 
-- 后端：Go + [infrakit](https://github.com/fj1981/infrakit)（数据库方言适配）
-- 前端：React + TypeScript + Vite + Tailwind CSS + shadcn/ui
-- Excel：excelize（纯 Go，无 CGO）
+## 🧱 Tech Stack
 
-## 文档
+- **Backend**: Go + [infrakit](https://github.com/fj1981/infrakit) (database dialect adaptation), Gin, embedded SQLite
+- **Frontend**: React + TypeScript + Vite + Tailwind CSS + shadcn/ui + Monaco Editor
+- **Excel**: excelize (pure Go, no CGO)
+- **Distribution**: single static binary with embedded frontend, dark mode, i18n (EN/中文)
 
-- [CLI 使用手册](CLI.md)
-- [开发约定](docs/conventions.md)（状态建模、全链路数据流等工程约定，改动前必读）
+---
+
+## 📚 Documentation
+
+- [CLI Manual](CLI.md) — every command, flag, and meta-command
+- [Project Overview](docs/OVERVIEW.md) — philosophy, personas, and deep-dive scenarios
+- [Engineering Conventions](docs/conventions.md) — state modeling & data-flow rules (read before contributing)
+
+---
+
+## 🤝 Contributing
+
+Contributions are what make open source great — and they earn you a place on the stargazers list too! ⭐
+
+We welcome:
+- 🐛 Bug fixes (highest priority)
+- 📝 Documentation improvements (EN / 中文)
+- 🧩 New SQL templates for the offline library
+- 🗄️ Additional database driver support
+- 🎨 UI/UX polish
+
+**How to contribute:**
+
+1. Fork the repo
+2. Create a branch: `git checkout -b feature/your-feature`
+3. Commit your changes: `git commit -am 'feat: add something awesome'`
+4. Push: `git push origin feature/your-feature`
+5. Open a Pull Request
+
+Conventions: Go code follows `gofmt`; TypeScript follows ESLint + Prettier; commits follow [Conventional Commits](https://www.conventionalcommits.org/).
+
+---
+
+## 📄 License
+
+[MIT](LICENSE) © 2026 fj1981
+
+**⭐ Star us on GitHub** — it tells us you care, and helps more people discover the tool. Fork it, play with it, break it, and send us a PR!
