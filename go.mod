@@ -12,8 +12,9 @@ require (
 	github.com/pingcap/tidb/parser v0.0.0-20231013125129-93a834a6bf8d
 	github.com/rs/xid v1.6.0
 	github.com/spf13/cobra v1.10.1
+	github.com/spf13/pflag v1.0.10
 	github.com/xuri/excelize/v2 v2.11.0
-	gitlab.mycyclone.com/rpa-platform/pk-infrakit-g v0.1.4
+	gitlab.mycyclone.com/rpa-platform/pk-infrakit-g v0.1.5
 	golang.org/x/term v0.44.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -97,7 +98,6 @@ require (
 	github.com/sony/sonyflake v1.3.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/swaggo/files v1.0.1 // indirect
 	github.com/swaggo/gin-swagger v1.6.0 // indirect
 	github.com/swaggo/swag v1.8.12 // indirect
@@ -127,5 +127,3 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.39.0 // indirect
 )
-
-// replace gitlab.mycyclone.com/rpa-platform/pk-infrakit-g => /Users/fanjun/project/pk-infrakit-g

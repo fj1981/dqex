@@ -128,7 +128,8 @@ export default function DictionaryView() {
         }
       />
 
-      <Card className="flex flex-1 flex-col gap-5 bg-gradient-to-br from-muted/50 via-muted/15 to-muted/85 p-5 dark:from-muted/30 dark:via-muted/10 dark:to-muted/55">
+      {/* min-h-0：允许 Card 在 h-full 视口内收缩，选项区内部滚动，避免整页滚动 */}
+      <Card className="flex min-h-0 flex-1 flex-col gap-5 bg-gradient-to-br from-muted/50 via-muted/15 to-muted/85 p-5 dark:from-muted/30 dark:via-muted/10 dark:to-muted/55">
         <StepWizard steps={STEPS.map((s) => tKey(s))} current={step} onStepClick={(i) => runningTaskID ? undefined : setStep(i)} />
 
         {step === 0 && (
@@ -145,8 +146,8 @@ export default function DictionaryView() {
       )}
 
       {step === 1 && (
-        <div className="space-y-4">
-          <Hint>
+        <div className="flex min-h-0 flex-1 flex-col gap-4">
+          <Hint className="shrink-0">
             {t("dictionary.hint2")}
           </Hint>
           <TablePicker
@@ -159,13 +160,14 @@ export default function DictionaryView() {
             showObjects={false}
             onChange={(tables) => set({ tables })}
           />
-          <WizardFooter onBack={() => setStep(0)} onNext={() => setStep(2)} />
+          <WizardFooter className="shrink-0" onBack={() => setStep(0)} onNext={() => setStep(2)} />
         </div>
       )}
 
       {step === 2 && !runningTaskID && (
-        <div className="mx-auto max-w-3xl space-y-4">
-          <Card className="divide-y p-0">
+        <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-col gap-4">
+          {/* 选项区超高时内部滚动，底部导航固定；容器自身不出现整页滚动 */}
+          <Card className="scrollbar-thin min-h-0 flex-1 divide-y overflow-y-auto p-0">
             <div className="p-5">
               <Section title={t("export.outputSettings")}>
                 <div className="grid gap-2">
@@ -198,6 +200,7 @@ export default function DictionaryView() {
             </div>
           </Card>
           <WizardFooter
+            className="shrink-0"
             onBack={() => setStep(1)}
             next={
               <Button onClick={startRun}>

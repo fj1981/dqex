@@ -11,6 +11,7 @@
 
 ### Fixed
 - Connection selector content being fully truncated in narrow sidebars; name and address no longer squeeze each other after the layout hierarchy rework
+- SQL syntax errors (Error 1064) when re-importing exported files: text columns (e.g. mediumtext storing JSON) containing special characters such as single quotes were not escaped per the target database dialect rules, aborting the import
 
 ## [0.4.0] - 2026-08-20
 ### Added

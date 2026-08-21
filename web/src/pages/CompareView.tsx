@@ -510,8 +510,8 @@ export default function CompareView() {
       )}
 
       {step === 1 && (
-        <div className="space-y-4">
-          <Hint>
+        <div className="flex min-h-0 flex-1 flex-col gap-4">
+          <Hint className="shrink-0">
             {t("compare.hint1")}
           </Hint>
           <TablePicker
@@ -529,7 +529,7 @@ export default function CompareView() {
 
           {/* 库级映射：每个源库指定对比的目标库（同名默认，可改为目标库的其他库） */}
           {sourceDBs.length > 0 && (
-            <Card className="p-4">
+            <Card className="shrink-0 p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <div className="text-sm font-medium">{t("compare.dbMapping")}</div>
@@ -639,7 +639,7 @@ export default function CompareView() {
             </Card>
           )}
 
-          <WizardFooter onBack={() => setStep(0)} onNext={() => setStep(2)} />
+          <WizardFooter className="shrink-0" onBack={() => setStep(0)} onNext={() => setStep(2)} />
         </div>
       )}
 

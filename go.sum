@@ -350,8 +350,8 @@ github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9/go.mod h1:WwHg+CVyzlv/T
 github.com/yargevad/filepathx v1.0.0 h1:SYcT+N3tYGi+NvazubCNlvgIPbzAk7i7y2dwg3I5FYc=
 github.com/yargevad/filepathx v1.0.0/go.mod h1:BprfX/gpYNJHJfc35GjRRpVcwWXS89gGulUIU5tK3tA=
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
-gitlab.mycyclone.com/rpa-platform/pk-infrakit-g v0.1.4 h1:8bOHUc2qp5Y1w8ZpeCub2hahWNcolrk5qAVD7ZRi34w=
-gitlab.mycyclone.com/rpa-platform/pk-infrakit-g v0.1.4/go.mod h1:OKb5PQd6OpRjK+5u0otsaIGQM0oH6smeILlJIZIb+YU=
+gitlab.mycyclone.com/rpa-platform/pk-infrakit-g v0.1.5 h1:dvJOAdswwKIY9k+GGZPRavTsBWYmfuKNcwoFlL81zNs=
+gitlab.mycyclone.com/rpa-platform/pk-infrakit-g v0.1.5/go.mod h1:OKb5PQd6OpRjK+5u0otsaIGQM0oH6smeILlJIZIb+YU=
 go.uber.org/atomic v1.6.0/go.mod h1:sABNBOSYdrvTF6hTgEIbc7YasKWGhgEQZyfxyTvoXHQ=
 go.uber.org/atomic v1.7.0/go.mod h1:fEN4uk6kAWBTFdckzkM89CLk9XfWZrxpCo0nPH17wJc=
 go.uber.org/atomic v1.9.0/go.mod h1:fEN4uk6kAWBTFdckzkM89CLk9XfWZrxpCo0nPH17wJc=

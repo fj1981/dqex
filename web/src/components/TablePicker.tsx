@@ -6,7 +6,6 @@ import { Card } from "@/components/ui/card"
 import { confirm } from "@/components/ui/alert-dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -770,9 +769,9 @@ export default function TablePicker({
   )
 
   return (
-    <div className="grid grid-cols-2 gap-4">
+    <div className="grid min-h-0 flex-1 grid-cols-2 gap-4">
       {/* 左：可用表与对象（库→分组→项 树形） */}
-      <Card className="flex flex-col p-3">
+      <Card className="flex min-h-0 flex-col p-3">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-sm font-medium">
             {!singleMode ? tr("tablePicker.availableContentMulti", { dbs: tree.length, tables: totalTables }) : tr("tablePicker.availableContent", { tables: totalTables })}{showObjects && totalObjects > 0 ? tr("tablePicker.totalObjects", { n: totalObjects }) : ""}{tr("tablePicker.availableTail")}
@@ -798,7 +797,10 @@ export default function TablePicker({
           onChange={(e) => setKeyword(e.target.value)}
           className="mb-2 h-8"
         />
-        <ScrollArea className="h-[340px] rounded border pr-3">
+        {/* 列表区只限制最大高度（不超卡片剩余空间）：内容少时自适应高度不出现空白，内容多时内部滚动 */}
+        <div className="min-h-0 flex-1">
+          {/* 原生滚动容器（ScrollArea 的 Viewport h-full 在 Root 高度 auto 时无法解析，超高内容被裁剪无滚动） */}
+          <div className="scrollbar-thin max-h-full overflow-y-auto rounded border pr-1">
           {loading && (
             <div className="flex items-center justify-center py-8 text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" /> {tr("tablePicker.loading")}
@@ -810,15 +812,18 @@ export default function TablePicker({
           )}
           {!loading && !error && singleMode && filteredTree[0] && singleGroups(filteredTree[0])}
           {!loading && !error && !singleMode && filteredTree.map(dbSection)}
-        </ScrollArea>
+          </div>
+        </div>
       </Card>
 
       {/* 右：已选表及条件 + 已选对象 */}
-      <Card className="flex flex-col p-3">
+      <Card className="flex min-h-0 flex-col p-3">
         <div className="mb-2 text-sm font-medium">
           {tr("tablePicker.selectedContent", { tables: effectiveSelected.length })}{showObjects ? tr("tablePicker.totalObjects", { n: selectedObjects.length }) : ""}{tr("tablePicker.availableTail")}
         </div>
-        <ScrollArea className="h-[388px] rounded border pr-3">
+        <div className="min-h-0 flex-1">
+          {/* 原生滚动容器（ScrollArea 的 Viewport h-full 在 Root 高度 auto 时无法解析，超高内容被裁剪无滚动） */}
+          <div className="scrollbar-thin max-h-full overflow-y-auto rounded border pr-1">
           {effectiveSelected.length === 0 && selectedObjects.length === 0 && (
             <div className="py-8 text-center text-sm text-muted-foreground">{tr("tablePicker.nothingSelected")}</div>
           )}
@@ -886,7 +891,8 @@ export default function TablePicker({
               })}
             </div>
           )}
-        </ScrollArea>
+          </div>
+        </div>
       </Card>
 
       {/* 条件编辑弹窗 */}

@@ -28,14 +28,17 @@ interface Props {
 export default function ConnectionPair({ source, target, children }: Props) {
   return (
     <div className={`mx-auto w-full space-y-4 ${CONN_PAIR_W}`}>
-      <div className="grid grid-cols-[1fr_auto_1fr] gap-3">
-        <ConnectionSelect {...source} fill />
-        <div className="flex h-11 items-center justify-center self-center">
-          <span className="flex h-9 w-9 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm">
-            <MoveRight className="h-5 w-5" />
-          </span>
+      {/* 窗口宽度不足时双卡区域横向滚动，避免目标卡片被裁剪；下方提示/按钮不随动 */}
+      <div className="scrollbar-thin overflow-x-auto pb-1">
+        <div className="grid min-w-[600px] grid-cols-[1fr_auto_1fr] gap-3">
+          <ConnectionSelect {...source} fill />
+          <div className="flex h-11 items-center justify-center self-center">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm">
+              <MoveRight className="h-5 w-5" />
+            </span>
+          </div>
+          <ConnectionSelect {...target} fill />
         </div>
-        <ConnectionSelect {...target} fill />
       </div>
       {children}
     </div>

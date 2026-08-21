@@ -337,7 +337,8 @@ export default function ImportView() {
         }
       />
 
-      <Card className="flex flex-1 flex-col gap-5 bg-gradient-to-br from-muted/50 via-muted/15 to-muted/85 p-5 dark:from-muted/30 dark:via-muted/10 dark:to-muted/55">
+      {/* min-h-0：允许 Card 在 h-full 视口内收缩，选项区内部滚动，避免整页滚动 */}
+      <Card className="flex min-h-0 flex-1 flex-col gap-5 bg-gradient-to-br from-muted/50 via-muted/15 to-muted/85 p-5 dark:from-muted/30 dark:via-muted/10 dark:to-muted/55">
         <StepWizard steps={STEPS.map((s) => tKey(s))} current={step} onStepClick={(i) => !runningTaskID && setStep(i)} />
 
         {/* 单卡宽度与迁移/对比页双卡布局中的卡片同宽（CONN_SINGLE_W），各任务页卡片尺寸统一 */}
@@ -508,8 +509,9 @@ export default function ImportView() {
       )}
 
       {step === 2 && (
-        <div className="mx-auto max-w-3xl space-y-4">
-          <Card className="divide-y p-0">
+        <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-col gap-4">
+          {/* 选项区超高时内部滚动，底部导航固定；容器自身不出现整页滚动 */}
+          <Card className="scrollbar-thin min-h-0 flex-1 divide-y overflow-y-auto p-0">
             <div className="p-5">
               <ResetOptions
                 resetMode={opts.resetMode}
@@ -543,6 +545,7 @@ export default function ImportView() {
             </div>
           </Card>
           <WizardFooter
+            className="shrink-0"
             onBack={() => setStep(1)}
             next={<Button onClick={startRun}><Play className="mr-1 h-4 w-4" /> {t("import.start")}</Button>}
           />
