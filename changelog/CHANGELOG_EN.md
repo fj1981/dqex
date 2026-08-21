@@ -7,6 +7,10 @@
 
 ### Changed
 - On macOS, reuses existing browser tab if the same URL is already open instead of opening a new one (supports Chrome / Safari / Firefox / Edge / Brave)
+- Database types are now shown as brand-colored icons; connection dropdown upgraded to a two-line layout (name/short name and host:port on separate lines) with selected-item highlight and full address available on hover
+
+### Fixed
+- Connection selector content being fully truncated in narrow sidebars; name and address no longer squeeze each other after the layout hierarchy rework
 
 ## [0.4.0] - 2026-08-20
 ### Added
