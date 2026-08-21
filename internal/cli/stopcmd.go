@@ -3,11 +3,8 @@ package cli
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -93,91 +90,5 @@ func findDqexProcesses() []procInfo {
 		return findDqexProcessesWindows()
 	default:
 		return findDqexProcessesUnix()
-	}
-}
-
-// findDqexProcessesUnix pgrep -x dqex（精确匹配进程名）
-func findDqexProcessesUnix() []procInfo {
-	out, err := exec.Command("pgrep", "-x", "dqex").Output()
-	if err != nil {
-		return nil
-	}
-	var procs []procInfo
-	for _, line := range strings.Split(string(out), "\n") {
-		pidStr := strings.TrimSpace(line)
-		if pidStr == "" {
-			continue
-		}
-		pid, err := strconv.Atoi(pidStr)
-		if err != nil {
-			continue
-		}
-		// 获取进程名
-		name := getProcessNameUnix(pid)
-		procs = append(procs, procInfo{PID: pid, Name: name})
-	}
-	return procs
-}
-
-func getProcessNameUnix(pid int) string {
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
-	if err != nil {
-		return "unknown"
-	}
-	return strings.TrimSpace(string(out))
-}
-
-func findDqexProcessesWindows() []procInfo {
-	out, err := exec.Command("tasklist", "/FI", "imagename eq dqex.exe", "/FO", "CSV", "/NH").Output()
-	if err != nil {
-		return nil
-	}
-	var procs []procInfo
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.Split(line, ",")
-		if len(parts) < 2 {
-			continue
-		}
-		pid, err := strconv.Atoi(strings.Trim(parts[1], "\""))
-		if err != nil {
-			continue
-		}
-		procs = append(procs, procInfo{PID: pid, Name: "dqex.exe"})
-	}
-	return procs
-}
-
-// killProc 发送 SIGTERM（Unix）或 taskkill（Windows）
-func killProc(pid int) error {
-	switch runtime.GOOS {
-	case "windows":
-		return exec.Command("taskkill", "/PID", strconv.Itoa(pid)).Run()
-	default:
-		return syscall.Kill(pid, syscall.SIGTERM)
-	}
-}
-
-// killProcForce 发送 SIGKILL（Unix）或 taskkill /F（Windows）
-func killProcForce(pid int) error {
-	switch runtime.GOOS {
-	case "windows":
-		return exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F").Run()
-	default:
-		return syscall.Kill(pid, syscall.SIGKILL)
-	}
-}
-
-// processExists 检查进程是否存在
-func processExists(pid int) bool {
-	switch runtime.GOOS {
-	case "windows":
-		out, _ := exec.Command("tasklist", "/FI", "PID eq "+strconv.Itoa(pid), "/FO", "CSV", "/NH").Output()
-		return strings.Contains(string(out), strconv.Itoa(pid))
-	default:
-		return syscall.Kill(pid, 0) == nil
 	}
 }

@@ -1,15 +1,16 @@
 package web
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"golang.org/x/term"
@@ -52,8 +53,15 @@ func ensurePortAvailable(host string, port int, lang string) bool {
 		fmt.Fprintf(os.Stderr, txt.altPort+"\n", port+1)
 		return false
 	}
-	// 交互提示
-	if !promptKill(txt) {
+	// 交互提示：终止 / 打开已有服务 / 取消
+	choice := promptKillOrOpen(txt, port)
+	switch choice {
+	case "o": // 打开已有服务
+		openExistingService(host, port)
+		return false
+	case "y": // 终止进程
+		// 继续执行终止逻辑
+	default: // 取消或其他
 		fmt.Fprintln(os.Stderr, txt.cancelled)
 		return false
 	}
@@ -245,28 +253,6 @@ func getProcessNameWindows(pid int) string {
 	return "unknown"
 }
 
-// ---- 进程终止 ----
-
-func killProcess(pid int) error {
-	switch runtime.GOOS {
-	case "windows":
-		return exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F").Run()
-	default:
-		return syscall.Kill(pid, syscall.SIGTERM)
-	}
-}
-
-// ---- 权限检测 ----
-
-func hasAdminPrivilege() bool {
-	switch runtime.GOOS {
-	case "windows":
-		return true // 直接尝试 taskkill，失败视为无权限
-	default:
-		return os.Geteuid() == 0
-	}
-}
-
 // ---- 辅助函数 ----
 
 func isTTY() bool {
@@ -278,6 +264,61 @@ func promptKill(txt portTexts) bool {
 	var answer string
 	fmt.Scanln(&answer)
 	return strings.EqualFold(strings.TrimSpace(answer), "y")
+}
+
+// promptKillOrOpen 交互提示：终止进程 / 打开已有服务 / 取消
+// 返回 "y"（终止）、"o"（打开已有服务）或其他（取消）
+func promptKillOrOpen(txt portTexts, port int) string {
+	fmt.Printf(txt.promptKillOrOpen+"\n", port)
+	fmt.Print("[y/o/N] ")
+	var answer string
+	fmt.Scanln(&answer)
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	if answer == "y" || answer == "o" {
+		return answer
+	}
+	return ""
+}
+
+// openExistingService 打开已运行的 dqex 服务地址（带 token）
+func openExistingService(host string, port int) {
+	browserHost := host
+	if browserHost == "" || browserHost == "0.0.0.0" || browserHost == "::" {
+		browserHost = "127.0.0.1"
+	}
+	url := "http://" + net.JoinHostPort(browserHost, strconv.Itoa(port)) + "/"
+	// 尝试从 web-access.json 读取 token
+	token := readTokenFromAccessFile(port)
+	if token != "" {
+		url += "?token=" + token
+	}
+	openBrowser(url)
+	fmt.Println("已打开浏览器访问已有服务")
+}
+
+// readTokenFromAccessFile 从数据目录的 web-access.json 读取 token
+func readTokenFromAccessFile(port int) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	accessFile := filepath.Join(home, ".dqex", "web-access.json")
+	data, err := os.ReadFile(accessFile)
+	if err != nil {
+		return ""
+	}
+	var info struct {
+		Token    string `json:"token"`
+		IssuedAt int64  `json:"issuedAt"`
+	}
+	if err := json.Unmarshal(data, &info); err != nil {
+		return ""
+	}
+	// 检查 token 是否过期（24小时）
+	if time.Now().After(time.UnixMilli(info.IssuedAt).Add(24 * time.Hour)) {
+		return ""
+	}
+	return info.Token
 }
 
 func printPortInfo(w io.Writer, procs []ProcInfo, port int, txt portTexts) {
@@ -314,6 +355,7 @@ type portTexts struct {
 	portOccupiedUnknown string // "端口 %d 已被占用，但无法识别占用进程。"
 	procLine            string // "  PID %d  %s"
 	promptKill          string // "是否终止占用进程? [y/N] "
+	promptKillOrOpen    string // "端口 %d 已被占用（dqex 已在运行）。是否终止进程并重启？或直接打开已有服务？"
 	killing             string // "正在终止进程 %d ..."
 	freed               string // "端口 %d 已释放，正在启动服务..."
 	stillOccupied       string // "端口 %d 仍被占用（可能处于 TIME_WAIT 状态），请等待或换端口"
@@ -336,6 +378,7 @@ var zhPortTexts = portTexts{
 	portOccupiedUnknown: "端口 %d 已被占用，但无法识别占用进程。",
 	procLine:            "  PID %d  %s",
 	promptKill:          "是否终止占用进程? [y/N] ",
+	promptKillOrOpen:    "端口 %d 已被占用（dqex 已在运行）。是否终止进程并重启？或直接打开已有服务？",
 	killing:             "正在终止进程 %d ...",
 	freed:               "端口 %d 已释放，正在启动服务...",
 	stillOccupied:       "端口 %d 仍被占用（可能处于 TIME_WAIT 状态），请等待或换端口",
@@ -351,6 +394,7 @@ var enPortTexts = portTexts{
 	portOccupiedUnknown: "Port %d is occupied, but the occupying process could not be identified.",
 	procLine:            "  PID %d  %s",
 	promptKill:          "Terminate the occupying process? [y/N] ",
+	promptKillOrOpen:    "Port %d is occupied (dqex is already running). Terminate and restart, or open the existing service?",
 	killing:             "Terminating process %d ...",
 	freed:               "Port %d released, starting service...",
 	stillOccupied:       "Port %d is still occupied (possibly TIME_WAIT), please wait or use another port",
