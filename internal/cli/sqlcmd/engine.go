@@ -27,6 +27,7 @@ type session struct {
 	lastErr     string   // 最近一次执行报错（供 \ai fix 自动携带）
 	displayMode string   // 结果展示模式："" / "auto"=超宽自动降级；"table"=强制表格；"vertical"=强制垂直
 	ai          *aiState // AI 会话状态（懒加载；切换数据库时重置）
+	offlineAI   *OfflineAssistant // 离线SQL智能辅助（规则引擎+模板库）
 }
 
 func newSession(info *engine.DBConnInfo) (*session, error) {
@@ -39,6 +40,7 @@ func newSession(info *engine.DBConnInfo) (*session, error) {
 		cli:       cliDB,
 		currentDB: info.DBName,
 		dbType:    info.Type,
+		offlineAI: NewOfflineAssistant(), // 初始化离线助手
 	}, nil
 }
 
@@ -241,6 +243,14 @@ func (s *session) handleMeta(cmd string) (bool, bool) {
 	case "\\ai":
 		s.aiCommand(args)
 		return true, false
+	case "\\template", "\\tpl":
+		// 离线SQL模板：\template <模板ID> [参数...]
+		s.applyTemplate(args)
+		return true, false
+	case "\\templates", "\\tpls":
+		// 列出所有可用模板：\templates [分类]
+		s.listTemplates(args)
+		return true, false
 	}
 	return false, false
 }
@@ -260,6 +270,88 @@ func (s *session) runLastSQL(vertical bool) {
 		return
 	}
 	s.renderResult(result, vertical)
+}
+
+// applyTemplate 应用离线SQL模板
+func (s *session) applyTemplate(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, red("用法: \\template <模板ID> [参数...]"))
+		fmt.Fprintln(os.Stderr, dim("示例: \\template top_n amount orders 10"))
+		fmt.Fprintln(os.Stderr, dim("使用 \\templates 查看所有可用模板"))
+		return
+	}
+	
+	templateID := args[0]
+	params := args[1:]
+	
+	sql, err := s.offlineAI.ApplyTemplate(templateID, params)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, red(err.Error()))
+		return
+	}
+	
+	// 显示生成的SQL
+	fmt.Println(green("✓ 生成的SQL:"))
+	fmt.Println(bold(sql))
+	fmt.Println(dim("提示: 使用 \\g 执行，或 \\e 编辑后执行"))
+	
+	// 自动加载到缓冲区
+	s.lastSQL = sql
+}
+
+// listTemplates 列出所有可用模板
+func (s *session) listTemplates(args []string) {
+	category := ""
+	if len(args) > 0 {
+		category = args[0]
+	}
+	
+	templates := s.offlineAI.ListTemplates(category)
+	if len(templates) == 0 {
+		fmt.Println(yellow("未找到匹配的模板"))
+		return
+	}
+	
+	// 按分类分组显示
+	categories := make(map[string][]SQLTemplate)
+	for _, tmpl := range templates {
+		categories[tmpl.Category] = append(categories[tmpl.Category], tmpl)
+	}
+	
+	fmt.Println(bold("📚 可用SQL模板:"))
+	fmt.Println()
+	
+	// 定义分类名称映射
+	categoryNames := map[string]string{
+		"query":       "🔍 基础查询",
+		"aggregation": "📊 聚合统计",
+		"filter":      "🎯 条件过滤",
+		"join":        "🔗 关联查询",
+	}
+	
+	// 按固定顺序显示分类
+	catOrder := []string{"query", "aggregation", "filter", "join"}
+	for _, cat := range catOrder {
+		tmpls, ok := categories[cat]
+		if !ok {
+			continue
+		}
+		
+		catName := categoryNames[cat]
+		if catName == "" {
+			catName = cat
+		}
+		
+		fmt.Printf("%s:\n", bold(catName))
+		for _, tmpl := range tmpls {
+			fmt.Printf("  %-20s %s\n", cyan(tmpl.ID), tmpl.Description)
+			fmt.Printf("    示例: %s\n", dim(tmpl.Example))
+		}
+		fmt.Println()
+	}
+	
+	fmt.Println(dim("使用方法: \\template <模板ID> [参数...]"))
+	fmt.Println(dim("例如:   \\template top_n amount orders 10"))
 }
 
 // renderResult 按显示模式渲染查询结果；forceVertical 为 \G / SQL 后缀 \G 的单次垂直。

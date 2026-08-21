@@ -38,6 +38,7 @@ var (
 	green  = func(s string) string { return colorize("32", s) }
 	red    = func(s string) string { return colorize("31", s) }
 	yellow = func(s string) string { return colorize("33", s) }
+	cyan   = func(s string) string { return colorize("36", s) }
 	bold   = func(s string) string { return colorize("1", s) }
 	dim    = func(s string) string { return colorize("2", s) }
 )

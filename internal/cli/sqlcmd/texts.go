@@ -272,6 +272,8 @@ var cliTextsMap = map[string]cliTexts{
   \\copy <文件>          导出上一条查询结果到文件（CSV）
   \\w <文件>             导出上一条查询结果到文件
   \\i <文件>             执行文件中的 SQL
+  \\template <ID> [参数] 从离线模板生成SQL（无需联网）
+  \\templates [分类]     列出所有可用模板
 
 快捷键:
   Enter (分号结尾)      执行 SQL
@@ -423,6 +425,8 @@ var cliTextsMap = map[string]cliTexts{
   \\copy <file>          export the last query result to a file (CSV)
   \\w <file>             export the last query result to a file
   \\i <file>             execute SQL from a file
+  \\template <id> [args] generate SQL from offline template (offline AI)
+  \\templates [category] list all available templates
 
 Shortcuts:
   Enter (ends with ;)   execute SQL
