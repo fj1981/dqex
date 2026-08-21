@@ -32,7 +32,7 @@ import {
 } from "lucide-react"
 
 import * as api from "@/api"
-import { Badge } from "@/components/ui/badge"
+import DbTypeIcon from "@/components/DbTypeIcon"
 import { Button } from "@/components/ui/button"
 import { confirm, prompt } from "@/components/ui/alert-dialog"
 import { Separator } from "@/components/ui/separator"
@@ -254,9 +254,7 @@ function RightPanel() {
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate text-sm font-medium">{c.name}</span>
-                <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px] font-normal uppercase">
-                  {c.conn.Type}
-                </Badge>
+                <DbTypeIcon type={c.conn.Type} />
               </div>
               <div className="truncate text-[11px] leading-snug text-muted-foreground">
                 {c.conn.Host}:{c.conn.Port}

@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Camera, CheckCircle2, ChevronDown, ChevronUp, Database, Loader2, Play, Plus, RotateCcw, ScrollText, Trash2 } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import DbTypeIcon from "@/components/DbTypeIcon"
 import { Button } from "@/components/ui/button"
 import { confirm } from "@/components/ui/alert-dialog"
 import { Card } from "@/components/ui/card"
@@ -285,9 +285,7 @@ export default function SnapshotView() {
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">{s.name}</span>
                 </div>
                 <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal uppercase">
-                    {s.dbType}
-                  </Badge>
+                  <DbTypeIcon type={s.dbType} className="h-3.5 w-3.5 text-[7px]" />
                   <span className="truncate">{s.dbNames?.length ? s.dbNames.join(", ") : s.dbName}</span>
                 </div>
                 <div className="mt-1 text-[11px] text-muted-foreground">
@@ -308,9 +306,7 @@ export default function SnapshotView() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <h3 className="truncate text-base font-medium">{detail.name}</h3>
-                      <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal uppercase">
-                        {detail.dbType}
-                      </Badge>
+                      <DbTypeIcon type={detail.dbType} />
                     </div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
@@ -349,7 +345,7 @@ export default function SnapshotView() {
                         {connections.map((c) => (
                           <SelectItem key={c.id} value={c.id}>
                             <span className="flex items-center gap-1.5">
-                              <span className="rounded bg-muted px-1 py-0 text-[10px] uppercase">{c.conn.Type}</span>
+                              <DbTypeIcon type={c.conn.Type} className="h-3.5 w-3.5 text-[7px]" />
                               <span>{c.name}</span>
                             </span>
                           </SelectItem>

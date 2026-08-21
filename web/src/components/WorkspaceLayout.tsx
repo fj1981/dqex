@@ -3,7 +3,7 @@ import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panel
 import { useTranslation } from "react-i18next"
 import { AlertCircle, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, FunctionSquare, Lightbulb, List, Loader2, Plus, SkipForward, Sparkles, Star, Table2, View, X } from "lucide-react"
 import { toast } from "sonner"
-import { Badge } from "@/components/ui/badge"
+import DbTypeIcon from "@/components/DbTypeIcon"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -362,7 +362,11 @@ export default function WorkspaceLayout() {
                   切换连接时无需跨越整个 tab 区，操作更顺手。「对象」标题和折叠按钮放在右侧同一行。
                   健康圆点保留在 trigger 内，便于手动复检。 */}
               <Select value={connId} onValueChange={setConnId}>
-                <SelectTrigger className="h-7 min-w-0 flex-1 px-2 text-xs">
+                {/* 窄栏放不下 host:port 文本，完整地址挂 title 悬停可见（下拉选项里仍完整展示） */}
+                <SelectTrigger
+                  className="h-7 min-w-0 flex-1 px-2 text-xs"
+                  title={conn ? `${conn.name} · ${conn.conn.Host}:${conn.conn.Port}` : undefined}
+                >
                   {conn ? (
                     <span className="flex min-w-0 items-center gap-1.5">
                       <span
@@ -385,32 +389,35 @@ export default function WorkspaceLayout() {
                                 : "bg-muted-foreground",
                         )}
                       />
-                      <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px] font-normal uppercase">
-                        {conn.conn.Type}
-                      </Badge>
-                      <span className="truncate font-medium">{conn.name}</span>
+                      <DbTypeIcon type={conn.conn.Type} />
+                      <span className="min-w-0 flex-1 truncate font-medium">{conn.name}</span>
                     </span>
                   ) : (
                     <span className="text-muted-foreground">{t("workspace.selectConn")}</span>
                   )}
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="w-[280px]">
                   {connections.length === 0 ? (
                     <div className="px-2 py-4 text-center text-sm text-muted-foreground">
                       {t("workspace.noConnNew")}
                     </div>
                   ) : (
                     connections.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        <span className="flex items-center gap-2">
-                          <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal uppercase">
-                            {c.conn.Type}
-                          </Badge>
-                          <span className="truncate">{c.name}</span>
-                          {c.shortName && (
-                            <span className="text-xs font-mono text-muted-foreground">({c.shortName})</span>
-                          )}
-                          <span className="text-xs text-muted-foreground">
+                      <SelectItem
+                        key={c.id}
+                        value={c.id}
+                        // 选中项浅色底 + 对勾，未选中仅悬停高亮
+                        className="data-[state=checked]:bg-primary/5"
+                      >
+                        <span className="flex min-w-0 flex-col gap-0.5">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <DbTypeIcon type={c.conn.Type} />
+                            <span className="min-w-0 flex-1 truncate font-medium">{c.name}</span>
+                            {c.shortName && (
+                              <span className="shrink-0 text-xs font-mono text-muted-foreground">({c.shortName})</span>
+                            )}
+                          </span>
+                          <span className="truncate pl-6 font-mono text-xs text-muted-foreground">
                             {c.conn.Host}:{c.conn.Port}
                           </span>
                         </span>

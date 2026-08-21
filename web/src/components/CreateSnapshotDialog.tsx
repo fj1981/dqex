@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Camera, Database, Info, Loader2, Sparkles, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import DbTypeIcon from "@/components/DbTypeIcon"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -221,9 +222,7 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
             <Camera className="h-4 w-4 text-primary" />
             <DialogTitle>{t("createSnapshot.title")}</DialogTitle>
             {selectedConn && (
-              <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal uppercase">
-                {selectedConn.conn.Type}
-              </Badge>
+              <DbTypeIcon type={selectedConn.conn.Type} />
             )}
           </div>
           <DialogDescription>
@@ -258,9 +257,7 @@ export default function CreateSnapshotDialog({ open, onOpenChange, onCreated }: 
                   {connections.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
                       <span className="flex items-center gap-2">
-                        <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal uppercase">
-                          {c.conn.Type}
-                        </Badge>
+                        <DbTypeIcon type={c.conn.Type} />
                         <span className="truncate">{c.name}</span>
                       </span>
                     </SelectItem>

@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+import DbTypeIcon from "@/components/DbTypeIcon"
 import { confirm } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -224,8 +224,8 @@ export default function ConnectionDrawer() {
                         <Trash2 className="h-3 w-3" />
                       </Button>
                     </div>
-                    <div className="mt-0.5 flex items-center gap-1 truncate pl-3.5 text-[11px] text-muted-foreground">
-                      <span className="font-mono uppercase">{c.conn.Type}</span>
+                    <div className="mt-0.5 flex items-center gap-1.5 truncate pl-3.5 text-[11px] text-muted-foreground">
+                      <DbTypeIcon type={c.conn.Type} className="h-3.5 w-3.5 text-[7px]" />
                       {c.env && <span className="rounded-sm border px-1 text-[9px] uppercase tracking-wide">{c.env}</span>}
                       <span className="truncate">{c.conn.Host}:{c.conn.Port}</span>
                     </div>
@@ -309,7 +309,12 @@ export default function ConnectionDrawer() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {Object.keys(dbTypes).map((t) => (
-                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                        <SelectItem key={t} value={t}>
+                          <span className="flex items-center gap-2">
+                            <DbTypeIcon type={t} />
+                            {t}
+                          </span>
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

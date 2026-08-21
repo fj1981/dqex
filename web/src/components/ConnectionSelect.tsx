@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { CheckCircle2, Database, Loader2, PlugZap, Settings2, XCircle } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import DbTypeIcon from "@/components/DbTypeIcon"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import {
@@ -78,11 +78,12 @@ export default function ConnectionSelect({ title, subtitle, value, onChange, fil
         <SelectTrigger className={cn("h-11", !selected && "text-muted-foreground")}>
           {selected ? (
             <span className="flex items-center gap-2">
-              <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal uppercase">
-                {selected.conn.Type}
-              </Badge>
-              <span className="truncate font-medium">{selected.name}</span>
+              <DbTypeIcon type={selected.conn.Type} />
+              <span className="min-w-0 flex-1 truncate font-medium">{selected.name}</span>
               {selected.shortName && <span className="shrink-0 text-xs text-muted-foreground">({selected.shortName})</span>}
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {selected.conn.Host}:{selected.conn.Port}
+              </span>
             </span>
           ) : (
             <span>{t("conn.selectPlaceholder")}</span>
@@ -93,14 +94,19 @@ export default function ConnectionSelect({ title, subtitle, value, onChange, fil
             <div className="px-2 py-4 text-center text-sm text-muted-foreground">{t("conn.noConnsHint")}</div>
           )}
           {connections.map((c) => (
-            <SelectItem key={c.id} value={c.id}>
-              <span className="flex items-center gap-2">
-                <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal uppercase">
-                  {c.conn.Type}
-                </Badge>
-                {c.name}
-                {c.shortName && <span className="text-xs text-muted-foreground font-mono">({c.shortName})</span>}
-                <span className="text-xs text-muted-foreground">
+            <SelectItem
+              key={c.id}
+              value={c.id}
+              // 选中项浅色底 + 对勾，未选中仅悬停高亮
+              className="data-[state=checked]:bg-primary/5"
+            >
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="flex min-w-0 items-center gap-2">
+                  <DbTypeIcon type={c.conn.Type} />
+                  <span className="min-w-0 flex-1 truncate font-medium">{c.name}</span>
+                  {c.shortName && <span className="shrink-0 text-xs font-mono text-muted-foreground">({c.shortName})</span>}
+                </span>
+                <span className="truncate pl-6 font-mono text-xs text-muted-foreground">
                   {c.conn.Host}:{c.conn.Port}
                 </span>
               </span>
