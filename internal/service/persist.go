@@ -173,7 +173,12 @@ func (p *PersistMgr) RemoveArtifact(outputPath string) {
 		return
 	}
 	if err := os.RemoveAll(path); err != nil {
-		cylog.Warnf("清理产物文件失败 %s: %v", path, err)
+		// 避免日志暴露完整服务器路径
+		if pe, ok := err.(*os.PathError); ok {
+			cylog.Warnf("清理产物文件失败: %v", pe.Err)
+		} else {
+			cylog.Warnf("清理产物文件失败: %v", err)
+		}
 	}
 }
 

@@ -57,7 +57,12 @@ func writeWebAccessFile(baseDir, addr, token string, issuedAt int64) {
 	}
 	path := filepath.Join(baseDir, webAccessFileName)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
-		cylog.Warnf("写入 Web 访问凭证文件失败（不影响启动）: %v", err)
+		// 避免日志暴露完整服务器路径
+		if pe, ok := err.(*os.PathError); ok {
+			cylog.Warnf("写入 Web 访问凭证文件失败（不影响启动）: %v", pe.Err)
+		} else {
+			cylog.Warnf("写入 Web 访问凭证文件失败（不影响启动）: %v", err)
+		}
 	}
 }
 
@@ -185,6 +190,10 @@ func openBrowser(url string) {
 func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth, noBrowser bool) {
 	if noAuth && !isLoopback(host) {
 		cylog.Errorf("安全限制: --no-auth 仅允许监听本机回环地址；对外暴露（--host %s）必须启用令牌认证，请去掉 --no-auth 后重启", host)
+		return
+	}
+	// 端口预检：占用时交互提示终止占用进程，重试绑定
+	if !ensurePortAvailable(host, port, "zh") {
 		return
 	}
 	// 访问来源白名单过滤器：启动时由 --allow / 配置初始化，配置保存后可热更新（handleSaveConfig）

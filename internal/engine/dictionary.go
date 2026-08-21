@@ -227,7 +227,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 	result := &ExportResult{OutputDir: baseDir, TotalTables: totalTables}
 	if opts.Compress {
 		zipPath := filepath.Join(outputDir, fmt.Sprintf("%s_%s.zip", taskName, ts))
-		t.log(engineTextsFor(t.lang).zipPack, zipPath)
+		t.log(engineTextsFor(t.lang).zipPack, filepath.Base(zipPath))
 		if err := zipDir(baseDir, zipPath); err != nil {
 			return nil, NewMsgErrf(errDictZipPack, err)
 		}
@@ -239,7 +239,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 
 	t.p.OutputPath = result.OutputPath
 	t.finish()
-	t.log(engineTextsFor(t.lang).dictDone, len(infos), totalTables, result.OutputPath)
+	t.log(engineTextsFor(t.lang).dictDone, len(infos), totalTables, filepath.Base(result.OutputPath))
 	return result, nil
 }
 

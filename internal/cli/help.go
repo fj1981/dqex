@@ -187,6 +187,7 @@ CLI 子命令与 Web 功能对齐：export / import / migrate / compare / dictio
 			flags: map[string]string{"token-only": "仅输出 token（便于脚本/API 调试）"},
 		},
 		"version": {short: "查看版本号"},
+		"stop":    {short: "终止其他 dqex 进程"},
 		"task":    {short: "任务配置管理（list/show/run/save/delete）"},
 		"task list": {
 			short: "列出任务配置",
@@ -493,6 +494,7 @@ Examples:
 			flags: map[string]string{"token-only": "Print token only (for scripts/API debugging)"},
 		},
 		"version": {short: "Show version"},
+		"stop":    {short: "Terminate other dqex processes"},
 		"task":    {short: "Task config management (list/show/run/save/delete)"},
 		"task list": {
 			short: "List task configs",

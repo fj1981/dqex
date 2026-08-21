@@ -1,6 +1,10 @@
 # Changelog
 
 ## [0.5.0] - 2026-08-21
+### Added
+- Port occupation detection: automatically checks port availability before Web service startup; interactively prompts to terminate occupying process and retries binding; supports macOS/Linux/Windows
+- `dqex stop` command: finds and terminates other running dqex processes
+
 ### Changed
 - Binary renamed from `dbx` to `dqex` (d=database, q=query, e=execute, ex=export/extension); all CLI commands, scripts, and docs updated accordingly
 - Config directory renamed from `~/.dbimpex` to `~/.dqex`; environment variable renamed from `DBIMPEX_CONFIG` to `DQEX_CONFIG`

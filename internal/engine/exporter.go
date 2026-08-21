@@ -106,7 +106,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 		totalTables += len(p.tables)
 	}
 	t.p.TotalUnits = totalTables
-	t.log(engineTextsFor(t.lang).expStart, len(plan), totalTables, baseDir)
+	t.log(engineTextsFor(t.lang).expStart, len(plan), totalTables, filepath.Base(baseDir))
 
 	// 3. 逐库导出（每库一个 sql 文件）
 	var totalRows int64
@@ -143,7 +143,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 	result := &ExportResult{OutputDir: baseDir, TotalTables: totalTables, TotalRows: totalRows}
 	if opts.Compress {
 		zipPath := filepath.Join(outputDir, fmt.Sprintf("%s_%s.zip", taskName, ts))
-		t.log(engineTextsFor(t.lang).zipPack, zipPath)
+		t.log(engineTextsFor(t.lang).zipPack, filepath.Base(zipPath))
 		if err := zipDir(baseDir, zipPath); err != nil {
 			return nil, NewMsgErrf(errExpZipPack, err)
 		}
@@ -156,7 +156,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 
 	t.p.OutputPath = result.OutputPath
 	t.finish()
-	t.log(engineTextsFor(t.lang).expDone, totalTables, totalRows, result.OutputPath)
+	t.log(engineTextsFor(t.lang).expDone, totalTables, totalRows, filepath.Base(result.OutputPath))
 	return result, nil
 }
 
