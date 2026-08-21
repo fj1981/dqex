@@ -3,15 +3,15 @@ package cli
 // 点导入：CLI 层大量复用 service 包的模型别名与入口（NewService/选项模型/错误码）
 import (
 	"context"
-	. "dbimpex/internal/service"
+	. "dqex/internal/service"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 
-	"dbimpex/internal/cli/sqlcmd"
-	"dbimpex/internal/engine"
-	"dbimpex/internal/llm"
+	"dqex/internal/cli/sqlcmd"
+	"dqex/internal/engine"
+	"dqex/internal/llm"
 
 	"github.com/spf13/cobra"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
@@ -55,9 +55,9 @@ func init() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "dbx",
+	Use:   "dqex",
 	Short: "数据库导入/导出/迁移/对比工具",
-	Long: `dbx - 数据库导入/导出/迁移/对比工具
+	Long: `dqex - 数据库导入/导出/迁移/对比工具
 
 不带子命令时启动 Web 服务（默认端口 8181）。
 CLI 子命令与 Web 功能对齐：export / import / migrate / compare / conn / task / history`,
@@ -83,8 +83,8 @@ func Execute() *WebArgs {
 	rootCmd.PersistentFlags().StringVar(&webArgs.Allow, "allow", "", "访问来源白名单（IP/CIDR/域名，逗号分隔；留空不限制，优先于配置 web.allow；本机回环始终放行）")
 	rootCmd.PersistentFlags().BoolVar(&webArgs.NoAuth, "no-auth", false, "禁用令牌认证（仅限监听本机回环，不推荐）")
 	rootCmd.PersistentFlags().BoolVar(&webArgs.NoBrowser, "no-browser", false, "启动时不自动打开浏览器")
-	rootCmd.PersistentFlags().StringVar(&webArgs.DataDir, "data-dir", "", "数据根目录（默认取全局配置，否则 ~/.dbimpex）")
-	rootCmd.PersistentFlags().StringVar(&webArgs.ConfigFile, "config-file", "", "全局配置文件（默认 环境变量 DBIMPEX_CONFIG 或 ~/.dbimpex/config.yaml）")
+	rootCmd.PersistentFlags().StringVar(&webArgs.DataDir, "data-dir", "", "数据根目录（默认取全局配置，否则 ~/.dqex）")
+	rootCmd.PersistentFlags().StringVar(&webArgs.ConfigFile, "config-file", "", "全局配置文件（默认 环境变量 dqex_CONFIG 或 ~/.dqex/config.yaml）")
 	rootCmd.PersistentFlags().BoolVar(&webArgs.Debug, "debug", false, "输出 debug 及以上级别的日志（含 AI 链路；等效 config 顶层 debug: true）")
 	rootCmd.PersistentFlags().StringVar(&langFlag, "lang", "", "CLI 输出语言（zh/en；环境变量 DBX_LANG，默认 zh）")
 	// help 展示（--help / 裸跑分组命令）也视为 CLI 执行，避免随后误启 Web
@@ -129,7 +129,7 @@ func cliErrMsg(err error) string {
 	return err.Error()
 }
 
-// newCliService 解析全局配置（--data-dir/--config-file/DBIMPEX_CONFIG/~/.dbimpex/config.yaml）后构建 Service
+// newCliService 解析全局配置（--data-dir/--config-file/dqex_CONFIG/~/.dqex/config.yaml）后构建 Service
 func newCliService() (*Service, error) {
 	svc, err := NewServiceWith(WithLang(context.Background(), cliLang()), webArgs.DataDir, webArgs.ConfigFile)
 	if err != nil {
@@ -143,7 +143,7 @@ func newCliService() (*Service, error) {
 	return svc, nil
 }
 
-// ---- Shell 动态补全（配合 dbx completion 生成的补全脚本） ----
+// ---- Shell 动态补全（配合 dqex completion 生成的补全脚本） ----
 
 // completeConnNames 补全已保存连接（名称+短名，Tab 描述附 ID 和地址）
 func completeConnNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

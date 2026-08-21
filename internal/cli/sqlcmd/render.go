@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"dbimpex/internal/engine"
+	"dqex/internal/engine"
 
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/tw"
@@ -316,7 +316,7 @@ func auditLogPath() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".dbimpex", auditFileName)
+	return filepath.Join(home, ".dqex", auditFileName)
 }
 
 func rotateAuditLogs(basePath string) {

@@ -6,8 +6,8 @@ package cli
 // 注册表缺条目时保持定义时中文（zh 基准），新增语言只加 map 条目。
 
 import (
-	"dbimpex/internal/cli/sqlcmd"
-	"dbimpex/internal/llm"
+	"dqex/internal/cli/sqlcmd"
+	"dqex/internal/llm"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -123,7 +123,7 @@ func zhHelpTexts() cliHelpTexts {
 	return cliHelpTexts{cmds: map[string]cliHelpCmd{
 		"root": {
 			short: "数据库导入/导出/迁移/对比工具",
-			long: `dbx - 数据库导入/导出/迁移/对比工具
+			long: `dqex - 数据库导入/导出/迁移/对比工具
 
 不带子命令时启动 Web 服务（默认端口 8181）。
 CLI 子命令与 Web 功能对齐：export / import / migrate / compare / dictionary / snapshot / conn / task / history`,
@@ -133,8 +133,8 @@ CLI 子命令与 Web 功能对齐：export / import / migrate / compare / dictio
 				"allow":       "访问来源白名单（IP/CIDR/域名，逗号分隔；留空不限制，优先于配置 web.allow；本机回环始终放行）",
 				"no-auth":     "禁用令牌认证（仅限监听本机回环，不推荐）",
 				"no-browser":  "启动时不自动打开浏览器",
-				"data-dir":    "数据根目录（默认取全局配置，否则 ~/.dbimpex）",
-				"config-file": "全局配置文件（默认 环境变量 DBIMPEX_CONFIG 或 ~/.dbimpex/config.yaml）",
+				"data-dir":    "数据根目录（默认取全局配置，否则 ~/.dqex）",
+				"config-file": "全局配置文件（默认 环境变量 dqex_CONFIG 或 ~/.dqex/config.yaml）",
 				"debug":       "输出 debug 及以上级别的日志（含 AI 调用；等效配置文件顶层 debug: true）",
 				"lang":        "CLI 输出语言（zh/en；环境变量 DBX_LANG，默认 zh）",
 			},
@@ -167,11 +167,11 @@ CLI 子命令与 Web 功能对齐：export / import / migrate / compare / dictio
 			long: `查看解析后的全局配置（四类数据目录）。
 
 全局配置文件为 config.yaml，查找顺序：
-  --config-file > 环境变量 DBIMPEX_CONFIG > ~/.dbimpex/config.yaml
+  --config-file > 环境变量 dqex_CONFIG > ~/.dqex/config.yaml
 
-目录优先级：--data-dir > 配置文件 dirs.data > 默认 ~/.dbimpex；
+目录优先级：--data-dir > 配置文件 dirs.data > 默认 ~/.dqex；
 其余目录：配置文件显式值 > 由 data 目录派生。
-使用 dbx config --gen 输出配置模板。`,
+使用 dqex config --gen 输出配置模板。`,
 			flags: map[string]string{"gen": "输出全局配置模板到标准输出"},
 		},
 		"url": {
@@ -181,9 +181,9 @@ CLI 子命令与 Web 功能对齐：export / import / migrate / compare / dictio
 删除数据目录下的数据文件不影响启动（下次启动自动重建）。
 
 示例：
-  dbx url                                    # 完整访问链接
-  dbx url --token-only                       # 仅输出 token
-  curl -H "Authorization: Bearer $(dbx url --token-only)" http://127.0.0.1:8181/api/connections`,
+  dqex url                                    # 完整访问链接
+  dqex url --token-only                       # 仅输出 token
+  curl -H "Authorization: Bearer $(dqex url --token-only)" http://127.0.0.1:8181/api/connections`,
 			flags: map[string]string{"token-only": "仅输出 token（便于脚本/API 调试）"},
 		},
 		"version": {short: "查看版本号"},
@@ -201,11 +201,11 @@ CLI 子命令与 Web 功能对齐：export / import / migrate / compare / dictio
 			long: `管理数据库快照，支持与当前数据库状态对比。
 
 独立闭环用法：
-  dbx snapshot create -c <连接名> -d <数据库> -n <名称>     # 创建快照
-  dbx snapshot list                                           # 列出所有快照
-  dbx snapshot show -i <快照ID>                               # 查看快照详情
-  dbx snapshot delete -i <快照ID>                             # 删除快照
-  dbx snapshot compare -i <快照ID> -c <连接名> -d <数据库>    # 快照 vs 当前库`,
+  dqex snapshot create -c <连接名> -d <数据库> -n <名称>     # 创建快照
+  dqex snapshot list                                           # 列出所有快照
+  dqex snapshot show -i <快照ID>                               # 查看快照详情
+  dqex snapshot delete -i <快照ID>                             # 删除快照
+  dqex snapshot compare -i <快照ID> -c <连接名> -d <数据库>    # 快照 vs 当前库`,
 		},
 		"snapshot create": {
 			short: "创建数据库快照",
@@ -245,14 +245,14 @@ CLI 子命令与 Web 功能对齐：export / import / migrate / compare / dictio
 			long: `对比两个数据库的结构与数据差异。
 
 独立闭环用法：
-  dbx compare --gen-config > compare.yaml   # 生成配置模板
+  dqex compare --gen-config > compare.yaml   # 生成配置模板
   vi compare.yaml                               # 填写连接与选项
-  dbx compare --config compare.yaml         # 执行对比
+  dqex compare --config compare.yaml         # 执行对比
 
 命令行参数优先于配置文件；也可完全通过 flags 指定连接（--source-* / --target-*）。
 连接 flag 提供 mysqldump 风格别名：--source-user/--source-password/--source-database（及 target- 同名系列）`,
 			flags: mergeMaps(zhConnFlags("source"), zhConnFlags("target"), zhConnAliases("source-", "source-"), zhConnAliases("target-", "target-"), map[string]string{
-				"config":         "配置文件(yaml)，dbx compare --gen-config 可生成模板",
+				"config":         "配置文件(yaml)，dqex compare --gen-config 可生成模板",
 				"gen-config":     "输出配置文件模板到标准输出",
 				"task":           "已保存任务配置 ID（Web 保存的任务）",
 				"source-conn":    "使用已保存源连接（ID 或名称）",
@@ -273,8 +273,8 @@ CLI 子命令与 Web 功能对齐：export / import / migrate / compare / dictio
 			short: "回看历史对比记录的差异明细",
 			long: `回看历史对比记录的差异明细。
 
-dbx cmp show -i <记录ID>                # 全部表明细
-dbx cmp show -i <记录ID> t_config       # 单表差异明细（位置参数或 --table/-t 均可，列级对照 + 差异行样例）`,
+dqex cmp show -i <记录ID>                # 全部表明细
+dqex cmp show -i <记录ID> t_config       # 单表差异明细（位置参数或 --table/-t 均可，列级对照 + 差异行样例）`,
 			flags: map[string]string{
 				"id":    "对比记录 ID（compare 执行后输出，或 history list --type compare 查看）",
 				"table": "仅显示指定表的差异明细",
@@ -285,9 +285,9 @@ dbx cmp show -i <记录ID> t_config       # 单表差异明细（位置参数或
 			long: `导出数据库结构及数据为 SQL（可压缩为 zip / gzip）。
 
 独立闭环用法：
-  dbx export --gen-config > export.yaml   # 生成配置模板
+  dqex export --gen-config > export.yaml   # 生成配置模板
   vi export.yaml                              # 填写连接与选项
-  dbx export --config export.yaml         # 执行导出
+  dqex export --config export.yaml         # 执行导出
 
 命令行参数优先于配置文件；也可完全通过 flags 指定连接（--source-*）。
 连接与常用 flag 提供 mysqldump 风格别名：
@@ -295,7 +295,7 @@ dbx cmp show -i <记录ID> t_config       # 单表差异明细（位置参数或
   短参：-h/-P/-u/-p（主机/端口/用户/密码）、-s（已保存连接）、-o（输出）、-T（表）
   位置参数 [库名 [表名...]] 等同 --databases/--tables`,
 			flags: mergeMaps(zhConnFlags("source"), zhConnAliases("", "source-"), map[string]string{
-				"config":             "配置文件(yaml)，dbx export --gen-config 可生成模板",
+				"config":             "配置文件(yaml)，dqex export --gen-config 可生成模板",
 				"gen-config":         "输出配置文件模板到标准输出",
 				"task":               "已保存任务配置 ID（Web 保存的任务）",
 				"source-conn":        "使用已保存连接（ID 或名称），与 --source-* 同时给出时后者优先",
@@ -321,15 +321,15 @@ dbx cmp show -i <记录ID> t_config       # 单表差异明细（位置参数或
 			long: `导入 SQL 文件（.sql / .sql.gz / .zip）到数据库。
 
 独立闭环用法：
-  dbx import --gen-config > import.yaml   # 生成配置模板
+  dqex import --gen-config > import.yaml   # 生成配置模板
   vi import.yaml                              # 填写连接与选项
-  dbx import --config import.yaml         # 执行导入
+  dqex import --config import.yaml         # 执行导入
 
 命令行参数优先于配置文件；也可完全通过 flags 指定连接（--target-*）。
 连接 flag 提供 mysqldump 风格别名：--host/--port/--user/--password/--database
 短参：-h/-P/-u/-p（主机/端口/用户/密码）、-t（已保存连接）、-i（导入文件）`,
 			flags: mergeMaps(zhConnFlags("target"), zhConnAliases("", "target-"), map[string]string{
-				"config":      "配置文件(yaml)，dbx import --gen-config 可生成模板",
+				"config":      "配置文件(yaml)，dqex import --gen-config 可生成模板",
 				"gen-config":  "输出配置文件模板到标准输出",
 				"task":        "已保存任务配置 ID（Web 保存的任务）",
 				"target-conn": "使用已保存连接（ID 或名称），与 --target-* 同时给出时后者优先",
@@ -345,14 +345,14 @@ dbx cmp show -i <记录ID> t_config       # 单表差异明细（位置参数或
 			long: `数据库迁移（支持跨类型）。
 
 独立闭环用法：
-  dbx migrate --gen-config > migrate.yaml   # 生成配置模板
+  dqex migrate --gen-config > migrate.yaml   # 生成配置模板
   vi migrate.yaml                               # 填写连接与选项
-  dbx migrate --config migrate.yaml         # 执行迁移
+  dqex migrate --config migrate.yaml         # 执行迁移
 
 命令行参数优先于配置文件；也可完全通过 flags 指定连接（--source-* / --target-*）。
 连接 flag 提供 mysqldump 风格别名：--source-user/--source-password/--source-database（及 target- 同名系列）`,
 			flags: mergeMaps(zhConnFlags("source"), zhConnFlags("target"), zhConnAliases("source-", "source-"), zhConnAliases("target-", "target-"), map[string]string{
-				"config":      "配置文件(yaml)，dbx migrate --gen-config 可生成模板",
+				"config":      "配置文件(yaml)，dqex migrate --gen-config 可生成模板",
 				"gen-config":  "输出配置文件模板到标准输出",
 				"task":        "已保存任务配置 ID（Web 保存的任务）",
 				"source-conn": "使用已保存源连接（ID 或名称）",
@@ -373,15 +373,15 @@ dbx cmp show -i <记录ID> t_config       # 单表差异明细（位置参数或
 产物为单个 Excel 工作簿：总览页（全实例表清单，超链接跳转）+ 每库一个字段明细页。
 
 独立闭环用法：
-  dbx dictionary --gen-config > dictionary.yaml   # 生成配置模板
+  dqex dictionary --gen-config > dictionary.yaml   # 生成配置模板
   vi dictionary.yaml                                # 填写连接与选项
-  dbx dictionary --config dictionary.yaml         # 执行生成
+  dqex dictionary --config dictionary.yaml         # 执行生成
 
 命令行参数优先于配置文件；也可完全通过 flags 指定连接（--source-*）。
   短参：-h/-P/-u/-p（主机/端口/用户/密码）、-s（已保存连接）、-o（输出）、-T（表）
   位置参数 [库名 [表名...]] 等同 --databases/--tables`,
 			flags: mergeMaps(zhConnFlags("source"), zhConnAliases("", "source-"), map[string]string{
-				"config":      "配置文件(yaml)，dbx dictionary --gen-config 可生成模板",
+				"config":      "配置文件(yaml)，dqex dictionary --gen-config 可生成模板",
 				"gen-config":  "输出配置文件模板到标准输出",
 				"task":        "已保存任务配置 ID（Web 保存的任务）",
 				"source-conn": "使用已保存连接（ID 或名称），与 --source-* 同时给出时后者优先",
@@ -429,7 +429,7 @@ func enHelpTexts() cliHelpTexts {
 	return cliHelpTexts{cmds: map[string]cliHelpCmd{
 		"root": {
 			short: "Database import/export/migrate/compare tool",
-			long: `dbx - Database import/export/migrate/compare tool
+			long: `dqex - Database import/export/migrate/compare tool
 
 Starts the Web service (default port 8181) when invoked without a subcommand.
 CLI subcommands align with Web features: export / import / migrate / compare / dictionary / snapshot / conn / task / history`,
@@ -439,8 +439,8 @@ CLI subcommands align with Web features: export / import / migrate / compare / d
 				"allow":       "Allowed origin whitelist (IP/CIDR/domain, comma-separated; empty = unrestricted, takes priority over config web.allow; loopback always allowed)",
 				"no-auth":     "Disable token auth (loopback only, not recommended)",
 				"no-browser":  "Do not auto-open the browser on startup",
-				"data-dir":    "Data root directory (default from global config, else ~/.dbimpex)",
-				"config-file": "Global config file (default env DBIMPEX_CONFIG or ~/.dbimpex/config.yaml)",
+				"data-dir":    "Data root directory (default from global config, else ~/.dqex)",
+				"config-file": "Global config file (default env dqex_CONFIG or ~/.dqex/config.yaml)",
 				"debug":       "Output debug-level or higher logs (incl. AI calls; equivalent to config top-level debug: true)",
 				"lang":        "CLI output language (zh/en; env DBX_LANG, default zh)",
 			},
@@ -473,11 +473,11 @@ CLI subcommands align with Web features: export / import / migrate / compare / d
 			long: `Show the resolved global config (four data directories).
 
 Global config file is config.yaml, resolved in order:
-  --config-file > env DBIMPEX_CONFIG > ~/.dbimpex/config.yaml
+  --config-file > env dqex_CONFIG > ~/.dqex/config.yaml
 
-Directory priority: --data-dir > config dirs.data > default ~/.dbimpex;
+Directory priority: --data-dir > config dirs.data > default ~/.dqex;
 other dirs: explicit config values > derived from the data dir.
-Use dbx config --gen to print the config template.`,
+Use dqex config --gen to print the config template.`,
 			flags: map[string]string{"gen": "Print the global config template to stdout"},
 		},
 		"url": {
@@ -487,9 +487,9 @@ The token is regenerated on every startup (not read from disk), valid for 24 hou
 Deleting the data files under the data dir does not affect startup (recreated on next start).
 
 Examples:
-  dbx url                                    # full access URL
-  dbx url --token-only                       # print token only
-  curl -H "Authorization: Bearer $(dbx url --token-only)" http://127.0.0.1:8181/api/connections`,
+  dqex url                                    # full access URL
+  dqex url --token-only                       # print token only
+  curl -H "Authorization: Bearer $(dqex url --token-only)" http://127.0.0.1:8181/api/connections`,
 			flags: map[string]string{"token-only": "Print token only (for scripts/API debugging)"},
 		},
 		"version": {short: "Show version"},
@@ -507,11 +507,11 @@ Examples:
 			long: `Manage database snapshots, with comparison against the current database state.
 
 Standalone usage:
-  dbx snapshot create -c <conn> -d <db> -n <name>     # create a snapshot
-  dbx snapshot list                                   # list all snapshots
-  dbx snapshot show -i <snapshotID>                   # show snapshot details
-  dbx snapshot delete -i <snapshotID>                 # delete a snapshot
-  dbx snapshot compare -i <snapshotID> -c <conn> -d <db>    # snapshot vs current db`,
+  dqex snapshot create -c <conn> -d <db> -n <name>     # create a snapshot
+  dqex snapshot list                                   # list all snapshots
+  dqex snapshot show -i <snapshotID>                   # show snapshot details
+  dqex snapshot delete -i <snapshotID>                 # delete a snapshot
+  dqex snapshot compare -i <snapshotID> -c <conn> -d <db>    # snapshot vs current db`,
 		},
 		"snapshot create": {
 			short: "Create a database snapshot",
@@ -551,14 +551,14 @@ Standalone usage:
 			long: `Compare structure and data differences between two databases.
 
 Standalone usage:
-  dbx compare --gen-config > compare.yaml   # generate config template
+  dqex compare --gen-config > compare.yaml   # generate config template
   vi compare.yaml                               # fill in connections and options
-  dbx compare --config compare.yaml         # run comparison
+  dqex compare --config compare.yaml         # run comparison
 
 Command-line flags take priority over the config file; connections can also be fully specified via flags (--source-* / --target-*).
 Conn flags provide mysqldump-style aliases: --source-user/--source-password/--source-database (and the target- series)`,
 			flags: mergeMaps(enConnFlags("source"), enConnFlags("target"), enConnAliases("source-", "source-"), enConnAliases("target-", "target-"), map[string]string{
-				"config":         "Config file (yaml); dbx compare --gen-config prints a template",
+				"config":         "Config file (yaml); dqex compare --gen-config prints a template",
 				"gen-config":     "Print the config template to stdout",
 				"task":           "Saved task config ID (tasks saved from Web)",
 				"source-conn":    "Use saved source connection (ID or name)",
@@ -579,8 +579,8 @@ Conn flags provide mysqldump-style aliases: --source-user/--source-password/--so
 			short: "Review diff details of a historical compare record",
 			long: `Review diff details of a historical compare record.
 
-dbx cmp show -i <recordID>                # all tables
-dbx cmp show -i <recordID> t_config       # single table diff (positional arg or --table/-t; column-level diff + sample rows)`,
+dqex cmp show -i <recordID>                # all tables
+dqex cmp show -i <recordID> t_config       # single table diff (positional arg or --table/-t; column-level diff + sample rows)`,
 			flags: map[string]string{
 				"id":    "Compare record ID (printed after compare, or via history list --type compare)",
 				"table": "Show diff details for the given table only",
@@ -591,9 +591,9 @@ dbx cmp show -i <recordID> t_config       # single table diff (positional arg or
 			long: `Export database structure and data as SQL (compressible as zip/gzip).
 
 Standalone usage:
-  dbx export --gen-config > export.yaml   # generate config template
+  dqex export --gen-config > export.yaml   # generate config template
   vi export.yaml                              # fill in connections and options
-  dbx export --config export.yaml         # run export
+  dqex export --config export.yaml         # run export
 
 Command-line flags take priority over the config file; connections can also be fully specified via flags (--source-*).
 Connection and common flags provide mysqldump-style aliases:
@@ -601,7 +601,7 @@ Connection and common flags provide mysqldump-style aliases:
   Short flags: -h/-P/-u/-p (host/port/user/password), -s (saved connection), -o (output), -T (tables)
   Positional args [db [table...]] are equivalent to --databases/--tables`,
 			flags: mergeMaps(enConnFlags("source"), enConnAliases("", "source-"), map[string]string{
-				"config":             "Config file (yaml); dbx export --gen-config prints a template",
+				"config":             "Config file (yaml); dqex export --gen-config prints a template",
 				"gen-config":         "Print the config template to stdout",
 				"task":               "Saved task config ID (tasks saved from Web)",
 				"source-conn":        "Use saved connection (ID or name); takes priority when --source-* also given",
@@ -627,15 +627,15 @@ Connection and common flags provide mysqldump-style aliases:
 			long: `Import SQL files (.sql / .sql.gz / .zip) into a database.
 
 Standalone usage:
-  dbx import --gen-config > import.yaml   # generate config template
+  dqex import --gen-config > import.yaml   # generate config template
   vi import.yaml                              # fill in connections and options
-  dbx import --config import.yaml         # run import
+  dqex import --config import.yaml         # run import
 
 Command-line flags take priority over the config file; connections can also be fully specified via flags (--target-*).
 Conn flags provide mysqldump-style aliases: --host/--port/--user/--password/--database
 Short flags: -h/-P/-u/-p (host/port/user/password), -t (saved connection), -i (input file)`,
 			flags: mergeMaps(enConnFlags("target"), enConnAliases("", "target-"), map[string]string{
-				"config":      "Config file (yaml); dbx import --gen-config prints a template",
+				"config":      "Config file (yaml); dqex import --gen-config prints a template",
 				"gen-config":  "Print the config template to stdout",
 				"task":        "Saved task config ID (tasks saved from Web)",
 				"target-conn": "Use saved connection (ID or name); takes priority when --target-* also given",
@@ -651,14 +651,14 @@ Short flags: -h/-P/-u/-p (host/port/user/password), -t (saved connection), -i (i
 			long: `Database migration (cross-type supported).
 
 Standalone usage:
-  dbx migrate --gen-config > migrate.yaml   # generate config template
+  dqex migrate --gen-config > migrate.yaml   # generate config template
   vi migrate.yaml                               # fill in connections and options
-  dbx migrate --config migrate.yaml         # run migration
+  dqex migrate --config migrate.yaml         # run migration
 
 Command-line flags take priority over the config file; connections can also be fully specified via flags (--source-* / --target-*).
 Conn flags provide mysqldump-style aliases: --source-user/--source-password/--source-database (and the target- series)`,
 			flags: mergeMaps(enConnFlags("source"), enConnFlags("target"), enConnAliases("source-", "source-"), enConnAliases("target-", "target-"), map[string]string{
-				"config":      "Config file (yaml); dbx migrate --gen-config prints a template",
+				"config":      "Config file (yaml); dqex migrate --gen-config prints a template",
 				"gen-config":  "Print the config template to stdout",
 				"task":        "Saved task config ID (tasks saved from Web)",
 				"source-conn": "Use saved source connection (ID or name)",
@@ -679,15 +679,15 @@ Conn flags provide mysqldump-style aliases: --source-user/--source-password/--so
 Output is a single Excel workbook: an overview sheet (all instance tables with hyperlinks) + one detail sheet per database.
 
 Standalone usage:
-  dbx dictionary --gen-config > dictionary.yaml   # generate config template
+  dqex dictionary --gen-config > dictionary.yaml   # generate config template
   vi dictionary.yaml                                # fill in connections and options
-  dbx dictionary --config dictionary.yaml         # run generation
+  dqex dictionary --config dictionary.yaml         # run generation
 
 Command-line flags take priority over the config file; connections can also be fully specified via flags (--source-*).
   Short flags: -h/-P/-u/-p (host/port/user/password), -s (saved connection), -o (output), -T (tables)
   Positional args [db [table...]] are equivalent to --databases/--tables`,
 			flags: mergeMaps(enConnFlags("source"), enConnAliases("", "source-"), map[string]string{
-				"config":      "Config file (yaml); dbx dictionary --gen-config prints a template",
+				"config":      "Config file (yaml); dqex dictionary --gen-config prints a template",
 				"gen-config":  "Print the config template to stdout",
 				"task":        "Saved task config ID (tasks saved from Web)",
 				"source-conn": "Use saved connection (ID or name); takes priority when --source-* also given",

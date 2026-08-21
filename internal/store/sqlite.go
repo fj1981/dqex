@@ -9,7 +9,7 @@ import (
 
 	"github.com/rs/xid"
 
-	"dbimpex/internal/engine"
+	"dqex/internal/engine"
 
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"

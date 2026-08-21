@@ -52,7 +52,7 @@ function summarizeDBs(dbs: string[], max = 3): string {
 
 // 一日内递增的序号 — 同名重复时自动加序号避免冲突
 function nextSeqOfToday(): string {
-  const key = `dbimpex:snapshot:seq:${new Date().toISOString().slice(0, 10)}`
+  const key = `dqex:snapshot:seq:${new Date().toISOString().slice(0, 10)}`
   let seq = 1
   try {
     const raw = localStorage.getItem(key)

@@ -3,7 +3,7 @@ package cli
 // 点导入：CLI 层大量复用 service 包的模型别名与入口（NewService/选项模型/错误码）
 import (
 	"context"
-	. "dbimpex/internal/service"
+	. "dqex/internal/service"
 	"fmt"
 	"os"
 	"strings"
@@ -18,11 +18,11 @@ var configCmd = &cobra.Command{
 	Long: `查看解析后的全局配置（四类数据目录）。
 
 全局配置文件为 config.yaml，查找顺序：
-  --config-file > 环境变量 DBIMPEX_CONFIG > ~/.dbimpex/config.yaml
+  --config-file > 环境变量 dqex_CONFIG > ~/.dqex/config.yaml
 
-目录优先级：--data-dir > 配置文件 dirs.data > 默认 ~/.dbimpex；
+目录优先级：--data-dir > 配置文件 dirs.data > 默认 ~/.dqex；
 其余目录：配置文件显式值 > 由 data 目录派生。
-使用 dbx config --gen 输出配置模板。`,
+使用 dqex config --gen 输出配置模板。`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if v, _ := cmd.Flags().GetBool("gen"); v {
 			os.Stdout.WriteString(appConfigTemplate)
@@ -58,11 +58,11 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 }
 
-const appConfigTemplate = `# dbx 全局配置
-# 默认位置 ~/.dbimpex/config.yaml，可用 --config-file 或环境变量 DBIMPEX_CONFIG 指定
+const appConfigTemplate = `# dqex 全局配置
+# 默认位置 ~/.dqex/config.yaml，可用 --config-file 或环境变量 dqex_CONFIG 指定
 # 留空的项由 data 目录派生
 dirs:
-  data: ""        # ① 配置保存目录（connections/tasks/history），默认 ~/.dbimpex
+  data: ""        # ① 配置保存目录（connections/tasks/history），默认 ~/.dqex
   tmp: ""         # ② 任务处理临时目录，默认 <data>/tmp
   uploads: ""     # ③ Web 上传临时目录，默认 <data>/uploads
   exports: ""     # ④ 最终生成产物目录，默认 <data>/exports
@@ -71,6 +71,6 @@ web:
   # allow:        # 示例：对外暴露时收紧来源（--allow 命令行参数优先于此配置）
   #   - 192.168.1.0/24
   #   - 10.20.16.170
-  #   - dbx.example.com
+  #   - dqex.example.com
 compat_collation: true  # 兼容排序规则：MySQL 8.0 特有排序规则替换为 5.7 兼容版本（默认开启）
 `

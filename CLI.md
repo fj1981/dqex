@@ -1,6 +1,6 @@
-# dbx 使用手册
+# dqex 使用手册
 
-CLI 与 Web 共享同一份数据（连接配置、任务配置、执行历史），默认存放于 `~/.dbimpex`（Linux/macOS）或 `%USERPROFILE%\.dbimpex`（Windows）。
+CLI 与 Web 共享同一份数据（连接配置、任务配置、执行历史），默认存放于 `~/.dqex`（Linux/macOS）或 `%USERPROFILE%\.dqex`（Windows）。
 
 ## 快速开始
 
@@ -9,7 +9,7 @@ CLI 与 Web 共享同一份数据（连接配置、任务配置、执行历史�
 **Linux / macOS：**
 ```bash
 ./install.sh                    # 安装到 /usr/local/bin
-dbx                             # 启动 Web 服务
+dqex                             # 启动 Web 服务
 # 或
 ./start.sh                      # 前台运行（Ctrl+C 停止）
 ./start.sh -d                   # 后台运行（关终端不中断）
@@ -19,8 +19,8 @@ dbx                             # 启动 Web 服务
 
 **Windows（双击或 cmd 执行）：**
 ```bat
-install.bat                     :: 安装到 %%LOCALAPPDATA%%\dbx 并加入 PATH
-dbx                             :: 新开终端后启动 Web 服务
+install.bat                     :: 安装到 %%LOCALAPPDATA%%\dqex 并加入 PATH
+dqex                             :: 新开终端后启动 Web 服务
 :: 或不安装直接使用：
 start.bat                       :: 前台运行（关窗口即停）
 start.bat -d                    :: 后台运行（关窗口不中断）
@@ -36,10 +36,10 @@ stop.bat                        :: 停止后台服务
 不带子命令直接运行时启动 Web 界面，默认仅监听本机并启用令牌认证：
 
 ```bash
-dbx                      # 启动 Web 服务（默认 127.0.0.1:8181，自动打开浏览器）
-dbx version              # 查看版本号（简写 dbx v）
-dbx url                  # 输出带 token 的 Web 访问链接
-dbx url --token-only     # 仅输出 token，便于 curl/脚本调试
+dqex                      # 启动 Web 服务（默认 127.0.0.1:8181，自动打开浏览器）
+dqex version              # 查看版本号（简写 dqex v）
+dqex url                  # 输出带 token 的 Web 访问链接
+dqex url --token-only     # 仅输出 token，便于 curl/脚本调试
 ```
 
 | flag | 默认值 | 说明 |
@@ -49,10 +49,10 @@ dbx url --token-only     # 仅输出 token，便于 curl/脚本调试
 | `--allow` | 无 | 访问来源白名单，IP/CIDR/域名逗号分隔；本机回环始终放行 |
 | `--no-browser` | `false` | 启动时不自动打开浏览器 |
 | `--no-auth` | `false` | 禁用令牌认证（仅限本机回环，与 `--host 0.0.0.0` 互斥） |
-| `--data-dir` | `~/.dbimpex` | 数据根目录 |
-| `--config-file` | `~/.dbimpex/config.yaml` | 全局配置文件路径 |
+| `--data-dir` | `~/.dqex` | 数据根目录 |
+| `--config-file` | `~/.dqex/config.yaml` | 全局配置文件路径 |
 
-> **安全说明**：令牌有效期 24 小时，未过期重启复用，超期后 API 返回 401 提示重启；`dbx url` 可随时取回访问链接。对外暴露时强制启用认证，且支持来源白名单 + 暴力破解防护（1 分钟 10 次后锁定 5 分钟）。
+> **安全说明**：令牌有效期 24 小时，未过期重启复用，超期后 API 返回 401 提示重启；`dqex url` 可随时取回访问链接。对外暴露时强制启用认证，且支持来源白名单 + 暴力破解防护（1 分钟 10 次后锁定 5 分钟）。
 >
 > ⚠️ 根命令 `--port` 是 **Web 服务端口**；子命令中的 `--port` 是数据库端口（mysqldump 风格别名），两者作用域不同。
 
@@ -97,11 +97,11 @@ dbx url --token-only     # 仅输出 token，便于 curl/脚本调试
 
 ```bash
 # zsh
-mkdir -p ~/.zsh/completions && dbx completion zsh > ~/.zsh/completions/_dbx
+mkdir -p ~/.zsh/completions && dqex completion zsh > ~/.zsh/completions/_dqex
 echo 'fpath=(~/.zsh/completions $fpath)' >> ~/.zshrc && echo 'autoload -Uz compinit && compinit' >> ~/.zshrc
 
 # bash
-dbx completion bash >> ~/.bashrc
+dqex completion bash >> ~/.bashrc
 ```
 
 ---
@@ -111,10 +111,10 @@ dbx completion bash >> ~/.bashrc
 ### 连接管理
 
 ```bash
-dbx conn add --name "生产库" --type mysql --host 10.20.16.170 --port 3317 --un root --pw 'xxx'
-dbx conn list
-dbx conn test --conn "生产库"
-dbx conn delete --conn "生产库"
+dqex conn add --name "生产库" --type mysql --host 10.20.16.170 --port 3317 --un root --pw 'xxx'
+dqex conn list
+dqex conn test --conn "生产库"
+dqex conn delete --conn "生产库"
 ```
 
 ### 定时备份（cron）
@@ -129,60 +129,60 @@ compress: true
 ```
 
 ```bash
-dbx export --config daily.yaml
+dqex export --config daily.yaml
 # crontab -e
-0 2 * * * dbx export --config daily.yaml >> /var/log/dbx-backup.log 2>&1
+0 2 * * * dqex export --config daily.yaml >> /var/log/dqex-backup.log 2>&1
 ```
 
 ### 灾备恢复
 
 ```bash
-dbx import --target-conn "测试库" --input daily.zip --reset truncate
+dqex import --target-conn "测试库" --input daily.zip --reset truncate
 ```
 
 ### 跨类型同步
 
 ```bash
-dbx migrate --source-conn "生产库" --target-conn "测试库" \
+dqex migrate --source-conn "生产库" --target-conn "测试库" \
   --source-database camunda --target-database camunda --reset truncate
 ```
 
 ### 对比验证
 
 ```bash
-dbx compare --source-conn "生产库" --target-conn "测试库" \
+dqex compare --source-conn "生产库" --target-conn "测试库" \
   --source-database camunda --target-database camunda --scope both
 ```
 
 ### 数据字典
 
 ```bash
-dbx dictionary camunda -s "170 生产" -o ./dict.zip
+dqex dictionary camunda -s "170 生产" -o ./dict.zip
 ```
 
 ### 故障排查
 
 ```bash
-dbx history list                  # 查看执行记录
-dbx history show --id <ID>        # 查看详情
+dqex history list                  # 查看执行记录
+dqex history show --id <ID>        # 查看详情
 ```
 
 ---
 
-## SQL 终端（dbx sql）
+## SQL 终端（dqex sql）
 
 交互式 REPL / 单次执行 / 智能体友好 JSON 输出。SQL 按**目标数据库方言原生执行**：不提供 MySQL→PG/Oracle 自动语法翻译，跨方言场景请直接写目标方言（PG 用 `LIMIT ... OFFSET ...`、Oracle 用 `FETCH FIRST ... ROWS ONLY`）；DDL 与写入 SQL 的方言转换由迁移/导入引擎负责，与终端无关。
 
 ### 交互式终端
 
 ```bash
-dbx sql -c "生产库"          # 连接名称
-dbx sql -c prod             # 短名
-dbx sql -c conn_a1b2c3      # 连接 ID
+dqex sql -c "生产库"          # 连接名称
+dqex sql -c prod             # 短名
+dqex sql -c conn_a1b2c3      # 连接 ID
 
 # 进入后提示符自动显示类型/地址/库名：
-# dbx (mysql  @ 10.0.0.1:3306/mydb) >
-# dbx (pg     @ 10.0.0.2:5432/mydb) >
+# dqex (mysql  @ 10.0.0.1:3306/mydb) >
+# dqex (pg     @ 10.0.0.2:5432/mydb) >
 ```
 
 终端能力（已落地）：
@@ -216,14 +216,14 @@ dbx sql -c conn_a1b2c3      # 连接 ID
 ### 单次执行与管道
 
 ```bash
-dbx sql -c prod -e "SELECT * FROM users LIMIT 5"          # 表格输出
-dbx sql -c prod --json "SELECT id,name FROM users"        # JSON 输出
-echo "SELECT COUNT(*) FROM orders" | dbx sql -c prod --json   # 从 stdin
-dbx sql -c prod -f query.sql                              # 从文件执行
+dqex sql -c prod -e "SELECT * FROM users LIMIT 5"          # 表格输出
+dqex sql -c prod --json "SELECT id,name FROM users"        # JSON 输出
+echo "SELECT COUNT(*) FROM orders" | dqex sql -c prod --json   # 从 stdin
+dqex sql -c prod -f query.sql                              # 从文件执行
 
 # 管道友好
-dbx sql -c prod -e "SELECT * FROM users" | grep "admin"
-result=$(dbx sql -c prod --json "SELECT COUNT(*) FROM users")
+dqex sql -c prod -e "SELECT * FROM users" | grep "admin"
+result=$(dqex sql -c prod --json "SELECT COUNT(*) FROM users")
 echo "$result" | jq '.rows[0][0]'
 ```
 
@@ -241,20 +241,20 @@ echo "$result" | jq '.rows[0][0]'
 | `--ssl-ca` | — | — | TLS CA 证书路径 |
 | `--no-color` | — | false | 禁用颜色 |
 
-> 内联连接：`dbx sql --type mysql --host 10.0.0.1 --port 3306 --un root --pw '${DB_PASSWORD}' --db mydb`
+> 内联连接：`dqex sql --type mysql --host 10.0.0.1 --port 3306 --un root --pw '${DB_PASSWORD}' --db mydb`
 
 ---
 
-## 快照（dbx snapshot）
+## 快照（dqex snapshot）
 
 对库结构 / 数据打快照并对比差异，CLI + Web 全链路已落地。子命令：`create / list / show / delete / compare`。
 
 ```bash
-dbx snapshot create -c 生产库 -n 早盘          # 打快照
-dbx snapshot list -c 生产库                    # 列出快照
-dbx snapshot show  -c 生产库 --id <ID>         # 查看快照内容
-dbx snapshot delete -c 生产库 --id <ID>        # 删除
-dbx snapshot compare -c 生产库 --a 早盘 --b 午盘   # 对比两个快照结构/数据差异
+dqex snapshot create -c 生产库 -n 早盘          # 打快照
+dqex snapshot list -c 生产库                    # 列出快照
+dqex snapshot show  -c 生产库 --id <ID>         # 查看快照内容
+dqex snapshot delete -c 生产库 --id <ID>        # 删除
+dqex snapshot compare -c 生产库 --a 早盘 --b 午盘   # 对比两个快照结构/数据差异
 ```
 
 典型用途：每次变更前打快照，出问题时 `compare` 快速定位结构或数据漂移。
@@ -272,11 +272,11 @@ dbx snapshot compare -c 生产库 --a 早盘 --b 午盘   # 对比两个快照�
 
 ```bash
 # 在交互终端内启用（需先配置 AI）
-dbx sql -c 生产库
-dbx (mysql @ ...)> \ai 帮我统计昨日新增用户数
+dqex sql -c 生产库
+dqex (mysql @ ...)> \ai 帮我统计昨日新增用户数
 ```
 
-**`\ai` 子命令一览**（在 `dbx sql` 交互终端内使用）：
+**`\ai` 子命令一览**（在 `dqex sql` 交互终端内使用）：
 
 | 命令 | 说明 |
 |---|---|
@@ -292,12 +292,12 @@ dbx (mysql @ ...)> \ai 帮我统计昨日新增用户数
 
 ```bash
 # 示例：生成 → 修复 → 执行（执行报错后可直接 \ai fix，自动携带报错信息）
-dbx (mysql @ ...)> \ai 统计每个部门的人数
-dbx (mysql @ ...)> \g
+dqex (mysql @ ...)> \ai 统计每个部门的人数
+dqex (mysql @ ...)> \g
 [query] error=> Error 1054 ... Unknown column 'dept' ...
 提示: 输入 \ai fix 可让 AI 根据该报错自动修复 SQL
-dbx (mysql @ ...)> \ai fix
-dbx (mysql @ ...)> \g
+dqex (mysql @ ...)> \ai fix
+dqex (mysql @ ...)> \g
 ```
 
 > 提示：需求中写明表名（如 `\ai 查询 robotics_user 表的必要字段`）可让 AI 先确认真实表结构，避免凭想象生成字段。
@@ -309,7 +309,7 @@ dbx (mysql @ ...)> \g
 ### export 导出
 
 ```bash
-dbx export [database [table...]] [flags]
+dqex export [database [table...]] [flags]
 ```
 
 | flag | 说明 |
@@ -333,16 +333,16 @@ dbx export [database [table...]] [flags]
 
 ```bash
 # 示例
-dbx export --gen-config > export.yaml
-dbx export --config export.yaml
-dbx export --source-conn "170 生产" --databases camunda -o ./camunda.zip
-dbx export camunda act_ge_property -s 本地 --schema-only --compress=false -o ./schema
+dqex export --gen-config > export.yaml
+dqex export --config export.yaml
+dqex export --source-conn "170 生产" --databases camunda -o ./camunda.zip
+dqex export camunda act_ge_property -s 本地 --schema-only --compress=false -o ./schema
 ```
 
 ### import 导入
 
 ```bash
-dbx import [flags]
+dqex import [flags]
 ```
 
 | flag | 说明 |
@@ -357,8 +357,8 @@ dbx import [flags]
 | `--batch-size` | 批量大小，默认 500 |
 
 ```bash
-dbx import -t 本地 -i ./camunda.zip --reset truncate
-dbx import --config import.yaml
+dqex import -t 本地 -i ./camunda.zip --reset truncate
+dqex import --config import.yaml
 ```
 
 > ⚠️ `--reset` 非空且 `--backup=false` 时目标数据不可恢复。
@@ -366,7 +366,7 @@ dbx import --config import.yaml
 ### migrate 迁移
 
 ```bash
-dbx migrate [flags]
+dqex migrate [flags]
 ```
 
 | flag | 说明 |
@@ -380,14 +380,14 @@ dbx migrate [flags]
 | `--reset` / `--backup` / `--batch-size` | 同 import |
 
 ```bash
-dbx migrate --config migrate.yaml
-dbx migrate -s "170 生产" -t 本地 --tables act_ge_property --reset truncate
+dqex migrate --config migrate.yaml
+dqex migrate -s "170 生产" -t 本地 --tables act_ge_property --reset truncate
 ```
 
 ### compare 对比
 
 ```bash
-dbx compare [flags]
+dqex compare [flags]
 ```
 
 | flag | 说明 |
@@ -405,22 +405,22 @@ dbx compare [flags]
 | `--all` | 输出全部表（默认仅输出有差异的表） |
 
 ```bash
-dbx compare --config compare.yaml
-dbx cmp -s "170 生产" -t 本地 -T act_ge_property --scope both -o report.json
+dqex compare --config compare.yaml
+dqex cmp -s "170 生产" -t 本地 -T act_ge_property --scope both -o report.json
 ```
 
 **compare show 查看差异明细：**
 
 ```bash
-dbx cmp show -i <记录ID>            # 全部表差异摘要
-dbx cmp show -i <记录ID> <表名>      # 单表差异明细
+dqex cmp show -i <记录ID>            # 全部表差异摘要
+dqex cmp show -i <记录ID> <表名>      # 单表差异明细
 ```
 
 ### dictionary 数据字典
 
 ```bash
-dbx dictionary [database [table...]] [flags]
-dbx dict                    # 简写
+dqex dictionary [database [table...]] [flags]
+dqex dict                    # 简写
 ```
 
 | flag | 说明 |
@@ -435,55 +435,55 @@ dbx dict                    # 简写
 | `--compress` | zip 打包，默认 true |
 
 ```bash
-dbx dictionary --gen-config > dictionary.yaml
-dbx dictionary --config dictionary.yaml
-dbx dict camunda -s "170 生产" -o ./camunda-dict.zip
+dqex dictionary --gen-config > dictionary.yaml
+dqex dictionary --config dictionary.yaml
+dqex dict camunda -s "170 生产" -o ./camunda-dict.zip
 ```
 
 ### config 全局配置
 
 ```bash
-dbx config                     # 查看当前配置
-dbx config --gen               # 输出配置模板
+dqex config                     # 查看当前配置
+dqex config --gen               # 输出配置模板
 ```
 
 ### conn 连接管理
 
 ```bash
-dbx conn list
-dbx conn add --name 生产库 --type mysql --host 10.20.16.170 --port 3317 --un root --pw 'xxx'
-dbx conn add --id <ID> ...     # 更新已有连接
-dbx conn test --conn "生产库"
-dbx conn delete --conn "生产库"
+dqex conn list
+dqex conn add --name 生产库 --type mysql --host 10.20.16.170 --port 3317 --un root --pw 'xxx'
+dqex conn add --id <ID> ...     # 更新已有连接
+dqex conn test --conn "生产库"
+dqex conn delete --conn "生产库"
 ```
 
 ### task 任务配置
 
 ```bash
-dbx task list                          # --type 过滤
-dbx task show --id <ID>
-dbx task run --id <ID>                 # 同步执行
-dbx task save --name 每日对比 --config compare.yaml
-dbx task delete --id <ID>
+dqex task list                          # --type 过滤
+dqex task show --id <ID>
+dqex task run --id <ID>                 # 同步执行
+dqex task save --name 每日对比 --config compare.yaml
+dqex task delete --id <ID>
 ```
 
 ### history 执行历史
 
 ```bash
-dbx history list                       # --type 过滤
-dbx history show --id <ID>
-dbx history delete --id <ID>
+dqex history list                       # --type 过滤
+dqex history show --id <ID>
+dqex history delete --id <ID>
 ```
 
 ---
 
 ## 配置文件
 
-### 全局配置（~/.dbimpex/config.yaml）
+### 全局配置（~/.dqex/config.yaml）
 
 ```yaml
 dirs:
-  data: ""        # 默认 ~/.dbimpex
+  data: ""        # 默认 ~/.dqex
   tmp: ""         # 默认 <data>/tmp
   uploads: ""     # 默认 <data>/uploads
   exports: ""     # 默认 <data>/exports
@@ -491,7 +491,7 @@ cli:
   display_mode: ""   # SQL 终端结果默认显示：空/auto=表格超宽自动垂直 | table=强制表格 | vertical=强制垂直（\x 命令切换并写回）
 ```
 
-配置文件查找顺序：`--config-file` > 环境变量 `DBIMPEX_CONFIG` > `~/.dbimpex/config.yaml`
+配置文件查找顺序：`--config-file` > 环境变量 `dqex_CONFIG` > `~/.dqex/config.yaml`
 
 ### 任务配置文件
 
@@ -586,7 +586,7 @@ batch_size: 500
 
 ```bash
 # 以配置文件为基础，临时改导出其中两张表
-dbx export --config daily.yaml --tables orders,users
+dqex export --config daily.yaml --tables orders,users
 ```
 
 ---
@@ -604,7 +604,7 @@ dbx export --config daily.yaml --tables orders,users
 1. **连接带库名**：`compare` / `migrate` 要求连接明确到库。内联连接写 `database`；引用已保存连接时用 `--source-database` / `--target-database` 覆盖
 2. **密码安全**：内联密码明文存于配置文件，注意文件权限，不要提交到 git；推荐用 `conn add` 保存连接后以 `source_ref` 引用
 3. **重置即破坏**：`--reset truncate/drop` 会清空或删除目标表；默认 `--backup=true` 先建备份表，成功后自动清理，失败时保留可回滚
-4. **导出文件格式**：dbx 自有结构（`库名.sql` + `.desc`），与 mysqldump 不互通，请用 `dbx import` 导入
+4. **导出文件格式**：dqex 自有结构（`库名.sql` + `.desc`），与 mysqldump 不互通，请用 `dqex import` 导入
 5. **大表对比**：超过 `threshold`（默认 1000）仅比行数，需逐行确认时调大阈值
 6. **task run 同步执行**：长任务占用终端，Ctrl+C 终止（历史保留已执行部分）
 7. **同名参数**：根命令 `--port` 是 Web 端口；子命令 `--port` 是数据库端口

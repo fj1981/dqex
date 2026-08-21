@@ -111,7 +111,7 @@ export default function AboutDialog({ open, onOpenChange }: { open: boolean; onO
               {version ? (
                 <div className="space-y-3 text-sm">
                   <InfoRow icon={<Database className="h-4 w-4" />} label={t("about.version")}>
-                    <span className="font-mono font-medium">dbx {version.version}</span>
+                    <span className="font-mono font-medium">dqex {version.version}</span>
                   </InfoRow>
                   {version.buildTime && (
                     <InfoRow icon={<Calendar className="h-4 w-4" />} label={t("about.buildTime")}>

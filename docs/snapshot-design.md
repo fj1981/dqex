@@ -102,7 +102,7 @@ type SnapshotCompareOptions struct {
 ### 3.1 目录结构
 
 ```
-~/.dbimpex/
+~/.dqex/
   snapshots/
     index.json              # 快照索引（[]SnapshotInfo），按创建时间倒序
     <snapshot-id>.json      # 单个快照完整数据（Snapshot）
@@ -245,14 +245,14 @@ type SnapshotCompareResultReq struct {
 
 ```bash
 # 快照管理
-dbx snapshot create   -c <连接名> -d <数据库> -n <名称> [-desc <备注>] [--samples]
-dbx snapshot list     [-c <连接名>] [-t <类型>]
-dbx snapshot show     -i <快照ID>
-dbx snapshot delete   -i <快照ID>
+dqex snapshot create   -c <连接名> -d <数据库> -n <名称> [-desc <备注>] [--samples]
+dqex snapshot list     [-c <连接名>] [-t <类型>]
+dqex snapshot show     -i <快照ID>
+dqex snapshot delete   -i <快照ID>
 
 # 快照对比
-dbx snapshot compare  -i <快照ID> -c <连接名> [-d <数据库>] [--threshold N]
-dbx snapshot diff     -i <快照A> -j <快照B>   # 两个快照之间的结构对比（Phase 2）
+dqex snapshot compare  -i <快照ID> -c <连接名> [-d <数据库>] [--threshold N]
+dqex snapshot diff     -i <快照A> -j <快照B>   # 两个快照之间的结构对比（Phase 2）
 ```
 
 CLI 命令遵循现有模式：使用 cobra，通过 `service` 包的类型别名调用业务逻辑。

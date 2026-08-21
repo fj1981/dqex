@@ -3,7 +3,7 @@ package cli
 // 点导入：CLI 层大量复用 service 包的模型别名与入口（NewService/选项模型/错误码）
 import (
 	"context"
-	. "dbimpex/internal/service"
+	. "dqex/internal/service"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -19,9 +19,9 @@ var importCmd = &cobra.Command{
 	Long: `导入 SQL 文件（.sql / .sql.gz / .zip）到数据库。
 
 独立闭环用法：
-  dbx import --gen-config > import.yaml   # 生成配置模板
+  dqex import --gen-config > import.yaml   # 生成配置模板
   vi import.yaml                              # 填写连接与选项
-  dbx import --config import.yaml         # 执行导入
+  dqex import --config import.yaml         # 执行导入
 
 命令行参数优先于配置文件；也可完全通过 flags 指定连接（--target-*）。
 连接 flag 提供 mysqldump 风格别名：--host/--port/--user/--password/--database
@@ -32,7 +32,7 @@ var importCmd = &cobra.Command{
 func init() {
 	reserveHelpFlag(importCmd) // -h 让给 --host（mysqldump 风格），帮助用 --help
 	f := importCmd.Flags()
-	f.String("config", "", "配置文件(yaml)，dbx import --gen-config 可生成模板")
+	f.String("config", "", "配置文件(yaml)，dqex import --gen-config 可生成模板")
 	f.Bool("gen-config", false, "输出配置文件模板到标准输出")
 	f.String("task", "", "已保存任务配置 ID（Web 保存的任务）")
 	registerConnFlags(importCmd, "target", &importTarget)

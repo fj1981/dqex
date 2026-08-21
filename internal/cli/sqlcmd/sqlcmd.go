@@ -1,4 +1,4 @@
-// Package sqlcmd 提供 dbx sql 子命令：交互式 SQL 终端 + JSON 输出。
+// Package sqlcmd 提供 dqex sql 子命令：交互式 SQL 终端 + JSON 输出。
 // 完全自包含，不引用父包 internal/cli 以避免循环依赖。
 package sqlcmd
 
@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"dbimpex/internal/engine"
-	"dbimpex/internal/service"
+	"dqex/internal/engine"
+	"dqex/internal/service"
 
 	"github.com/spf13/cobra"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
@@ -44,7 +44,7 @@ var (
 
 // ---- 子命令入口 ----
 
-// Command 返回 dbx sql 子命令，供 root.go 注册。
+// Command 返回 dqex sql 子命令，供 root.go 注册。
 func Command() *cobra.Command {
 	opts := &options{}
 	cmd := &cobra.Command{
@@ -53,9 +53,9 @@ func Command() *cobra.Command {
 		Long: `交互式数据库 SQL 终端，支持表格渲染与 JSON 输出。
 
 使用方式：
-  dbx sql -c <连接>              交互式 REPL 终端
-  dbx sql -c <连接> -e "SQL"     单次执行（表格输出）
-  dbx sql -c <连接> --json "SQL" JSON 输出（智能体友好）`,
+  dqex sql -c <连接>              交互式 REPL 终端
+  dqex sql -c <连接> -e "SQL"     单次执行（表格输出）
+  dqex sql -c <连接> --json "SQL" JSON 输出（智能体友好）`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return run(cmd, opts, args)
 		},

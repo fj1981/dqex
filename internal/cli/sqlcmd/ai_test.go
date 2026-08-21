@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"dbimpex/internal/engine"
-	"dbimpex/internal/llm"
-	"dbimpex/internal/service"
+	"dqex/internal/engine"
+	"dqex/internal/llm"
+	"dqex/internal/service"
 
 	"github.com/cloudwego/eino/schema"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"

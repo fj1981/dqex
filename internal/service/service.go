@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"dbimpex/internal/engine"
+	"dqex/internal/engine"
 
 	"github.com/rs/xid"
 

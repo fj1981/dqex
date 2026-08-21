@@ -2,8 +2,8 @@
 package web
 
 import (
-	"dbimpex/internal/engine"
-	"dbimpex/internal/service"
+	"dqex/internal/engine"
+	"dqex/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"

@@ -2,8 +2,8 @@ import i18n from "i18next"
 import { initReactI18next } from "react-i18next"
 import { FALLBACK_LANG, SUPPORTED_LANGS, resolveLang, resources } from "@/locales"
 
-// localStorage 持久化键（与 next-themes 的 dbimpex-theme 风格一致）
-export const LANG_STORAGE_KEY = "dbimpex-lang"
+// localStorage 持久化键（与 next-themes 的 dqex-theme 风格一致）
+export const LANG_STORAGE_KEY = "dqex-lang"
 
 // 语言解析：手动选择（localStorage）> 浏览器语言（注册表精确/前缀匹配）> 默认
 function detectLang(): string {

@@ -1,7 +1,7 @@
 # Go
 .gotmp/
 *.exe
-/dbimpex
+/dqex
 /release/
 
 # Air 热重载配置（每个开发者可按需自定义）
@@ -11,7 +11,7 @@
 web/node_modules/
 
 # 运行期导出/构建产物
-.dbimpex-exports/
+.dqex-exports/
 /exports/
 *.tsbuildinfo
 

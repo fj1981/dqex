@@ -13,11 +13,11 @@ import (
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
 )
 
-// DefaultConfigName 全局配置文件默认名（位于默认数据目录 ~/.dbimpex/ 下）
+// DefaultConfigName 全局配置文件默认名（位于默认数据目录 ~/.dqex/ 下）
 const DefaultConfigName = "config.yaml"
 
 // EnvConfigFile 指定全局配置文件的环境变量
-const EnvConfigFile = "DBIMPEX_CONFIG"
+const EnvConfigFile = "dqex_CONFIG"
 
 // DirConfig 六类数据目录配置（留空 = 由 data 目录派生）
 type DirConfig struct {
@@ -52,7 +52,7 @@ type AIConfig struct {
 	SystemPrompt   string  `yaml:"system_prompt,omitempty" json:"systemPrompt"`      // 自定义 system prompt 模板（支持 {dialect}/{schema} 占位符），留空用内置默认
 }
 
-// CLIConfig CLI 交互终端配置（dbx sql）
+// CLIConfig CLI 交互终端配置（dqex sql）
 type CLIConfig struct {
 	// DisplayMode 查询结果默认显示模式：auto=表格超宽自动降级（默认）；table=强制表格；vertical=强制垂直
 	DisplayMode string `yaml:"display_mode,omitempty" json:"displayMode"`
@@ -84,7 +84,7 @@ type ResolvedDirs struct {
 	Snapshots string `json:"snapshots"`
 }
 
-// FindConfigFile 确定全局配置文件路径：显式指定 > 环境变量 DBIMPEX_CONFIG > ~/.dbimpex/config.yaml（缺省位置不存在时返回 ""）
+// FindConfigFile 确定全局配置文件路径：显式指定 > 环境变量 dqex_CONFIG > ~/.dqex/config.yaml（缺省位置不存在时返回 ""）
 func FindConfigFile(explicit string) string {
 	if explicit = strings.TrimSpace(explicit); explicit != "" {
 		return explicit
@@ -93,7 +93,7 @@ func FindConfigFile(explicit string) string {
 		return v
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		p := filepath.Join(home, ".dbimpex", DefaultConfigName)
+		p := filepath.Join(home, ".dqex", DefaultConfigName)
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
@@ -146,7 +146,7 @@ type ConfigInfo struct {
 	Config AppConfig `json:"config"`
 	// Resolved 解析后的六类最终目录（只读展示；除 data 根目录固定外，其余保存后立即热生效）
 	Resolved ResolvedDirs `json:"resolved"`
-	// ConfigFile 全局配置文件路径（空 = 未发现，保存时将写到默认位置 ~/.dbimpex/config.yaml）
+	// ConfigFile 全局配置文件路径（空 = 未发现，保存时将写到默认位置 ~/.dqex/config.yaml）
 	ConfigFile string `json:"configFile"`
 	// DataDirOverride 是否由 --data-dir 启动参数覆盖了配置的 dirs.data（此时目录项修改不生效）
 	DataDirOverride bool `json:"dataDirOverride"`
@@ -180,7 +180,7 @@ func (s *Service) GetConfigInfo() ConfigInfo {
 	}
 }
 
-// tildifyHome 将用户主目录前缀缩写为 ~（如 /Users/xx/.dbimpex → ~/.dbimpex，主目录本身 → ~）。
+// tildifyHome 将用户主目录前缀缩写为 ~（如 /Users/xx/.dqex → ~/.dqex，主目录本身 → ~）。
 // 跨平台：Windows 用 \ 分隔且路径匹配大小写不敏感（NTFS 不区分大小写）；
 // 主目录为文件系统根（如 / 或 C:\）时无意义，保持原样。仅用于接口展示，不参与任何真实文件操作。
 func tildifyHome(p string) string {
@@ -226,12 +226,12 @@ func (s *Service) SaveConfig(ctx context.Context, cfg AppConfig) error {
 	txt := svcTextsFor(langFrom(ctx))
 	path := s.configFile
 	if strings.TrimSpace(path) == "" {
-		// 未发现配置文件：写入默认位置 ~/.dbimpex/config.yaml
+		// 未发现配置文件：写入默认位置 ~/.dqex/config.yaml
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint(), cygin.WithErrDetails(txt.errCfgHome))
 		}
-		path = filepath.Join(home, ".dbimpex", DefaultConfigName)
+		path = filepath.Join(home, ".dqex", DefaultConfigName)
 	}
 	// 确保目录存在
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -266,7 +266,7 @@ func (s *Service) SaveConfig(ctx context.Context, cfg AppConfig) error {
 	return nil
 }
 
-// ResolveDirs 计算最终目录。优先级：--data-dir flag > 配置文件 dirs.data > 默认 ~/.dbimpex；
+// ResolveDirs 计算最终目录。优先级：--data-dir flag > 配置文件 dirs.data > 默认 ~/.dqex；
 // 其余目录：配置文件显式值 > 由 data 目录派生
 func ResolveDirs(dataDirFlag string, cfg *AppConfig) ResolvedDirs {
 	if cfg == nil {
@@ -278,7 +278,7 @@ func ResolveDirs(dataDirFlag string, cfg *AppConfig) ResolvedDirs {
 	}
 	if data == "" {
 		home, _ := os.UserHomeDir()
-		data = filepath.Join(home, ".dbimpex")
+		data = filepath.Join(home, ".dqex")
 	}
 	return resolveSubDirs(data, cfg)
 }

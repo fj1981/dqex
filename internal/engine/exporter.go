@@ -44,7 +44,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 	if outputDir == "" {
 		// 默认：数据根目录下 exports/（service 层调用时已注入同一默认值）
 		home, _ := os.UserHomeDir()
-		outputDir = filepath.Join(home, ".dbimpex", "exports")
+		outputDir = filepath.Join(home, ".dqex", "exports")
 	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return nil, NewMsgErrf(errExpOutDir, err)
@@ -231,7 +231,7 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 	w := bufio.NewWriterSize(out, 256*1024)
 
 	now := time.Now().Format("2006-01-02 15:04:05")
-	fmt.Fprintf(w, "-- dbx export\n-- Database: %s\n-- Time: %s\n\n", db, now)
+	fmt.Fprintf(w, "-- dqex export\n-- Database: %s\n-- Time: %s\n\n", db, now)
 
 	// 前置语句：忽略约束检查等（如 MySQL 的 SET FOREIGN_KEY_CHECKS = 0）
 	writeSqlBlock(w, beginSQL)

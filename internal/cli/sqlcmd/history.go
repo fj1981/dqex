@@ -21,7 +21,7 @@ func historyFilePath() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".dbimpex", historyFileName)
+	return filepath.Join(home, ".dqex", historyFileName)
 }
 
 func loadHistory(line *liner.State, path string) {

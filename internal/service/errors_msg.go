@@ -7,7 +7,7 @@ package service
 import (
 	"context"
 
-	"dbimpex/internal/engine"
+	"dqex/internal/engine"
 	"errors"
 	"fmt"
 )

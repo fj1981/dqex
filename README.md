@@ -1,4 +1,4 @@
-# dbx - 数据库工作台
+# dqex - 数据库工作台
 
 跨平台数据库导入 / 导出 / 迁移 / 对比 / 快照 / 数据字典 / SQL 查询工具，支持 MySQL、PostgreSQL、Oracle。
 
@@ -15,7 +15,7 @@
 
 ```bash
 ./install.sh                    # 安装到 /usr/local/bin
-dbx                             # 启动 Web 服务（127.0.0.1:8181）
+dqex                             # 启动 Web 服务（127.0.0.1:8181）
 # 或直接使用
 ./start.sh                      # 前台运行（Ctrl+C 停止）
 ./start.sh -d                   # 后台运行
@@ -27,8 +27,8 @@ dbx                             # 启动 Web 服务（127.0.0.1:8181）
 双击或用 cmd 执行：
 
 ```bat
-install.bat                     :: 安装到 %LOCALAPPDATA%\dbx 并加入 PATH
-dbx                             :: 新开终端后启动 Web 服务
+install.bat                     :: 安装到 %LOCALAPPDATA%\dqex 并加入 PATH
+dqex                             :: 新开终端后启动 Web 服务
 :: 或不安装直接使用：
 start.bat                       :: 前台运行
 start.bat -d                    :: 后台运行
@@ -65,18 +65,18 @@ stop.bat                        :: 停止后台服务
 
 ```bash
 # CLI 示例
-dbx conn add --name 生产库 --type mysql --host 10.20.16.170 --port 3317 --un root --pw 'xxx'
-dbx exp camunda -s 生产库 -o backup.zip
-dbx dict camunda -s 生产库 -o dict.xlsx
-dbx cmp -s 生产库 -t 测试库 --source-database camunda --target-database camunda --scope both
+dqex conn add --name 生产库 --type mysql --host 10.20.16.170 --port 3317 --un root --pw 'xxx'
+dqex exp camunda -s 生产库 -o backup.zip
+dqex dict camunda -s 生产库 -o dict.xlsx
+dqex cmp -s 生产库 -t 测试库 --source-database camunda --target-database camunda --scope both
 
 # SQL 终端（按目标库方言原生执行）
-dbx sql -c 生产库                 # 交互式 REPL
-dbx sql -c 生产库 --json "SELECT id,name FROM users"   # 智能体友好 JSON 输出
+dqex sql -c 生产库                 # 交互式 REPL
+dqex sql -c 生产库 --json "SELECT id,name FROM users"   # 智能体友好 JSON 输出
 
 # 快照
-dbx snapshot create -c 生产库 -n 早盘
-dbx snapshot compare -c 生产库 --a 早盘 --b 午盘
+dqex snapshot create -c 生产库 -n 早盘
+dqex snapshot compare -c 生产库 --a 早盘 --b 午盘
 ```
 
 ## 构建
@@ -86,7 +86,7 @@ dbx snapshot compare -c 生产库 --a 早盘 --b 午盘
 make dev               # Go :8181 + Vite :5281，支持调试
 
 # 构建
-make build             # 单二进制 ./dbx（内嵌前端）
+make build             # 单二进制 ./dqex（内嵌前端）
 make release           # 跨平台打包 → release/
 
 # 安装

@@ -141,7 +141,7 @@ type Progress struct {
 type ProgressFunc func(Progress)
 
 // BackupTablePrefix 重置备份表前缀
-const BackupTablePrefix = "__dbimpex_bak_"
+const BackupTablePrefix = "__dqex_bak_"
 
 // DefaultBatchSize 默认批量大小
 const DefaultBatchSize = 500

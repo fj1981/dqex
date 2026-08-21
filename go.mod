@@ -1,4 +1,4 @@
-module dbimpex
+module dqex
 
 go 1.25.1
 

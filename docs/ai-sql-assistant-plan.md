@@ -2,7 +2,7 @@
 
 > 文档状态：**实施中**（Phase 1 完成，Phase 2 完成，Phase 3 完成）
 > 生成日期：2026-08-17
-> 目标：为 CLI（`dbx sql`）与 Web（查询终端）新增"大模型动态辅助写 SQL"能力。**AI 是完全可选的增量功能：未配置大模型时入口自动隐藏，全链路零侵入，行为与现状完全一致。**
+> 目标：为 CLI（`dqex sql`）与 Web（查询终端）新增"大模型动态辅助写 SQL"能力。**AI 是完全可选的增量功能：未配置大模型时入口自动隐藏，全链路零侵入，行为与现状完全一致。**
 >
 > **实施进度（2026-08-17）**：依赖已装（Eino v0.9.14 + openai 组件 v0.1.13 + atotto/clipboard）；`internal/llm`（2 文件）✓；`AppConfig.AI` + 掩码/保留密钥 + `Service.AIEnabled()` ✓；`service/ai.go` 会话/元数据缓存/流式编排/token 累计/进程级累计 ✓；CLI `\ai`（生成/run/explain/fix/optimize/continue/again/copy/status/config/clear/help）✓；Web `/api/ai/*`（status/usage/sessions/chat/SSE）✓；`AIPanel` 抽屉（流式 + diff 预览替换/追加 + 进程 token 展示）+ Settings AI 配置区（保存即热生效）✓；设置页左侧导航四区（通用/安全/AI/兼容）分区独立保存 ✓；未配置时入口隐藏 ✓。
 > **与计划的实现差异**：① Web diff 预览用 Monaco `DiffEditor` 侧并排对比，提供「替换编辑器内容 / 追加到末尾」两种确认（计划 §6.3）；② CLI `\ai config` 为逐项引导式写入 `config.yaml`（回车保持原值、`.` 退出），`\ai copy` 用 atotto/clipboard 跨平台复制缓冲区 SQL；③ 设置页四区导航实现（通用/安全/AI/兼容），AI 区独立「保存并立即生效」，其余区「保存后重启生效」；④ 进程级 token 累计：后端 `GET /api/ai/usage`，Web 面板底部展示「进程累计」，CLI `\ai status` 展示进程级消耗；⑤ schema 注入采用「表 + 字段定义」摘要格式（非完整 DDL）：透传表/列注释（`engine.GetTableMeta`）、PII 列脱敏、单表列数上限 80、单条注释截断 60 字、按 rune 安全裁剪不产生乱码（**仅 CLI 全量注入路径保留，Web 端已改为统一工具探索，见 ⑥**）；⑥ **React Agent 统一工具探索（Phase 4）**：Web 侧所有会话统一走 agent 模式——system prompt 只注入轻量「库+表名录」+ 工具使用约束（不再注入全量字段摘要，也不按表数路由），模型通过三个只读工具（`list_databases`/`list_tables`/`get_schema`，复用 engine 元数据，无 SQL 执行能力）自主探索后生成 SQL；agent 使用**会话独立 ChatModel 实例**避免工具绑定竞争，历史含工具轮次按「组」裁剪，SSE 新增 `tool` 事件供前端展示中间态；**CLI 侧保持全量注入（不启用 agent 模式）**。
@@ -179,7 +179,7 @@ ai:
 
 ---
 
-## 5. CLI 设计（`dbx sql` 内新增元命令，非流式整块输出）
+## 5. CLI 设计（`dqex sql` 内新增元命令，非流式整块输出）
 
 ### 生成后进入缓冲区，不弹多选菜单
 

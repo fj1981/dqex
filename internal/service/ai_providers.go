@@ -33,7 +33,7 @@ type AIProviderItem struct {
 	Models  []string `json:"models"`
 }
 
-// AIProviderConfig 本地配置文件结构（~/.dbimpex/ai_providers.yaml）。
+// AIProviderConfig 本地配置文件结构（~/.dqex/ai_providers.yaml）。
 type AIProviderConfig struct {
 	Providers []AIProviderStored `yaml:"providers"`
 }

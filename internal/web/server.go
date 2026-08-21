@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"dbimpex/internal/service"
-	webui "dbimpex/web"
+	"dqex/internal/service"
+	webui "dqex/web"
 
 	"github.com/gin-gonic/gin"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"
@@ -189,7 +189,7 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 	}
 	// 访问来源白名单过滤器：启动时由 --allow / 配置初始化，配置保存后可热更新（handleSaveConfig）
 	filter := newAccessFilter(allow)
-	eb := cygin.NewEndpointBuilder("/api", "dbx API", []string{"dbx"})
+	eb := cygin.NewEndpointBuilder("/api", "dqex API", []string{"dqex"})
 	apiGroup := eb.Build(
 		// 连接管理
 		eb.GROUP("/connections", []cygin.APIHandler{
@@ -329,12 +329,12 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 	server := cygin.NewServer(opts...)
 	// 绑定地址（WithPort 仅设置端口且默认全网卡，此处显式覆盖为 host:port）
 	server.Config.Address = net.JoinHostPort(host, strconv.Itoa(port))
-	// 访问凭证落盘：dbx url 可随时取回当前访问链接（含签发时间供过期判断）
+	// 访问凭证落盘：dqex url 可随时取回当前访问链接（含签发时间供过期判断）
 	if err := svc.Persist().SaveWebAccess(service.WebAccessInfo{Addr: server.Config.Address, Token: token, IssuedAt: issuedAt.UnixMilli()}); err != nil {
 		cylog.Warnf("保存 Web 访问凭证失败（不影响启动）: %v", err)
 	}
 	// 令牌桥接文件：本地开发（vite dev 代理）读取 web-access.json 注入 /api 请求头，
-	// 数据源仍以 SQLite 为准（dbx url 走 SQLite），此文件仅为 vite 的令牌快照
+	// 数据源仍以 SQLite 为准（dqex url 走 SQLite），此文件仅为 vite 的令牌快照
 	writeWebAccessFile(svc.Persist().BaseDir(), server.Config.Address, token, issuedAt.UnixMilli())
 	// 浏览器访问地址：通配地址（0.0.0.0/::）无法直接访问，回退为本机回环
 	browserHost := host
@@ -347,11 +347,11 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 	}
 	if token != "" {
 		openURL += "?token=" + token
-		cylog.Infof("dbx Web 服务启动: %s", openURL)
+		cylog.Infof("dqex Web 服务启动: %s", openURL)
 		cylog.Infof("令牌有效期至 %s（过期后请重启服务刷新）", issuedAt.Add(tokenTTL).Format("2006-01-02 15:04:05"))
 		cylog.Infof("API 认证: 请求头 Authorization: Bearer <token> / X-Auth-Token，或查询参数 ?token=")
 	} else {
-		cylog.Warnf("dbx Web 服务启动: %s（已禁用认证 --no-auth，请勿暴露到不可信网络）", openURL)
+		cylog.Warnf("dqex Web 服务启动: %s（已禁用认证 --no-auth，请勿暴露到不可信网络）", openURL)
 	}
 	if !noBrowser {
 		// 延迟至监听就绪后自动打开浏览器（携带 token，前端会存入 sessionStorage 供后续请求使用）

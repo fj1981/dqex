@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"dbimpex/internal/engine"
-	"dbimpex/internal/llm"
+	"dqex/internal/engine"
+	"dqex/internal/llm"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"

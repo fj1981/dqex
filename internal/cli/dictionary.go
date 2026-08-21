@@ -3,7 +3,7 @@ package cli
 // 点导入：CLI 层大量复用 service 包的模型别名与入口（NewService/选项模型/错误码）
 import (
 	"context"
-	. "dbimpex/internal/service"
+	. "dqex/internal/service"
 	"fmt"
 	"os"
 
@@ -21,9 +21,9 @@ var dictionaryCmd = &cobra.Command{
 产物为单个交付级工作簿：总览 sheet（全实例表清单，超链接跳转）+ 每库一个字段明细 sheet。
 
 独立闭环用法：
-  dbx dictionary --gen-config > dictionary.yaml   # 生成配置模板
+  dqex dictionary --gen-config > dictionary.yaml   # 生成配置模板
   vi dictionary.yaml                                # 填写连接与选项
-  dbx dictionary --config dictionary.yaml         # 执行生成
+  dqex dictionary --config dictionary.yaml         # 执行生成
 
 命令行参数优先于配置文件；也可完全通过 flags 指定连接（--source-*）。
   短参：-h/-P/-u/-p（主机/端口/用户/密码）、-s（已保存连接）、-o（输出）、-T（表）
@@ -34,7 +34,7 @@ var dictionaryCmd = &cobra.Command{
 func init() {
 	reserveHelpFlag(dictionaryCmd) // -h 让给 --host（mysqldump 风格），帮助用 --help
 	f := dictionaryCmd.Flags()
-	f.String("config", "", "配置文件(yaml)，dbx dictionary --gen-config 可生成模板")
+	f.String("config", "", "配置文件(yaml)，dqex dictionary --gen-config 可生成模板")
 	f.Bool("gen-config", false, "输出配置文件模板到标准输出")
 	f.String("task", "", "已保存任务配置 ID（Web 保存的任务）")
 	registerConnFlags(dictionaryCmd, "source", &dictSrc)

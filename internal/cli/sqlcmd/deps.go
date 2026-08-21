@@ -1,7 +1,7 @@
 package sqlcmd
 
 import (
-	"dbimpex/internal/engine"
+	"dqex/internal/engine"
 
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb/def"
 )

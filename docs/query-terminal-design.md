@@ -1,8 +1,8 @@
-# dbx sql — SQL 交互终端设计文档
+# dqex sql — SQL 交互终端设计文档
 
 ## 1. 概述
 
-`dbx sql` 是一个现代化的数据库 SQL 交互终端，内置于 `dbx` CLI 中。用户可以通过交互式 REPL 或单次执行模式连接 MySQL/PostgreSQL/Oracle 数据库并执行 SQL，支持人性化的表格渲染和智能体友好的 JSON 输出。
+`dqex sql` 是一个现代化的数据库 SQL 交互终端，内置于 `dqex` CLI 中。用户可以通过交互式 REPL 或单次执行模式连接 MySQL/PostgreSQL/Oracle 数据库并执行 SQL，支持人性化的表格渲染和智能体友好的 JSON 输出。
 
 **核心理念**：让熟悉 MySQL 的用户可以用 MySQL 语法操作 PostgreSQL/Oracle，底层由 `cydb` 的 `preProcess` 自动完成方言翻译。
 
@@ -16,23 +16,23 @@
 
 ```bash
 # 用已保存连接（支持 ID、名称或短名）
-dbx sql -c "生产库"         # 连接名称
-dbx sql -c prod              # 短名
-dbx sql -c conn_a1b2c3      # 连接 ID
+dqex sql -c "生产库"         # 连接名称
+dqex sql -c prod              # 短名
+dqex sql -c conn_a1b2c3      # 连接 ID
 
 # 连接 PostgreSQL
-dbx sql -c pg-prod
+dqex sql -c pg-prod
 
 # 连接 Oracle
-dbx sql -c oracle-dev
+dqex sql -c oracle-dev
 ```
 
 进入后显示提示符：
 
 ```
-dbx (mysql  @ 10.0.0.1:3306/mydb) >
-dbx (pg     @ 10.0.0.2:5432/mydb) >
-dbx (oracle @ 10.0.0.3:1521/XE)   >
+dqex (mysql  @ 10.0.0.1:3306/mydb) >
+dqex (pg     @ 10.0.0.2:5432/mydb) >
+dqex (oracle @ 10.0.0.3:1521/XE)   >
 ```
 
 > 提示符自动显示连接数据库的类型、地址和库名，MySQL 语法在 PG/Oracle 上自动翻译，用户无需感知差异。
@@ -41,33 +41,33 @@ dbx (oracle @ 10.0.0.3:1521/XE)   >
 
 ```bash
 # 执行单条 SQL（表格输出）
-dbx sql -c prod -e "SELECT * FROM users LIMIT 5"
+dqex sql -c prod -e "SELECT * FROM users LIMIT 5"
 
 # JSON 输出（智能体/脚本消费）
-dbx sql -c prod --json "SELECT id, name FROM users"
+dqex sql -c prod --json "SELECT id, name FROM users"
 
 # 从 stdin 读取
-echo "SELECT COUNT(*) FROM orders" | dbx sql -c prod --json
+echo "SELECT COUNT(*) FROM orders" | dqex sql -c prod --json
 
 # 从文件执行
-dbx sql -c prod -f query.sql
+dqex sql -c prod -f query.sql
 ```
 
 ### 2.3 管道友好（非 TTY 自动降级）
 
 ```bash
 # 管道场景自动使用纯文本表格（无 ANSI 颜色）
-dbx sql -c prod -e "SELECT * FROM users" | grep "admin"
+dqex sql -c prod -e "SELECT * FROM users" | grep "admin"
 
 # 脚本中获取 JSON 结果
-result=$(dbx sql -c prod --json "SELECT COUNT(*) FROM users")
+result=$(dqex sql -c prod --json "SELECT COUNT(*) FROM users")
 echo "$result" | jq '.rows[0][0]'
 ```
 
 ### 2.4 内联连接（无需预先保存）
 
 ```bash
-dbx sql --type mysql --host 10.0.0.1 --port 3306 --un root --pw '${DB_PASSWORD}' --db mydb
+dqex sql --type mysql --host 10.0.0.1 --port 3306 --un root --pw '${DB_PASSWORD}' --db mydb
 ```
 
 ---
@@ -100,7 +100,7 @@ dbx sql --type mysql --host 10.0.0.1 --port 3306 --un root --pw '${DB_PASSWORD}'
 ### 4.1 终端 UI 设计
 
 ```
-┌─ dbx (pg @ 10.0.0.2:5432/mydb) ──────────────────────────────┐
+┌─ dqex (pg @ 10.0.0.2:5432/mydb) ──────────────────────────────┐
 │                                                                │
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │  id │ name     │ email              │ created_at         │  │
@@ -111,7 +111,7 @@ dbx sql --type mysql --host 10.0.0.1 --port 3306 --un root --pw '${DB_PASSWORD}'
 │  └──────────────────────────────────────────────────────────┘  │
 │  3 rows in set (0.003 sec)                                     │
 │                                                                │
-│  dbx > SELECT id, name, email FROM users LIMIT 3;              │
+│  dqex > SELECT id, name, email FROM users LIMIT 3;              │
 │        ^ 光标位置                                               │
 └────────────────────────────────────────────────────────────────┘
 ```
@@ -122,7 +122,7 @@ dbx sql --type mysql --host 10.0.0.1 --port 3306 --un root --pw '${DB_PASSWORD}'
 |---|---|
 | **顶栏** | 显示连接类型 + 地址 + 当前库名，不可编辑 |
 | **结果区** | 表格渲染、消息、耗时统计，可滚动查看 |
-| **提示符** | `dbx >` 简洁提示符，支持多行编辑 |
+| **提示符** | `dqex >` 简洁提示符，支持多行编辑 |
 | **分页** | 结果超过终端高度时暂停，按 `q` 退出分页、`Space` 翻页 |
 
 ### 4.2 表格渲染
@@ -270,14 +270,14 @@ dbx sql --type mysql --host 10.0.0.1 --port 3306 --un root --pw '${DB_PASSWORD}'
 **自动 LIMIT 机制**：交互模式下，若用户 SQL 未显式包含 `LIMIT` 子句，引擎自动追加 `LIMIT 1000`。
 
 ```
-dbx > SELECT * FROM orders;
+dqex > SELECT * FROM orders;
 ⚠ 自动追加 LIMIT 1000（使用 --max-rows 调整）
 ┌───┬──────────┬───────┐
 │...│  ...     │ ...   │
 └───┴──────────┴───────┘
 1000 rows in set (0.523 sec)
 
-dbx > SELECT * FROM orders LIMIT 5000;
+dqex > SELECT * FROM orders LIMIT 5000;
 ⚠ 返回 5000 行可能较多，确定继续？[y/N] y
 ┌───┬──────────┬───────┐
 │...│  ...     │ ...   │
@@ -319,7 +319,7 @@ dbx > SELECT * FROM orders LIMIT 5000;
 
 ### 4.8 查询历史
 
-- 持久化到 `~/.dbimpex/query_history`（纯文本文件，最多保存 10000 条）
+- 持久化到 `~/.dqex/query_history`（纯文本文件，最多保存 10000 条）
 - 跨会话保留
 - `Ctrl+R` 增量搜索历史
 - 历史命令去重（连续相同的不重复保存）
@@ -332,7 +332,7 @@ dbx > SELECT * FROM orders LIMIT 5000;
 **EXPLAIN 表格增强**：自动识别 EXPLAIN 输出的关键列（`type`、`key`、`rows`、`Extra`）并着色标记。
 
 ```
-dbx > EXPLAIN SELECT * FROM users WHERE email = 'test@example.com';
+dqex > EXPLAIN SELECT * FROM users WHERE email = 'test@example.com';
 
 ┌────┬────────────┬──────┬───────┬──────────────┬──────┬──────┬──────┐
 │ id │ table      │ type │ key   │ possible_keys│ rows │ filt │ Extra│
@@ -353,7 +353,7 @@ dbx > EXPLAIN SELECT * FROM users WHERE email = 'test@example.com';
 **EXPLAIN ANALYZE 树形渲染**：
 
 ```
-dbx > EXPLAIN ANALYZE SELECT u.name, o.total FROM users u JOIN orders o ON u.id=o.user_id;
+dqex > EXPLAIN ANALYZE SELECT u.name, o.total FROM users u JOIN orders o ON u.id=o.user_id;
 
  Nested Loop Join  (cost=1.05..58.31 rows=45 width=36)
  ├─ Seq Scan on orders o  (cost=0.00..1.65 rows=65 width=8)
@@ -578,7 +578,7 @@ func (d *DBCli) preProcess(sql string) (string, error) {
 
 | 安全点 | 实现 |
 |---|---|
-| **操作日志** | 写操作（INSERT/UPDATE/DELETE/DDL）记录到 `~/.dbimpex/audit.log`，含时间戳、SQL（截断至 500 字符）、影响行数、耗时 |
+| **操作日志** | 写操作（INSERT/UPDATE/DELETE/DDL）记录到 `~/.dqex/audit.log`，含时间戳、SQL（截断至 500 字符）、影响行数、耗时 |
 | **日志轮转** | 单文件上限 10MB，自动轮转保留最近 5 个文件（`audit.log`、`audit.1.log`...`audit.4.log`） |
 | **只读操作不记录** | SELECT/SHOW/DESC 等只读查询不产生审计日志，避免日志膨胀 |
 
@@ -617,8 +617,8 @@ REPL 会话生命周期
 **提示符实时更新**：切换库后提示符同步更新。
 
 ```
-dbx (mysql @ 10.0.0.1:3306/mydb)  > USE mydb2;
-dbx (mysql @ 10.0.0.1:3306/mydb2) >   ← 提示符自动更新
+dqex (mysql @ 10.0.0.1:3306/mydb)  > USE mydb2;
+dqex (mysql @ 10.0.0.1:3306/mydb2) >   ← 提示符自动更新
 ```
 
 ---
@@ -656,7 +656,7 @@ require (
 | `cydb` 连接池 | ✅ | `sqlx` 纯 Go，驱动层全平台 |
 | ANSI 颜色 | ✅ | Windows Terminal（Win10+ 默认）完整支持；旧 cmd.exe 自动降级为纯文本 |
 | Unicode 表格边框 | ✅ | Windows Terminal 完整支持 Unicode |
-| `~/.dbimpex/` 数据目录 | ✅ | 项目已使用 `os.UserHomeDir()`，Windows 下自动映射到 `%USERPROFILE%` |
+| `~/.dqex/` 数据目录 | ✅ | 项目已使用 `os.UserHomeDir()`，Windows 下自动映射到 `%USERPROFILE%` |
 | `Ctrl+C` / SIGINT | ✅ | `liner` 已处理 Windows 平台差异 |
 | 分页器降级 | ✅ | `less` → `more` → 直接输出，三级降级 |
 
@@ -688,7 +688,7 @@ require (
 
 ## 10. 与其他数据库 CLI 工具的对比
 
-| 特性 | mysql CLI | psql | mycli | dbx sql |
+| 特性 | mysql CLI | psql | mycli | dqex sql |
 |---|---|---|---|---|
 | Unicode 表格边框 | ❌ ASCII | ❌ ASCII | ❌ ASCII | ✅ Unicode |
 | 语法着色 | ❌ | ❌ | ✅ AST 级着色 | ✅ 关键字/值/表名/列名着色 |
@@ -712,7 +712,7 @@ require (
 
 ## 11. 对现有功能的影响（零侵入）
 
-**零侵入**。`dbx sql` 子命令以独立子包 `internal/cli/sqlcmd/` 实现，对现有代码的改动仅一行：
+**零侵入**。`dqex sql` 子命令以独立子包 `internal/cli/sqlcmd/` 实现，对现有代码的改动仅一行：
 
 ```go
 // root.go 新增一行

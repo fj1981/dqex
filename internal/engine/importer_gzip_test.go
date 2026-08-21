@@ -34,7 +34,7 @@ func TestSqlBaseName(t *testing.T) {
 // 否则 --gzip 导出产物无法回导
 func TestOpenSQLFileGzipRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	content := "-- dbx export\nCREATE TABLE t (id INT);\n"
+	content := "-- dqex export\nCREATE TABLE t (id INT);\n"
 
 	// 明文 .sql
 	plain := filepath.Join(dir, "a.sql")

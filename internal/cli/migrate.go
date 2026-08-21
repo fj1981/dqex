@@ -3,7 +3,7 @@ package cli
 // 点导入：CLI 层大量复用 service 包的模型别名与入口（NewService/选项模型/错误码）
 import (
 	"context"
-	. "dbimpex/internal/service"
+	. "dqex/internal/service"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -19,9 +19,9 @@ var migrateCmd = &cobra.Command{
 	Long: `数据库迁移（支持跨类型）。
 
 独立闭环用法：
-  dbx migrate --gen-config > migrate.yaml   # 生成配置模板
+  dqex migrate --gen-config > migrate.yaml   # 生成配置模板
   vi migrate.yaml                               # 填写连接与选项
-  dbx migrate --config migrate.yaml         # 执行迁移
+  dqex migrate --config migrate.yaml         # 执行迁移
 
 命令行参数优先于配置文件；也可完全通过 flags 指定连接（--source-* / --target-*）。
 连接 flag 提供 mysqldump 风格别名：--source-user/--source-password/--source-database（及 target- 同名系列）`,
@@ -30,7 +30,7 @@ var migrateCmd = &cobra.Command{
 
 func init() {
 	f := migrateCmd.Flags()
-	f.String("config", "", "配置文件(yaml)，dbx migrate --gen-config 可生成模板")
+	f.String("config", "", "配置文件(yaml)，dqex migrate --gen-config 可生成模板")
 	f.Bool("gen-config", false, "输出配置文件模板到标准输出")
 	f.String("task", "", "已保存任务配置 ID（Web 保存的任务）")
 	registerConnFlags(migrateCmd, "source", &migrateSrc)

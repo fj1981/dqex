@@ -7,7 +7,7 @@ import type { SQLQueryResult } from "@/types"
 // 刷新页面 / 重开连接时按 key 从本地缓存读回，做到「刷新不丢结果、不重跑」。
 // 后端 workspace 表仍只持久化 tab 布局（sql/db/mode 等），结果集由本模块兜底。
 
-const DB_NAME = "dbimpex"
+const DB_NAME = "dqex"
 const STORE = "query-results"
 const DB_VERSION = 1
 

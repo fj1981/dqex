@@ -16,8 +16,8 @@ func TestResolveDirs(t *testing.T) {
 
 	// 无任何输入：全部默认派生
 	d := ResolveDirs("", nil)
-	if d.Data != filepath.Join(home, ".dbimpex") {
-		t.Fatalf("默认 data 目录应为 ~/.dbimpex，实际 %s", d.Data)
+	if d.Data != filepath.Join(home, ".dqex") {
+		t.Fatalf("默认 data 目录应为 ~/.dqex，实际 %s", d.Data)
 	}
 	if d.Exports != filepath.Join(d.Data, ExportDirName) || d.Tmp != filepath.Join(d.Data, TempDirName) || d.Uploads != filepath.Join(d.Data, UploadDirName) {
 		t.Fatalf("默认子目录应由 data 派生，实际 %+v", d)

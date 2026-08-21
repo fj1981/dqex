@@ -1,18 +1,18 @@
 @echo off
 setlocal EnableDelayedExpansion
-rem dbx Windows 安装脚本：把与脚本同目录的 dbx.exe 拷贝到安装目录并加入用户 PATH
+rem dqex Windows 安装脚本：把与脚本同目录的 dqex.exe 拷贝到安装目录并加入用户 PATH
 rem 用法（双击或 cmd 执行均可，无执行策略限制）：
-rem   install.bat              安装到默认目录 %%LOCALAPPDATA%%\dbx
-rem   install.bat D:\dbx   安装到自定义目录
-rem 安装完成后新开一个终端即可直接使用 dbx 命令
+rem   install.bat              安装到默认目录 %%LOCALAPPDATA%%\dqex
+rem   install.bat D:\dqex   安装到自定义目录
+rem 安装完成后新开一个终端即可直接使用 dqex 命令
 
-set "SRC=%~dp0dbx.exe"
+set "SRC=%~dp0dqex.exe"
 set "DEST_DIR=%~1"
-if "%DEST_DIR%"=="" set "DEST_DIR=%LOCALAPPDATA%\dbx"
-set "DEST=%DEST_DIR%\dbx.exe"
+if "%DEST_DIR%"=="" set "DEST_DIR=%LOCALAPPDATA%\dqex"
+set "DEST=%DEST_DIR%\dqex.exe"
 
 if not exist "%SRC%" (
-  echo 错误: 未在脚本同目录找到 dbx.exe (%~dp0)
+  echo 错误: 未在脚本同目录找到 dqex.exe (%~dp0)
   exit /b 1
 )
 

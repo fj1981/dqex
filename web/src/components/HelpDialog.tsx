@@ -18,19 +18,19 @@ import i18n from "@/lib/i18n"
 
 // 命令速查表：命令 / 别名 / 用途（desc 为 i18n key）
 const COMMANDS = [
-  { cmd: "dbx", alias: "", desc: "help.cmdDbx" },
-  { cmd: "dbx conn add", alias: "cn", desc: "help.cmdConnAdd" },
-  { cmd: "dbx conn list", alias: "", desc: "help.cmdConnList" },
-  { cmd: "dbx sql", alias: "", desc: "help.cmdSql" },
-  { cmd: "dbx export", alias: "exp", desc: "help.cmdExport" },
-  { cmd: "dbx import", alias: "imp", desc: "help.cmdImport" },
-  { cmd: "dbx migrate", alias: "mig", desc: "help.cmdMigrate" },
-  { cmd: "dbx compare", alias: "cmp", desc: "help.cmdCompare" },
-  { cmd: "dbx dictionary", alias: "dict", desc: "help.cmdDictionary" },
-  { cmd: "dbx snapshot", alias: "shot", desc: "help.cmdSnapshot" },
-  { cmd: "dbx task", alias: "tk", desc: "help.cmdTask" },
-  { cmd: "dbx history", alias: "his", desc: "help.cmdHistory" },
-  { cmd: "dbx config", alias: "cfg", desc: "help.cmdConfig" },
+  { cmd: "dqex", alias: "", desc: "help.cmdDbx" },
+  { cmd: "dqex conn add", alias: "cn", desc: "help.cmdConnAdd" },
+  { cmd: "dqex conn list", alias: "", desc: "help.cmdConnList" },
+  { cmd: "dqex sql", alias: "", desc: "help.cmdSql" },
+  { cmd: "dqex export", alias: "exp", desc: "help.cmdExport" },
+  { cmd: "dqex import", alias: "imp", desc: "help.cmdImport" },
+  { cmd: "dqex migrate", alias: "mig", desc: "help.cmdMigrate" },
+  { cmd: "dqex compare", alias: "cmp", desc: "help.cmdCompare" },
+  { cmd: "dqex dictionary", alias: "dict", desc: "help.cmdDictionary" },
+  { cmd: "dqex snapshot", alias: "shot", desc: "help.cmdSnapshot" },
+  { cmd: "dqex task", alias: "tk", desc: "help.cmdTask" },
+  { cmd: "dqex history", alias: "his", desc: "help.cmdHistory" },
+  { cmd: "dqex config", alias: "cfg", desc: "help.cmdConfig" },
 ]
 
 // 常用短参（desc 为 i18n key）
@@ -52,7 +52,7 @@ const EXAMPLES = [
   { title: "help.exSnapshot", code: "help.exSnapshotCode" },
 ]
 
-// 交互模式（dbx sql REPL）常用元命令（desc 为 i18n key）
+// 交互模式（dqex sql REPL）常用元命令（desc 为 i18n key）
 const META_COMMANDS = [
   { cmd: "\\q / \\quit", desc: "help.metaQuit" },
   { cmd: "\\dt / \\tables [pat]", desc: "help.metaTables" },
@@ -257,7 +257,7 @@ export default function HelpDialog({ open, onOpenChange }: { open: boolean; onOp
                 {t("help.replIntro")}
               </p>
               <pre className="overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs text-foreground">
-                dbx sql -c &lt;{t("help.replConn")}&gt;
+                dqex sql -c &lt;{t("help.replConn")}&gt;
               </pre>
               <div className="overflow-x-auto rounded-md border">
                 <table className="w-full text-left text-sm">
@@ -330,9 +330,9 @@ export default function HelpDialog({ open, onOpenChange }: { open: boolean; onOp
                 </table>
               </div>
               <pre className="overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs text-foreground">
-                dbx sql -c {t("help.aiDemoConn")}
+                dqex sql -c {t("help.aiDemoConn")}
                 {"\n"}
-                dbx (mysql @ ...)&gt; \ai {t("help.aiDemoPrompt")}
+                dqex (mysql @ ...)&gt; \ai {t("help.aiDemoPrompt")}
               </pre>
             </section>
 
@@ -371,7 +371,7 @@ export default function HelpDialog({ open, onOpenChange }: { open: boolean; onOp
                 <li>{t("help.note1a")}<code className="font-mono text-xs">--config 文件</code>{t("help.note1b")}<code className="font-mono text-xs">--task 任务ID</code>{t("help.note1c")}</li>
                 <li>{t("help.note2a")}<code className="font-mono text-xs">"170 生产"</code>{t("help.note2b")}</li>
                 <li>{t("help.note3a")}<code className="font-mono text-xs">--reset truncate/drop</code>{t("help.note3b")}</li>
-                <li>{t("help.note4a")}<code className="font-mono text-xs">dbx import</code>{t("help.note4b")}</li>
+                <li>{t("help.note4a")}<code className="font-mono text-xs">dqex import</code>{t("help.note4b")}</li>
                 <li>{t("help.note5a")}<code className="font-mono text-xs">--port</code>{t("help.note5b")}<code className="font-mono text-xs">--port</code>{t("help.note5c")}</li>
               </ul>
             </section>

@@ -9,7 +9,7 @@ import { defineConfig } from "vite"
 // 由代理层自动注入 /api 请求，使 http://localhost:5281 开箱即用（与生产行为一致：真实校验 token）
 function devToken(): string {
   try {
-    const file = path.join(os.homedir(), ".dbimpex", "web-access.json")
+    const file = path.join(os.homedir(), ".dqex", "web-access.json")
     if (!existsSync(file)) return ""
     const info = JSON.parse(readFileSync(file, "utf-8")) as { token?: string }
     return info.token || ""

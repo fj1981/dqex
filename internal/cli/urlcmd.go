@@ -12,12 +12,12 @@ var urlCmd = &cobra.Command{
 	Short: "输出 Web 访问链接（带 token）",
 	Long: `输出当前数据目录下的 Web 访问链接（带 token），可直接在浏览器打开或用于 API 调试。
 令牌每次启动自动重新生成（不读盘复用），有效期 24 小时；重启即刷新。
-删除数据目录下的存储库 dbimpex.db 不影响启动（下次启动重新生成并写入）。
+删除数据目录下的存储库 dqex.db 不影响启动（下次启动重新生成并写入）。
 
 示例：
-  dbx url                                    # 完整访问链接
-  dbx url --token-only                       # 仅输出 token
-  curl -H "Authorization: Bearer $(dbx url --token-only)" http://127.0.0.1:8181/api/connections`,
+  dqex url                                    # 完整访问链接
+  dqex url --token-only                       # 仅输出 token
+  curl -H "Authorization: Bearer $(dqex url --token-only)" http://127.0.0.1:8181/api/connections`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		svc, err := newCliService()
 		if err != nil {

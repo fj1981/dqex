@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.0] - 2026-08-21
+### Changed
+- Binary renamed from `dbx` to `dqex` (d=database, q=query, e=execute, ex=export/extension); all CLI commands, scripts, and docs updated accordingly
+- Config directory renamed from `~/.dbimpex` to `~/.dqex`; environment variable renamed from `DBIMPEX_CONFIG` to `DQEX_CONFIG`
+
 ## [0.4.0] - 2026-08-20
 ### Added
 - "Changelog" section in About dialog with per-version accordion display

@@ -6,10 +6,10 @@ import (
 	"os"
 	"strings"
 
-	"dbimpex/internal/cli"
-	"dbimpex/internal/engine"
-	"dbimpex/internal/service"
-	"dbimpex/internal/web"
+	"dqex/internal/cli"
+	"dqex/internal/engine"
+	"dqex/internal/service"
+	"dqex/internal/web"
 
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
 )

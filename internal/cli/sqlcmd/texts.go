@@ -3,8 +3,8 @@ package sqlcmd
 import (
 	"context"
 
-	"dbimpex/internal/llm"
-	"dbimpex/internal/service"
+	"dqex/internal/llm"
+	"dqex/internal/service"
 	"errors"
 	"fmt"
 	"io"
@@ -48,7 +48,7 @@ func langCtx() context.Context {
 // cliTexts SQL 终端高频输出文案（按语言索引，新增语言只加 map 条目）。
 type cliTexts struct {
 	// 交互横幅
-	bannerTitle string // dbx sql - 交互式 SQL 终端
+	bannerTitle string // dqex sql - 交互式 SQL 终端
 	bannerConn  string // 连接: %s @ %s:%d/%s
 	bannerHint  string // 输入 \h 查看帮助，\q 退出
 
@@ -200,7 +200,7 @@ type cliTexts struct {
 // cliTextsMap 语言注册表：缺失语言回退 zh。
 var cliTextsMap = map[string]cliTexts{
 	"zh": {
-		bannerTitle:         "dbx sql - 交互式 SQL 终端",
+		bannerTitle:         "dqex sql - 交互式 SQL 终端",
 		bannerConn:          "连接: %s @ %s:%d/%s",
 		bannerHint:          "输入 \\h 查看帮助，\\q 退出",
 		confirmWrite:        "确认执行写操作? [y/N] ",
@@ -351,7 +351,7 @@ var cliTextsMap = map[string]cliTexts{
 		errSwitchDB:            "切换数据库失败",
 	},
 	"en": {
-		bannerTitle:         "dbx sql - interactive SQL terminal",
+		bannerTitle:         "dqex sql - interactive SQL terminal",
 		bannerConn:          "Connected: %s @ %s:%d/%s",
 		bannerHint:          "Type \\h for help, \\q to quit",
 		confirmWrite:        "Confirm write operation? [y/N] ",

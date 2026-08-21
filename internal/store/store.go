@@ -9,7 +9,7 @@ func OpenSQLite(dbPath string) (Store, error) {
 }
 
 // DBFileName SQLite 数据库文件名（位于数据根目录）。
-const DBFileName = "dbimpex.db"
+const DBFileName = "dqex.db"
 
 // DefaultDBPath 返回数据根目录下的默认 SQLite 库路径。
 func DefaultDBPath(baseDir string) string {

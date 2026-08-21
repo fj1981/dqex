@@ -5,21 +5,21 @@ import (
 	"path/filepath"
 	"strings"
 
-	"dbimpex/internal/store"
+	"dqex/internal/store"
 
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cylog"
 )
 
 // PersistMgr 统一持久化管理：连接配置 + 任务配置 + 执行历史 + SQL 历史 + SQL 审计 + Web 凭证，
-// 全部存储于 SQLite（dbimpex.db），目录类资源（上传/临时/导出/对比/快照）仍为文件系统目录。
+// 全部存储于 SQLite（dqex.db），目录类资源（上传/临时/导出/对比/快照）仍为文件系统目录。
 type PersistMgr struct {
 	baseDir                                               string
 	tmpDir, uploadDir, exportDir, compareDir, snapshotDir string
 	store                                                 store.Store
 }
 
-// 数据根目录（默认 ~/.dbimpex，--data-dir 可覆盖）下的子目录规划：
-//   - 根目录：SQLite 数据库（dbimpex.db）
+// 数据根目录（默认 ~/.dqex，--data-dir 可覆盖）下的子目录规划：
+//   - 根目录：SQLite 数据库（dqex.db）
 //   - uploads：Web 上传文件临时目录
 //   - tmp：任务处理临时目录（如 zip 解压，任务结束自动清理）
 //   - exports：导出产物目录（导出 zip/目录）
@@ -33,7 +33,7 @@ const (
 	SnapshotDirName = "snapshots"
 )
 
-// NewPersistMgr 创建持久化管理器（默认 ~/.dbimpex/，子目录由 data 目录派生）
+// NewPersistMgr 创建持久化管理器（默认 ~/.dqex/，子目录由 data 目录派生）
 func NewPersistMgr(baseDir string) (*PersistMgr, error) {
 	return NewPersistMgrWith(ResolveDirs(baseDir, nil))
 }

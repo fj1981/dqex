@@ -25,7 +25,7 @@ func dropTableIfExists(cli *cydb.DBCli, table string) error {
 	return err
 }
 
-// backupTable 在目标库创建备份表 __dbimpex_bak_{表名}（CREATE TABLE AS SELECT）
+// backupTable 在目标库创建备份表 __dqex_bak_{表名}（CREATE TABLE AS SELECT）
 func backupTable(cli *cydb.DBCli, table string, t *tracker) error {
 	bak := backupTableName(table)
 	// 清理上一次遗留的备份表

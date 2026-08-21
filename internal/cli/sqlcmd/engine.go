@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"dbimpex/internal/engine"
+	"dqex/internal/engine"
 
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cydb"
 )
@@ -718,7 +718,7 @@ func (s *session) editLastSQL() {
 	}
 
 	// 写入临时文件
-	tmpFile, err := os.CreateTemp("", "dbx-edit-*.sql")
+	tmpFile, err := os.CreateTemp("", "dqex-edit-*.sql")
 	if err != nil {
 		fprintf(os.Stderr, "%s\n", red(err.Error()))
 		return

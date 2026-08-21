@@ -5,7 +5,7 @@ package sqlcmd
 // ApplyHelpLang 重写文本；注册表缺条目时保持定义时中文（zh 基准）。
 
 import (
-	"dbimpex/internal/llm"
+	"dqex/internal/llm"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -24,9 +24,9 @@ var sqlHelpMap = map[string]sqlHelpTexts{
 		long: `交互式数据库 SQL 终端，支持表格渲染与 JSON 输出。
 
 使用方式：
-  dbx sql -c <连接>              交互式 REPL 终端
-  dbx sql -c <连接> -e "SQL"     单次执行（表格输出）
-  dbx sql -c <连接> --json "SQL" JSON 输出（智能体友好）`,
+  dqex sql -c <连接>              交互式 REPL 终端
+  dqex sql -c <连接> -e "SQL"     单次执行（表格输出）
+  dqex sql -c <连接> --json "SQL" JSON 输出（智能体友好）`,
 		flags: map[string]string{
 			"conn":        "已保存连接（支持 ID、名称或短名）",
 			"execute":     "执行 SQL 后退出",
@@ -55,9 +55,9 @@ var sqlHelpMap = map[string]sqlHelpTexts{
 		long: `Interactive database SQL terminal with table rendering and JSON output.
 
 Usage:
-  dbx sql -c <conn>              interactive REPL terminal
-  dbx sql -c <conn> -e "SQL"     single run (table output)
-  dbx sql -c <conn> --json "SQL" JSON output (agent friendly)`,
+  dqex sql -c <conn>              interactive REPL terminal
+  dqex sql -c <conn> -e "SQL"     single run (table output)
+  dqex sql -c <conn> --json "SQL" JSON output (agent friendly)`,
 		flags: map[string]string{
 			"conn":        "Saved connection (ID, name or short name)",
 			"execute":     "Run SQL and exit",

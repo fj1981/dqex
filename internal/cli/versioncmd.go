@@ -15,7 +15,7 @@ var versionCmd = &cobra.Command{
 	Aliases: []string{"v"},
 	Short:   "查看版本号",
 	Run: func(cmd *cobra.Command, args []string) {
-		printf("dbx %s\n", Version)
+		printf("dqex %s\n", Version)
 		if BuildTime != "" {
 			printf(cliTextsFor(cliLang()).versionBuildTime+"\n", BuildTime)
 		}

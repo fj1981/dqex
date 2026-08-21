@@ -207,9 +207,9 @@ export default function WorkspaceLayout() {
   }, [connId, connections, setConnId])
 
   // 查询 tab 编辑器/结果区上下分割布局，自动持久化到 localStorage
-  const querySplit = useDefaultLayout({ id: "dbx-query-split" })
+  const querySplit = useDefaultLayout({ id: "dqex-query-split" })
   // AI 面板横向宽度（右侧面板，可拖动调整，比例存 localStorage）
-  const aiSplit = useDefaultLayout({ id: "dbx-ai-split" })
+  const aiSplit = useDefaultLayout({ id: "dqex-ai-split" })
 
   const checkHealth = useCallback(async () => {
     if (!connId) return

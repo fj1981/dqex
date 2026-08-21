@@ -1,17 +1,17 @@
 #!/bin/sh
-# dbx 安装脚本：把与脚本同目录的 dbx 二进制安装到 bin 目录
+# dqex 安装脚本：把与脚本同目录的 dqex 二进制安装到 bin 目录
 # 用法：
 #   ./install.sh                      # 安装到 /usr/local/bin（无写权限时自动 sudo）
 #   ./install.sh ~/bin                # 安装到自定义目录（如 /usr/local/bin 无权限时）
 set -e
 
 DIR=$(cd "$(dirname "$0")" && pwd)
-BIN="$DIR/dbx"
+BIN="$DIR/dqex"
 DEST_DIR=${1:-/usr/local/bin}
-DEST="$DEST_DIR/dbx"
+DEST="$DEST_DIR/dqex"
 
 if [ ! -f "$BIN" ]; then
-	echo "错误: 未在脚本同目录找到 dbx 二进制 ($DIR)" >&2
+	echo "错误: 未在脚本同目录找到 dqex 二进制 ($DIR)" >&2
 	exit 1
 fi
 
@@ -45,5 +45,5 @@ fi
 # 自定义目录不在 PATH 中时给出提示
 case ":$PATH:" in
 	*":$DEST_DIR:"*) ;;
-	*) echo "提示: $DEST_DIR 不在 PATH 中，可执行 export PATH=\"$DEST_DIR:\$PATH\" 或改用 ./dbx 直接运行" ;;
+	*) echo "提示: $DEST_DIR 不在 PATH 中，可执行 export PATH=\"$DEST_DIR:\$PATH\" 或改用 ./dqex 直接运行" ;;
 esac

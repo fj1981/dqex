@@ -2,8 +2,8 @@ package cli
 
 // 点导入：CLI 层大量复用 service 包的模型别名与入口（NewService/选项模型/错误码）
 import (
-	"dbimpex/internal/engine"
-	. "dbimpex/internal/service"
+	"dqex/internal/engine"
+	. "dqex/internal/service"
 	"os"
 	"path/filepath"
 	"strings"
@@ -358,7 +358,7 @@ func migrateFromLegacy(o *MigrateOptions) *migrateConfig {
 
 // ---- 配置模板（--gen-config 输出，人工填写起点） ----
 
-const tplConn = `# 内联连接配置；也可删除本段改用 source_ref: 已保存连接名（dbx conn add 保存）
+const tplConn = `# 内联连接配置；也可删除本段改用 source_ref: 已保存连接名（dqex conn add 保存）
 type: mysql            # mysql / postgresql / oracle
 subtype: ""            # 可选：兼容数据库产品（如 oceanbase/mariadb、gaussdb/kingbase、dameng），留空=原生
 host: 127.0.0.1
@@ -369,7 +369,7 @@ database: ""           # 留空=由 --databases/库内全部库决定
 `
 
 var configTemplates = map[string]string{
-	"compare": `# dbx compare 独立配置文件（dbx compare --config compare.yaml）
+	"compare": `# dqex compare 独立配置文件（dqex compare --config compare.yaml）
 source:
 ` + indentBlock(tplConn, "  ") + `target:
 ` + indentBlock(tplConn, "  ") + `# tables:              # 指定对比的表，留空=全部
@@ -388,7 +388,7 @@ threshold: 1000        # 单表行数超过阈值时仅对比行数，不逐行�
 # force_data: false    # 结构不一致时仍强制对比数据（默认跳过）
 # output: report.json  # 对比报告 JSON 保存路径（可选）
 `,
-	"export": `# dbx export 独立配置文件（dbx export --config export.yaml）
+	"export": `# dqex export 独立配置文件（dqex export --config export.yaml）
 source:
 ` + indentBlock(tplConn, "  ") + `# output: ./export.zip  # 输出 .zip 文件路径或目录（留空=默认导出目录）
 # name: myexport        # 任务名（用于生成文件名）
@@ -405,14 +405,14 @@ gzip: false            # SQL 文件 gzip 压缩为 .sql.gz（导入侧自动解�
 single_transaction: true  # 一致性快照导出（仅 MySQL/PostgreSQL 生效）
 batch_size: 500
 `,
-	"import": `# dbx import 独立配置文件（dbx import --config import.yaml）
+	"import": `# dqex import 独立配置文件（dqex import --config import.yaml）
 target:
 ` + indentBlock(tplConn, "  ") + `input: ./export.zip    # 导入文件（.sql / .sql.gz / .zip）
 reset: ""              # "" 直接追加 | truncate 清空表 | drop 删除重建
 backup: true           # 重置前创建备份表（仅 reset 非空时生效）
 batch_size: 500
 `,
-	"migrate": `# dbx migrate 独立配置文件（dbx migrate --config migrate.yaml）
+	"migrate": `# dqex migrate 独立配置文件（dqex migrate --config migrate.yaml）
 source:
 ` + indentBlock(tplConn, "  ") + `target:
 ` + indentBlock(tplConn, "  ") + `# tables:              # 指定表，留空=全部
@@ -425,7 +425,7 @@ reset: ""              # "" 直接追加 | truncate | drop
 backup: true
 batch_size: 500
 `,
-	"dictionary": `# dbx dictionary 独立配置文件（dbx dictionary --config dictionary.yaml）
+	"dictionary": `# dqex dictionary 独立配置文件（dqex dictionary --config dictionary.yaml）
 source:
 ` + indentBlock(tplConn, "  ") + `# output: ./dictionary.zip  # 输出 .zip 文件路径或目录（留空=默认导出目录）
 # name: mydict              # 任务名（用于生成文件名）

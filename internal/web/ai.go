@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"dbimpex/internal/service"
+	"dqex/internal/service"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/gin-gonic/gin"

@@ -11,11 +11,11 @@ import (
 	"os/user"
 	"strings"
 
-	"dbimpex/internal/engine"
+	"dqex/internal/engine"
 )
 
 // encPrefix 密文前缀：标识加密字段，同时用于识别旧版明文（无此头即明文，直接兼容）。
-const encPrefix = "dbimpex-enc-v1:"
+const encPrefix = "dqex-enc-v1:"
 
 // machineKey 由本机特征（主机名 + 用户名 + uid）派生 AES-256 密钥。
 // 数据被拷贝到其他机器后无法还原密钥，从而防止敏感信息泄露。
@@ -28,7 +28,7 @@ func machineKey() ([]byte, error) {
 	if u, err := user.Current(); err == nil {
 		uname = u.Username
 	}
-	sum := sha256.Sum256([]byte(fmt.Sprintf("dbimpex|%s|%s|%d", host, uname, os.Getuid())))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("dqex|%s|%s|%d", host, uname, os.Getuid())))
 	return sum[:], nil
 }
 

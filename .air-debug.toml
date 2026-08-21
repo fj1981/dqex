@@ -6,11 +6,11 @@ tmp_dir = ".gotmp"
 
 [build]
   # 与 go run ./cmd 等效
-  cmd = "go build -o .gotmp/dbx_dev ./cmd"
+  cmd = "go build -o .gotmp/dqex_dev ./cmd"
   # 编译后执行的二进制（带参数）
-  bin = ".gotmp/dbx_dev"
+  bin = ".gotmp/dqex_dev"
   # 额外参数：--no-browser 避免重复打开浏览器；--debug 开启全局 debug 日志
-  full_bin = ".gotmp/dbx_dev --no-browser --debug"
+  full_bin = ".gotmp/dqex_dev --no-browser --debug"
   # 排除的文件和目录
   exclude_dir = [
     "assets",
@@ -24,7 +24,7 @@ tmp_dir = ".gotmp"
     ".qoder",
     "release",
     "exports",
-    ".dbimpex-exports",
+    ".dqex-exports",
   ]
   exclude_regex = ["_test.go"]
   exclude_unchanged = false

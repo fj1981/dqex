@@ -48,7 +48,7 @@ func init() {
 		ErrOpenDirFailed:     {"zh": "打开目录失败", "en": "Failed to open directory"},
 		ErrCryptoFailed:      {"zh": "配置文件加解密失败", "en": "Failed to encrypt/decrypt configuration"},
 		ErrHistoryRunning:    {"zh": "任务运行中，无法删除记录", "en": "Task is running, cannot delete record"},
-		ErrTokenExpired:      {"zh": "访问令牌已过期（有效期 24 小时），请重启 dbx 服务刷新令牌后重新访问", "en": "Access token expired (valid for 24h); restart dbx to refresh the token"},
+		ErrTokenExpired:      {"zh": "访问令牌已过期（有效期 24 小时），请重启 dqex 服务刷新令牌后重新访问", "en": "Access token expired (valid for 24h); restart dqex to refresh the token"},
 		ErrAuthFailed:        {"zh": "认证失败：缺少访问令牌或令牌无效", "en": "Authentication failed: access token missing or invalid"},
 		ErrRateLimited:       {"zh": "认证失败过于频繁，来源已临时锁定，请稍后重试", "en": "Too many failed attempts; source temporarily locked, retry later"},
 		ErrAccessDenied:      {"zh": "访问被拒绝：当前来源不在允许访问的 IP/域名白名单内", "en": "Access denied: source not in the allowed IP/domain whitelist"},

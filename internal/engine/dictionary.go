@@ -110,7 +110,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 	if outputDir == "" {
 		// 默认：数据根目录下 exports/（service 层调用时已注入同一默认值）
 		home, _ := os.UserHomeDir()
-		outputDir = filepath.Join(home, ".dbimpex", "exports")
+		outputDir = filepath.Join(home, ".dqex", "exports")
 	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return nil, NewMsgErrf(errDictOutDir, err)

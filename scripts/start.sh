@@ -1,21 +1,21 @@
 #!/bin/sh
-# dbx 启动脚本：检查安装状态并启动 Web 服务
+# dqex 启动脚本：检查安装状态并启动 Web 服务
 # 用法：
 #   ./start.sh                         # 前台运行（Ctrl+C 停止）
 #   ./start.sh -d                      # 后台运行（关闭终端不中断）
 #   ./start.sh -d --port 9000          # 后台 + 指定端口
 set -e
 
-# 查找 dbx 二进制：优先同目录 > PATH
+# 查找 dqex 二进制：优先同目录 > PATH
 DIR=$(cd "$(dirname "$0")" && pwd)
 DBX=""
 
-if [ -f "$DIR/dbx" ] && [ -x "$DIR/dbx" ]; then
-	DBX="$DIR/dbx"
-elif command -v dbx >/dev/null 2>&1; then
-	DBX="dbx"
+if [ -f "$DIR/dqex" ] && [ -x "$DIR/dqex" ]; then
+	DBX="$DIR/dqex"
+elif command -v dqex >/dev/null 2>&1; then
+	DBX="dqex"
 else
-	echo "错误: 未找到 dbx，请先执行 ./install.sh 安装" >&2
+	echo "错误: 未找到 dqex，请先执行 ./install.sh 安装" >&2
 	exit 1
 fi
 
@@ -36,10 +36,10 @@ if [ "$DAEMON" = true ]; then
 	PID=$!
 	sleep 0.5
 	if kill -0 "$PID" 2>/dev/null; then
-		echo ">> dbx 已在后台启动 (PID: $PID)"
+		echo ">> dqex 已在后台启动 (PID: $PID)"
 		echo ">> 查看访问链接: $DIR/url.sh"
 	else
-		echo "错误: dbx 启动失败" >&2
+		echo "错误: dqex 启动失败" >&2
 		exit 1
 	fi
 else

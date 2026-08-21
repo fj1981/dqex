@@ -15,7 +15,7 @@ package store
 import (
 	"encoding/json"
 
-	"dbimpex/internal/engine"
+	"dqex/internal/engine"
 )
 
 // ---- 引擎模型别名（模型统一定义在 engine 包，避免循环依赖） ----
@@ -181,7 +181,7 @@ type SQLAuditEntry struct {
 	PKValues  []any    `json:"pkValues,omitempty"`
 }
 
-// WebAccessInfo Web 访问凭证：持久化后重启可复用（未过期时），dbx url 随时可取
+// WebAccessInfo Web 访问凭证：持久化后重启可复用（未过期时），dqex url 随时可取
 type WebAccessInfo struct {
 	Addr     string `json:"addr"`               // 监听地址 host:port
 	Token    string `json:"token"`              // 访问令牌（空=启动时禁用了认证）

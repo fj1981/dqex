@@ -7,7 +7,7 @@ VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev-$(shell 
 # 短 commit id：package 汇总包命名用（git rev-parse 取短哈希，如 d59e502）
 SHORT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILDTIME = $(shell date '+%y%m%d%H%M')
-LDFLAGS_REL := -s -w -X dbimpex/internal/cli.Version=$(VERSION) -X 'dbimpex/internal/cli.BuildTime=$(BUILDTIME)'
+LDFLAGS_REL := -s -w -X dqex/internal/cli.Version=$(VERSION) -X 'dqex/internal/cli.BuildTime=$(BUILDTIME)'
 
 # 检测 air 是否已安装
 HAS_AIR := $(shell command -v $(AIR) 2>/dev/null)
@@ -47,25 +47,25 @@ web-stub:
 
 # 构建单二进制（内嵌真实前端产物，注入版本号与构建时间）
 build: web-dist
-	$(GO) build -ldflags "-X dbimpex/internal/cli.Version=$(VERSION) -X 'dbimpex/internal/cli.BuildTime=$(BUILDTIME)'" -o dbx ./cmd
-	@echo ">> 构建完成: ./dbx（版本 $(VERSION)，构建于 $(BUILDTIME)）"
+	$(GO) build -ldflags "-X dqex/internal/cli.Version=$(VERSION) -X 'dqex/internal/cli.BuildTime=$(BUILDTIME)'" -o dqex ./cmd
+	@echo ">> 构建完成: ./dqex（版本 $(VERSION)，构建于 $(BUILDTIME)）"
 
 # 构建并安装到本机（默认 /usr/local/bin，无写权限时自动 sudo；可 make install PREFIX=$HOME/bin 覆盖）
 PREFIX ?= /usr/local/bin
 install: build
 	@if [ "$(PREFIX)" != "/usr/local/bin" ] && [ ! -d "$(PREFIX)" ]; then mkdir -p "$(PREFIX)"; fi
 	@if [ "$$(id -u)" = "0" ] || [ -w "$(PREFIX)" ]; then \
-		cp dbx "$(PREFIX)/dbx" && chmod +x "$(PREFIX)/dbx"; \
+		cp dqex "$(PREFIX)/dqex" && chmod +x "$(PREFIX)/dqex"; \
 	else \
 		echo ">> $(PREFIX) 无写权限，使用 sudo 安装"; \
-		sudo cp dbx "$(PREFIX)/dbx" && sudo chmod +x "$(PREFIX)/dbx"; \
+		sudo cp dqex "$(PREFIX)/dqex" && sudo chmod +x "$(PREFIX)/dqex"; \
 	fi
-	@echo ">> 安装完成: $$($(PREFIX)/dbx version | head -1) -> $(PREFIX)/dbx"
+	@echo ">> 安装完成: $$($(PREFIX)/dqex version | head -1) -> $(PREFIX)/dqex"
 
 # 卸载本机安装
 uninstall:
-	@if [ -w "$(PREFIX)" ] || [ "$$(id -u)" = "0" ]; then rm -f "$(PREFIX)/dbx"; else sudo rm -f "$(PREFIX)/dbx"; fi
-	@echo ">> 已卸载 $(PREFIX)/dbx"
+	@if [ -w "$(PREFIX)" ] || [ "$$(id -u)" = "0" ]; then rm -f "$(PREFIX)/dqex"; else sudo rm -f "$(PREFIX)/dqex"; fi
+	@echo ">> 已卸载 $(PREFIX)/dqex"
 
 # 清理开发端口残留进程（上次 dev 未正常退出导致 8181/5281 被占用时手动执行，dev 启动前会自动执行）
 stop:
@@ -91,32 +91,32 @@ dev: web-deps web-stub stop
 	@echo ">> Ctrl+C 同时停止前后端"
 	@if [ -n "$(DEBUG)" ]; then echo ">> DEBUG=1：后端以 --debug 启动，输出全局 debug 及以上级别日志"; fi
 	@if [ -z "$(OPEN_BACKEND)" ]; then echo ">> 默认不打开 8181 网页；如需同步打开请加 OPEN_BACKEND=1"; fi
-	@echo ">> dev 代理自动注入令牌（读 ~/.dbimpex/web-access.json），5281 无需 ?token= 即可访问"
+	@echo ">> dev 代理自动注入令牌（读 ~/.dqex/web-access.json），5281 无需 ?token= 即可访问"
 	@$(AIR) -c $(AIR_CFG) & AIR_PID=$$!; \
 	trap "kill $$AIR_PID 2>/dev/null; sh scripts/kill-dev-ports.sh" EXIT; \
 	cd web && yarn dev
 
 # 调试模式：dlv headless 启动后端（:2345），VS Code 使用 launch.json 中的
-# "Attach dbx" 配置 attach 调试；前端 Vite HMR 同时启动
+# "Attach dqex" 配置 attach 调试；前端 Vite HMR 同时启动
 # 注意：dlv 模式下后端不支持热重载（需手动重启 dlv），前端仍然 HMR
 dev-debug: web-deps web-stub stop
 	@echo ">> dlv 调试服务: 127.0.0.1:2345（VS Code F5 attach，不支持热重载，需手动重启）"
 	@echo ">> Vite HMR 启动前端 http://localhost:5281（React 代码变更即时生效）"
 	@echo ">> Ctrl+C 同时停止"
-	@echo ">> dev 代理自动注入令牌（读 ~/.dbimpex/web-access.json），5281 无需 ?token= 即可访问"
+	@echo ">> dev 代理自动注入令牌（读 ~/.dqex/web-access.json），5281 无需 ?token= 即可访问"
 	@$(DLV) debug --headless --listen=127.0.0.1:2345 --api-version=2 --accept-multiclient ./cmd & BACKEND_PID=$$!; \
 	trap "kill $$BACKEND_PID 2>/dev/null; sh scripts/kill-dev-ports.sh" EXIT; \
 	cd web && yarn dev
 
-# 跨平台打包：输出 release/dbx-$(VERSION)-{os}-{arch}.zip（CGO 关闭，纯静态二进制）；
-# zip 内包含 dbx（Windows 为 dbx.exe）+ 安装/启动/停止/查看链接脚本 + CLI.md 使用手册，解压即用；
+# 跨平台打包：输出 release/dqex-$(VERSION)-{os}-{arch}.zip（CGO 关闭，纯静态二进制）；
+# zip 内包含 dqex（Windows 为 dqex.exe）+ 安装/启动/停止/查看链接脚本 + CLI.md 使用手册，解压即用；
 # install.bat/start.bat/stop.bat 打包时转 CRLF + GBK，避免 Windows cmd（GBK 代码页）中文乱码与解析问题
 release: web-dist
 	@rm -rf release && mkdir -p release
 	@for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; \
-		bin=dbx; stage=release/$$os-$$arch; mkdir -p $$stage; \
-		if [ "$$os" = "windows" ]; then bin=dbx.exe; fi; \
+		bin=dqex; stage=release/$$os-$$arch; mkdir -p $$stage; \
+		if [ "$$os" = "windows" ]; then bin=dqex.exe; fi; \
 		echo ">> 构建 $$os/$$arch (版本 $(VERSION))"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "$(LDFLAGS_REL)" -o $$stage/$$bin ./cmd || exit 1; \
 		if [ "$$os" = "windows" ]; then \
@@ -131,24 +131,24 @@ release: web-dist
 		fi; \
 		cp CLI.md $$stage/; \
 		cp README.md $$stage/; \
-		(cd $$stage && zip -q ../dbx-$(VERSION)-$$os-$$arch.zip *) || exit 1; \
+		(cd $$stage && zip -q ../dqex-$(VERSION)-$$os-$$arch.zip *) || exit 1; \
 		rm -rf $$stage; \
 	done
 	@echo ">> 打包完成:"
 	@ls -lh release/
 
-# 汇总打包：将 release 下各平台 zip（make release 产物，dbx-$(VERSION)-{os}-{arch}.zip）统一压缩为
-# release/dbx-$(SHORT_COMMIT).zip，便于一次分发全部平台；只匹配平台包，避免嵌套历史汇总包；
+# 汇总打包：将 release 下各平台 zip（make release 产物，dqex-$(VERSION)-{os}-{arch}.zip）统一压缩为
+# release/dqex-$(SHORT_COMMIT).zip，便于一次分发全部平台；只匹配平台包，避免嵌套历史汇总包；
 # release 目录无匹配产物时提示先执行 make release
 package:
-	@if [ -z "$$(ls release/dbx-$(VERSION)-*.zip 2>/dev/null)" ]; then \
+	@if [ -z "$$(ls release/dqex-$(VERSION)-*.zip 2>/dev/null)" ]; then \
 		echo ">> release 目录没有 $(VERSION) 平台 zip 产物，请先执行 make release"; \
 		exit 1; \
 	fi
-	@cd release && rm -f dbx-$(SHORT_COMMIT).zip && zip -q dbx-$(SHORT_COMMIT).zip dbx-$(VERSION)-*.zip
-	@echo ">> 汇总完成: release/dbx-$(SHORT_COMMIT).zip"
-	@ls -lh release/dbx-$(SHORT_COMMIT).zip
+	@cd release && rm -f dqex-$(SHORT_COMMIT).zip && zip -q dqex-$(SHORT_COMMIT).zip dqex-$(VERSION)-*.zip
+	@echo ">> 汇总完成: release/dqex-$(SHORT_COMMIT).zip"
+	@ls -lh release/dqex-$(SHORT_COMMIT).zip
 
 clean:
-	rm -f dbx dbimpex
+	rm -f dqex dqex
 	rm -rf release web/dist

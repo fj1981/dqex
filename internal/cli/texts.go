@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"dbimpex/internal/llm"
+	"dqex/internal/llm"
 	"errors"
 	"fmt"
 	"io"
@@ -41,7 +41,7 @@ type cliTexts struct {
 	connDeleted   string // 连接已删除
 
 	// config 子命令
-	cfgNotFound   string // 配置文件: （未发现，使用默认值；dbx config --gen 可生成模板）
+	cfgNotFound   string // 配置文件: （未发现，使用默认值；dqex config --gen 可生成模板）
 	cfgPath       string // 配置文件:     %s
 	cfgDirData    string // 配置保存目录: %s
 	cfgDirTmp     string // 任务临时目录: %s
@@ -51,7 +51,7 @@ type cliTexts struct {
 	cfgAllowNone  string // 访问来源白名单: （未配置，不限制来源）
 
 	// url 子命令
-	urlTokenExpired string // ⚠️  令牌已过期（签发给 24 小时有效期），请重启 Web 服务刷新后重新执行 dbx url
+	urlTokenExpired string // ⚠️  令牌已过期（签发给 24 小时有效期），请重启 Web 服务刷新后重新执行 dqex url
 	urlExpireAt     string // 令牌有效期至 %s
 	urlNoAuth       string // 提示: 上次启动禁用了认证（--no-auth），链接不带 token
 
@@ -142,7 +142,7 @@ type cliTexts struct {
 	cmpColDetail   string // 差异说明
 	cmpNoDiff      string // （无差异）
 	cmpDiffOnly    string // 仅显示有差异的表（%d）；使用 --all 查看全部 %d 项
-	cmpShowHint    string // 记录 ID: %s · 查看差异明细: dbx cmp show -i %s [表名]
+	cmpShowHint    string // 记录 ID: %s · 查看差异明细: dqex cmp show -i %s [表名]
 	cmpStatusDiff  string // 有差异
 
 	// compare 明细
@@ -182,7 +182,7 @@ type cliTexts struct {
 
 	// 核心业务错误（textErr 渲染）
 	errSaveReport string // 保存对比报告失败
-	errNoWebCred  string // 未找到 Web 访问凭证，请先启动 Web 服务（直接运行 dbx）
+	errNoWebCred  string // 未找到 Web 访问凭证，请先启动 Web 服务（直接运行 dqex）
 	errNoToken    string // 当前凭证无 token（上次以 --no-auth 启动）
 
 	// 参数校验错误（cygin details 渲染，cliErrMsg 拼接展示）
@@ -251,7 +251,7 @@ var cliTextsMap = map[string]cliTexts{
 		connFail:      "失败",
 		connDeleted:   "连接已删除",
 
-		cfgNotFound:   "配置文件: （未发现，使用默认值；dbx config --gen 可生成模板）",
+		cfgNotFound:   "配置文件: （未发现，使用默认值；dqex config --gen 可生成模板）",
 		cfgPath:       "配置文件:     %s",
 		cfgDirData:    "配置保存目录: %s",
 		cfgDirTmp:     "任务临时目录: %s",
@@ -260,7 +260,7 @@ var cliTextsMap = map[string]cliTexts{
 		cfgAllow:      "访问来源白名单: %s（本机回环始终放行）",
 		cfgAllowNone:  "访问来源白名单: （未配置，不限制来源）",
 
-		urlTokenExpired: "⚠️ 令牌已过期（有效期 24 小时），请重启 Web 服务后重新执行 dbx url",
+		urlTokenExpired: "⚠️ 令牌已过期（有效期 24 小时），请重启 Web 服务后重新执行 dqex url",
 		urlExpireAt:     "令牌有效期至 %s",
 		urlNoAuth:       "提示: 上次启动禁用了认证（--no-auth），链接不带 token",
 
@@ -344,7 +344,7 @@ var cliTextsMap = map[string]cliTexts{
 		cmpColDetail:   "差异说明",
 		cmpNoDiff:      "（无差异）",
 		cmpDiffOnly:    "仅显示有差异的表（%d）；使用 --all 查看全部 %d 项",
-		cmpShowHint:    "记录 ID: %s · 查看差异明细: dbx cmp show -i %s [表名]",
+		cmpShowHint:    "记录 ID: %s · 查看差异明细: dqex cmp show -i %s [表名]",
 		cmpStatusDiff:  "有差异",
 
 		cmpTableTitle:     "表: %s",
@@ -382,7 +382,7 @@ var cliTextsMap = map[string]cliTexts{
 		cmpSampleRow:      "     %s: 源=%v  目标=%v",
 
 		errSaveReport: "保存对比报告失败",
-		errNoWebCred:  "未找到 Web 访问凭证，请先启动 Web 服务（直接运行 dbx）",
+		errNoWebCred:  "未找到 Web 访问凭证，请先启动 Web 服务（直接运行 dqex）",
 		errNoToken:    "当前凭证无 token（上次以 --no-auth 启动）",
 
 		errConnNotFound:   "未找到连接: %s",
@@ -434,7 +434,7 @@ var cliTextsMap = map[string]cliTexts{
 		connFail:      "failed",
 		connDeleted:   "connection deleted",
 
-		cfgNotFound:   "config file: (not found, using defaults; dbx config --gen generates a template)",
+		cfgNotFound:   "config file: (not found, using defaults; dqex config --gen generates a template)",
 		cfgPath:       "config file:     %s",
 		cfgDirData:    "config data dir: %s",
 		cfgDirTmp:     "task temp dir: %s",
@@ -443,7 +443,7 @@ var cliTextsMap = map[string]cliTexts{
 		cfgAllow:      "allowlist: %s (loopback always allowed)",
 		cfgAllowNone:  "allowlist: (not configured, no restrictions)",
 
-		urlTokenExpired: "⚠️ token expired (24h validity); restart the Web service, then re-run dbx url",
+		urlTokenExpired: "⚠️ token expired (24h validity); restart the Web service, then re-run dqex url",
 		urlExpireAt:     "token valid until %s",
 		urlNoAuth:       "note: auth was disabled at last start (--no-auth), the link has no token",
 
@@ -527,7 +527,7 @@ var cliTextsMap = map[string]cliTexts{
 		cmpColDetail:   "diff detail",
 		cmpNoDiff:      "(no differences)",
 		cmpDiffOnly:    "showing only tables with differences (%d); use --all to view all %d items",
-		cmpShowHint:    "record ID: %s · view diff details: dbx cmp show -i %s [table]",
+		cmpShowHint:    "record ID: %s · view diff details: dqex cmp show -i %s [table]",
 		cmpStatusDiff:  "differs",
 
 		cmpTableTitle:     "table: %s",
@@ -565,7 +565,7 @@ var cliTextsMap = map[string]cliTexts{
 		cmpSampleRow:      "     %s: source=%v  target=%v",
 
 		errSaveReport: "failed to save compare report",
-		errNoWebCred:  "web access credential not found; start the web service first (run dbx directly)",
+		errNoWebCred:  "web access credential not found; start the web service first (run dqex directly)",
 		errNoToken:    "credential has no token (last start used --no-auth)",
 
 		errConnNotFound:   "connection not found: %s",

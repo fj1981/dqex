@@ -8,10 +8,10 @@ import (
 	"sort"
 	"strings"
 
-	"dbimpex/changelog"
-	"dbimpex/internal/cli"
-	"dbimpex/internal/engine"
-	"dbimpex/internal/service"
+	"dqex/changelog"
+	"dqex/internal/cli"
+	"dqex/internal/engine"
+	"dqex/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"

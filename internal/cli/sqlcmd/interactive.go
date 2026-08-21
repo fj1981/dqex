@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"dbimpex/internal/engine"
+	"dqex/internal/engine"
 
 	"github.com/peterh/liner"
 )
@@ -193,7 +193,7 @@ func (s *session) promptString() string {
 	}
 	addr := sprintf("%s:%d/%s", s.connInfo.Host, s.connInfo.Port, s.currentDB)
 	// liner 不支持 ANSI 颜色，用纯文本提示符避免光标错位
-	return sprintf("dbx (%s @ %s) > ", dbType, addr)
+	return sprintf("dqex (%s @ %s) > ", dbType, addr)
 }
 
 func (s *session) refreshMetadata() {

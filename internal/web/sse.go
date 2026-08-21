@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"dbimpex/internal/service"
+	"dqex/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"gitlab.mycyclone.com/rpa-platform/pk-infrakit-g/pkg/cygin"

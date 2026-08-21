@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"dbimpex/internal/engine"
-	. "dbimpex/internal/service"
+	"dqex/internal/engine"
+	. "dqex/internal/service"
 
 	"github.com/spf13/cobra"
 )
@@ -23,11 +23,11 @@ var snapshotCmd = &cobra.Command{
 	Long: `管理数据库快照，支持与当前数据库状态对比。
 
 独立闭环用法：
-  dbx snapshot create -c <连接名> -d <数据库> -n <名称>     # 创建快照
-  dbx snapshot list                                           # 列出所有快照
-  dbx snapshot show -i <快照ID>                               # 查看快照详情
-  dbx snapshot delete -i <快照ID>                             # 删除快照
-  dbx snapshot compare -i <快照ID> -c <连接名> -d <数据库>    # 快照 vs 当前库`,
+  dqex snapshot create -c <连接名> -d <数据库> -n <名称>     # 创建快照
+  dqex snapshot list                                           # 列出所有快照
+  dqex snapshot show -i <快照ID>                               # 查看快照详情
+  dqex snapshot delete -i <快照ID>                             # 删除快照
+  dqex snapshot compare -i <快照ID> -c <连接名> -d <数据库>    # 快照 vs 当前库`,
 }
 
 var (

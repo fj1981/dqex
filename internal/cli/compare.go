@@ -3,8 +3,8 @@ package cli
 // 点导入：CLI 层大量复用 service 包的模型别名与入口（NewService/选项模型/错误码）
 import (
 	"context"
-	"dbimpex/internal/engine"
-	. "dbimpex/internal/service"
+	"dqex/internal/engine"
+	. "dqex/internal/service"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,9 +24,9 @@ var compareCmd = &cobra.Command{
 	Long: `对比两个数据库的结构与数据差异。
 
 独立闭环用法：
-  dbx compare --gen-config > compare.yaml   # 生成配置模板
+  dqex compare --gen-config > compare.yaml   # 生成配置模板
   vi compare.yaml                               # 填写连接与选项
-  dbx compare --config compare.yaml         # 执行对比
+  dqex compare --config compare.yaml         # 执行对比
 
 命令行参数优先于配置文件；也可完全通过 flags 指定连接（--source-* / --target-*）。
 连接 flag 提供 mysqldump 风格别名：--source-user/--source-password/--source-database（及 target- 同名系列）`,
@@ -35,7 +35,7 @@ var compareCmd = &cobra.Command{
 
 func init() {
 	f := compareCmd.Flags()
-	f.String("config", "", "配置文件(yaml)，dbx compare --gen-config 可生成模板")
+	f.String("config", "", "配置文件(yaml)，dqex compare --gen-config 可生成模板")
 	f.Bool("gen-config", false, "输出配置文件模板到标准输出")
 	f.String("task", "", "已保存任务配置 ID（Web 保存的任务）")
 	registerConnFlags(compareCmd, "source", &compareSrc)
@@ -70,8 +70,8 @@ var compareShowCmd = &cobra.Command{
 	Short: "回看历史对比记录的差异明细",
 	Long: `回看历史对比记录的差异明细。
 
-dbx cmp show -i <记录ID>                # 全部表明细
-dbx cmp show -i <记录ID> t_config       # 单表差异明细（位置参数或 --table/-t 均可，列级对照 + 差异行样例）`,
+dqex cmp show -i <记录ID>                # 全部表明细
+dqex cmp show -i <记录ID> t_config       # 单表差异明细（位置参数或 --table/-t 均可，列级对照 + 差异行样例）`,
 	RunE: cliCompareShow,
 }
 
