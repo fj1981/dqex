@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -168,33 +169,102 @@ func isLoopback(host string) bool {
 }
 
 // openBrowser 打开系统默认浏览器（失败静默忽略，如远程/无头环境）。
-// macOS 下优先复用已有标签页：若主流浏览器已打开相同 URL 则直接激活该标签，避免重复开新标签。
-func openBrowser(url string) {
+// macOS 下优先复用已有标签页：先检测运行中的浏览器，再为其生成字面量 AppleScript 激活已有标签。
+func openBrowser(rawURL string) {
 	switch runtime.GOOS {
 	case "darwin":
-		// AppleScript：遍历主流浏览器，查找已有标签页匹配 URL 则激活，否则 open 新开
-		const script = `on run argv
+		if tryReuseBrowserTab(rawURL) {
+			return
+		}
+		cmd := exec.Command("open", rawURL)
+		_ = cmd.Start()
+	case "windows":
+		cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL)
+		_ = cmd.Start()
+	default:
+		cmd := exec.Command("xdg-open", rawURL)
+		_ = cmd.Start()
+	}
+}
+
+// tryReuseBrowserTab 检测 macOS 正在运行的浏览器，若已有匹配 URL 的标签页则激活，返回是否成功复用。
+func tryReuseBrowserTab(rawURL string) bool {
+	// 通过 System Events 获取正在运行的进程名，避免对未安装应用触发定位弹窗
+	out, err := exec.Command("osascript", "-e",
+		`tell application "System Events" to get name of every process whose background only is false`,
+	).Output()
+	if err != nil {
+		return false
+	}
+	runningProcs := string(out)
+
+	type browserInfo struct {
+		name     string // AppleScript 应用名
+		urlProp  string // 标签页 URL 属性名
+		activate string // 激活标签页的 AppleScript 语句
+	}
+	browsers := []browserInfo{
+		{"Google Chrome", "URL", "set active tab index of w to tabIdx"},
+		{"Microsoft Edge", "URL", "set active tab index of w to tabIdx"},
+		{"Brave Browser", "URL", "set active tab index of w to tabIdx"},
+		{"Safari", "URL", "set current tab of w to t"},
+	}
+
+	for _, b := range browsers {
+		if !strings.Contains(runningProcs, b.name) {
+			continue
+		}
+		script := buildReuseScript(b.name, b.urlProp, b.activate)
+		tmpFile, err := os.CreateTemp("", "dqex-browser-*.applescript")
+		if err != nil {
+			continue
+		}
+		if _, err := tmpFile.WriteString(script); err != nil {
+			tmpFile.Close()
+			os.Remove(tmpFile.Name())
+			continue
+		}
+		tmpFile.Close()
+		out, err := exec.Command("osascript", tmpFile.Name(), rawURL).Output()
+		os.Remove(tmpFile.Name())
+		if err == nil && strings.TrimSpace(string(out)) == "found" {
+			return true
+		}
+	}
+	return false
+}
+
+// buildReuseScript 为指定浏览器生成 AppleScript，应用名以字面量嵌入，避免编译期字典解析问题。
+// 脚本输出 "found" 表示已激活匹配标签，"not_found" 表示无匹配。
+func buildReuseScript(appName, urlProp, activateStmt string) string {
+	return fmt.Sprintf(`on run argv
     set targetURL to item 1 of argv
     set baseURL to my stripQuery(targetURL)
 
-    set browsers to {"Google Chrome", "Safari", "Firefox", "Microsoft Edge", "Brave Browser"}
-    repeat with b in browsers
-        try
-            if running of application b then
-                set found to my checkBrowser(b, baseURL)
-                if found then return
-            end if
-        end try
-    end repeat
-
-    do shell script "open " & quoted form of targetURL
+    tell application "%s"
+        repeat with w in windows
+            set tabIdx to 0
+            repeat with t in (every tab of w)
+                set tabIdx to tabIdx + 1
+                if my stripQuery(%s of t) is baseURL then
+                    %s
+                    set index of w to 1
+                    activate
+                    return "found"
+                end if
+            end repeat
+        end repeat
+        if (count of windows) > 0 then
+            set index of (front window) to 1
+            activate
+        end if
+    end tell
+    return "not_found"
 end run
 
 on stripQuery(u)
-    -- 剥离查询参数 ?...
     set AppleScript's text item delimiters to "?"
     set base to item 1 of (text items of u)
-    -- 剥离片段 #...
     set AppleScript's text item delimiters to "#"
     set base to item 1 of (text items of base)
     set AppleScript's text item delimiters to ""
@@ -202,53 +272,7 @@ on stripQuery(u)
         set base to text 1 thru -2 of base
     end if
     return base
-end stripQuery
-
-on checkBrowser(browserName, baseURL)
-    if browserName is "Google Chrome" then
-        return my checkTabs("Google Chrome", url of tabs)
-    else if browserName is "Safari" then
-        return my checkTabs("Safari", URL of tabs)
-    else if browserName is "Firefox" then
-        return my checkTabs("Firefox", address of tabs)
-    else if browserName is "Microsoft Edge" then
-        return my checkTabs("Microsoft Edge", URL of tabs)
-    else if browserName is "Brave Browser" then
-        return my checkTabs("Brave Browser", url of tabs)
-    end if
-    return false
-end checkBrowser
-
-on checkTabs(browserName, urlGetter)
-    tell application browserName
-        repeat with w in windows
-            repeat with t in tabs of w
-                set tabURL to my stripQuery(urlGetter of t)
-                if tabURL is baseURL then
-                    set active tab index of w to (index of t)
-                    set index of w to 1
-                    activate
-                    return true
-                end if
-            end repeat
-        end repeat
-        if (count of windows) > 0 then
-            set w to front window
-            set index of w to 1
-            activate
-        end if
-    end tell
-    return false
-end checkTabs`
-		cmd := exec.Command("osascript", "-e", script, url)
-		_ = cmd.Start()
-	case "windows":
-		cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-		_ = cmd.Start()
-	default:
-		cmd := exec.Command("xdg-open", url)
-		_ = cmd.Start()
-	}
+end stripQuery`, appName, urlProp, activateStmt)
 }
 
 // RunWeb 启动 Web 服务。allow 为访问来源白名单（IP/CIDR/域名），空 = 不限制。
