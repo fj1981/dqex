@@ -14,6 +14,7 @@
 [![Go Version](https://img.shields.io/badge/Go-1.25-blue)](go.mod)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)]()
 [![Databases](https://img.shields.io/badge/databases-MySQL%20%7C%20PostgreSQL%20%7C%20Oracle-orange)]()
+[![CI](https://github.com/fj1981/dqex/actions/workflows/ci.yml/badge.svg)](https://github.com/fj1981/dqex/actions/workflows/ci.yml)
 
 [![Stars](https://img.shields.io/github/stars/fj1981/dqex?style=social&label=Star)](https://github.com/fj1981/dqex/stargazers)
 [![Forks](https://img.shields.io/github/forks/fj1981/dqex?style=social&label=Fork)](https://github.com/fj1981/dqex/network/members)
