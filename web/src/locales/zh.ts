@@ -1298,6 +1298,8 @@ const zh = {
     version: "版本",
     buildTime: "构建时间",
     dbTypes: "支持的数据库",
+    github: "Git 地址",
+    contact: "联系方式",
     changelog: "更新日志",
     changelogLoadFailed: "加载更新日志失败",
   },

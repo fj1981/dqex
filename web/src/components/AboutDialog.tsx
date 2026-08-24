@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { Calendar, ChevronDown, Clock, Database, Loader2 } from "lucide-react"
+import { Calendar, ChevronDown, Clock, Database, Github, Loader2, MessageCircle } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -120,6 +120,26 @@ export default function AboutDialog({ open, onOpenChange }: { open: boolean; onO
                   )}
                   <InfoRow icon={<Clock className="h-4 w-4" />} label={t("about.dbTypes")}>
                     <span className="font-mono text-muted-foreground">{version.dbTypes.join(" / ")}</span>
+                  </InfoRow>
+                  <InfoRow icon={<Github className="h-4 w-4" />} label={t("about.github")}>
+                    <a
+                      href="https://github.com/fj1981/dqex"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-mono text-primary hover:underline"
+                    >
+                      github.com/fj1981/dqex
+                    </a>
+                  </InfoRow>
+                  <InfoRow icon={<MessageCircle className="h-4 w-4" />} label={t("about.contact")}>
+                    <a
+                      href="https://github.com/fj1981/dqex/discussions"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-mono text-primary hover:underline"
+                    >
+                      GitHub Discussions
+                    </a>
                   </InfoRow>
                 </div>
               ) : (
