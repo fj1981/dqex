@@ -21,9 +21,9 @@ import (
 	"dqex/internal/service"
 	webui "dqex/web"
 
-	"github.com/gin-gonic/gin"
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cylog"
+	"github.com/gin-gonic/gin"
 )
 
 func nowMillis() int64 { return time.Now().UnixMilli() }
@@ -77,6 +77,8 @@ func cyginMsg(c *gin.Context, code int) string {
 }
 
 // tokenAuth /api 路由的令牌认证中间件：
+//   - 本机回环来源（127.0.0.1/localhost/::1）直接放行，仅外部来源需要令牌：
+//     本地开发开箱即用，对外暴露（--host 0.0.0.0）时自动拉起安全认证
 //   - 令牌超过 expireAt 过期：拒绝并提示重启服务刷新（令牌不自动续期）
 //   - 接受 Authorization: Bearer <token>、X-Auth-Token 头或 ?token= 查询参数
 //     （SSE EventSource 与文件下载无法自定义请求头，必须支持查询参数）
@@ -88,8 +90,14 @@ func tokenAuth(token string, expireAt time.Time, limiter *authLimiter) gin.Handl
 			c.Next()
 			return
 		}
-		ip := remoteIP(c).String()
-		if !limiter.allow(ip) {
+		ip := remoteIP(c)
+		// 本机回环免认证（与访问白名单同一豁免规则）：本地访问无需令牌，仅外部来源校验
+		if ip != nil && ip.IsLoopback() {
+			c.Next()
+			return
+		}
+		ipStr := ip.String()
+		if !limiter.allow(ipStr) {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"code": http.StatusTooManyRequests, "msg": cyginMsg(c, service.ErrRateLimited)})
 			return
 		}
@@ -105,11 +113,11 @@ func tokenAuth(token string, expireAt time.Time, limiter *authLimiter) gin.Handl
 			got = c.Query("token")
 		}
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1 {
-			limiter.pass(ip)
+			limiter.pass(ipStr)
 			c.Next()
 			return
 		}
-		limiter.fail(ip)
+		limiter.fail(ipStr)
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": http.StatusUnauthorized, "msg": cyginMsg(c, service.ErrAuthFailed)})
 	}
 }
@@ -123,11 +131,12 @@ func remoteIP(c *gin.Context) net.IP {
 	return net.ParseIP(host)
 }
 
-// accessControl 访问来源白名单中间件：仅放行白名单内的来源 IP（回环始终放行）
-func accessControl(f *accessFilter) gin.HandlerFunc {
+// accessControl 访问来源白名单中间件：仅放行白名单内的来源 IP（回环始终放行）。
+// noAuth 为 true 且白名单为空时，仅允许回环访问（禁用认证时默认收紧到本机）。
+func accessControl(f *accessFilter, noAuth bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := remoteIP(c)
-		if f.allow(ip) {
+		if f.allow(ip, noAuth) {
 			c.Next()
 			return
 		}
@@ -166,6 +175,35 @@ func isLoopback(host string) bool {
 		return ip.IsLoopback()
 	}
 	return false
+}
+
+// localLANIP 探测本机局域网 IPv4 地址（非回环），用于通配监听（0.0.0.0/::）时
+// 生成可被局域网其他设备直接访问的链接；探测失败返回 nil。
+func localLANIP() net.IP {
+	// 优先取默认路由出口地址：UDP 无连接，Dial 仅本地选路、不实际发包，
+	// 不依赖外网可达（纯局域网也能正常返回本机出口 IP）。
+	// 8.8.8.8 仅作为触发默认路由的占位目标，不会真正发送数据。
+	if conn, err := net.Dial("udp", "8.8.8.8:80"); err == nil {
+		addr, ok := conn.LocalAddr().(*net.UDPAddr)
+		conn.Close()
+		if ok && addr.IP != nil && !addr.IP.IsLoopback() && addr.IP.To4() != nil {
+			return addr.IP
+		}
+	}
+	// 兜底：遍历网卡取第一个非回环 IPv4
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	for _, a := range addrs {
+		if ipnet, ok := a.(*net.IPNet); ok {
+			ip := ipnet.IP
+			if ip != nil && !ip.IsLoopback() && ip.To4() != nil {
+				return ip
+			}
+		}
+	}
+	return nil
 }
 
 // openBrowser 打开系统默认浏览器（失败静默忽略，如远程/无头环境）。
@@ -278,20 +316,23 @@ end stripQuery`, appName, urlProp, activateStmt)
 // RunWeb 启动 Web 服务。allow 为访问来源白名单（IP/CIDR/域名），空 = 不限制。
 //
 // 安全默认：
-//   - host 默认 127.0.0.1 仅本机访问，需对外暴露时显式传 0.0.0.0 等
-//   - 默认启用随机令牌认证（noAuth=true 关闭，且仅限监听回环地址）
+//   - host 默认 127.0.0.1 仅本机访问；对外暴露（--host 0.0.0.0 等）时外部来源强制令牌认证
+//   - 默认启用随机令牌认证，但仅校验外部来源：本机回环（127.0.0.1/localhost/::1）免认证，
+//     本地访问开箱即用；noAuth=true 完全关闭认证（对外暴露时给安全警告但不拒绝）
+//   - 白名单为可选增强：对外暴露时可配置 --allow / web.allow 进一步限制来源 IP
 //   - 前端与 API 同源部署，不开启 CORS 通配
 func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth, noBrowser bool) {
+	// --no-auth 对外暴露：给强风险警告但不拒绝（用户已明确选择忽略安全）
 	if noAuth && !isLoopback(host) {
-		cylog.Errorf("安全限制: --no-auth 仅允许监听本机回环地址；对外暴露（--host %s）必须启用令牌认证，请去掉 --no-auth 后重启", host)
-		return
+		cylog.Warnf("⚠️  安全警告: --no-auth 对外暴露（--host %s）已完全禁用认证，任何能访问该端口的人都能操作数据库！", host)
+		cylog.Warnf("请确保仅面向可信网络，建议用 --allow 配置来源白名单进一步限制")
 	}
+	// 访问来源白名单过滤器：启动时由 --allow / 配置初始化，配置保存后可热更新（handleSaveConfig）
+	filter := newAccessFilter(allow)
 	// 端口预检：占用时交互提示终止占用进程，重试绑定
 	if !ensurePortAvailable(host, port, "zh") {
 		return
 	}
-	// 访问来源白名单过滤器：启动时由 --allow / 配置初始化，配置保存后可热更新（handleSaveConfig）
-	filter := newAccessFilter(allow)
 	eb := cygin.NewEndpointBuilder("/api", "dqex API", []string{"dqex"})
 	apiGroup := eb.Build(
 		// 连接管理
@@ -411,7 +452,7 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 	}
 	// 始终挂载访问控制中间件：空规则放行，配置保存后热更新（无需重启）
 	// langCtx 将请求语言注入 ctx，service 同步方法在真实出错点按语言渲染 details
-	middlewares := []gin.HandlerFunc{langCtx(), securityHeaders(), accessControl(filter)}
+	middlewares := []gin.HandlerFunc{langCtx(), securityHeaders(), accessControl(filter, noAuth)}
 	if len(filter.rules) > 0 {
 		cylog.Infof("访问来源白名单已启用: %d 条规则（本机回环始终放行，保存配置后热更新）", len(filter.rules))
 	}
@@ -439,22 +480,27 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 	// 令牌桥接文件：本地开发（vite dev 代理）读取 web-access.json 注入 /api 请求头，
 	// 数据源仍以 SQLite 为准（dqex url 走 SQLite），此文件仅为 vite 的令牌快照
 	writeWebAccessFile(svc.Persist().BaseDir(), server.Config.Address, token, issuedAt.UnixMilli())
-	// 浏览器访问地址：通配地址（0.0.0.0/::）无法直接访问，回退为本机回环
+	// 浏览器访问地址：通配地址（0.0.0.0/::）无法直接访问，
+	// 优先用本机局域网 IP（日志与浏览器一致，且局域网设备可直接复制访问），探测失败回退回环
 	browserHost := host
 	if browserHost == "" || browserHost == "0.0.0.0" || browserHost == "::" {
-		browserHost = "127.0.0.1"
+		if ip := localLANIP(); ip != nil {
+			browserHost = ip.String()
+		} else {
+			browserHost = "127.0.0.1"
+		}
 	}
 	openURL := "http://" + net.JoinHostPort(browserHost, strconv.Itoa(port)) + "/"
 	if !isLoopback(host) {
-		cylog.Warnf("服务已对外暴露（监听 %s）：请确保仅面向可信网络，必要时用 --allow / 配置 web.allow 收紧来源", server.Config.Address)
+		cylog.Warnf("服务已对外暴露（监听 %s）：白名单内来源可访问，请确保仅面向可信网络", server.Config.Address)
 	}
 	if token != "" {
 		openURL += "?token=" + token
 		cylog.Infof("dqex Web 服务启动: %s", openURL)
 		cylog.Infof("令牌有效期至 %s（过期后请重启服务刷新）", issuedAt.Add(tokenTTL).Format("2006-01-02 15:04:05"))
-		cylog.Infof("API 认证: 请求头 Authorization: Bearer <token> / X-Auth-Token，或查询参数 ?token=")
+		cylog.Infof("API 认证: 本机回环（127.0.0.1/localhost）免认证；外部来源需请求头 Authorization: Bearer <token> / X-Auth-Token，或查询参数 ?token=")
 	} else {
-		cylog.Warnf("dqex Web 服务启动: %s（已禁用认证 --no-auth，请勿暴露到不可信网络）", openURL)
+		cylog.Warnf("dqex Web 服务启动: %s（已完全禁用认证 --no-auth，请勿暴露到不可信网络）", openURL)
 	}
 	if !noBrowser {
 		// 延迟至监听就绪后自动打开浏览器（携带 token，前端会存入 sessionStorage 供后续请求使用）

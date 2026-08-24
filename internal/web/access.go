@@ -75,8 +75,9 @@ func looksLikeDomain(s string) bool {
 	return s == "localhost" || strings.Contains(s, ".")
 }
 
-// allow 判定客户端 IP 是否允许访问
-func (f *accessFilter) allow(ip net.IP) bool {
+// allow 判定客户端 IP 是否允许访问。
+// noAuth 为 true 且白名单为空时，仅允许回环访问（禁用认证时默认收紧到本机）。
+func (f *accessFilter) allow(ip net.IP, noAuth bool) bool {
 	if ip == nil || ip.IsLoopback() {
 		return true
 	}
@@ -86,6 +87,10 @@ func (f *accessFilter) allow(ip net.IP) bool {
 	copy(rules, f.rules)
 	f.mu.RUnlock()
 	if len(rules) == 0 {
+		// --no-auth 且无白名单：禁用认证时默认收紧到本机，仅允许回环
+		if noAuth {
+			return false
+		}
 		return true
 	}
 	for _, r := range rules {
