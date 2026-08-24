@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.0] - 2026-08-21
+### Added
+- First public open-source release (GitHub, MIT license, 5-platform packages)
+- Dialect adapter layer extracted into github.com/fj1981/infrakit v1.0.0, providing a stable foundation for cross-dialect capabilities
+- README rewritten as a bilingual (EN/ZH) marketing version with a project banner
+
 ## [0.5.0] - 2026-08-21
 ### Added
 - Port occupation detection: automatically checks port availability before Web service startup; supports terminating the occupying process and retrying binding, or opening the existing service directly; works on macOS/Linux/Windows
