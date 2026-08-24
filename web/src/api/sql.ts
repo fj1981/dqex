@@ -72,7 +72,12 @@ export const fetchWorkspace = (connId: string) =>
 export const saveWorkspace = (connId: string, state: WorkspaceState) =>
   request<{ ok: boolean }>(`/api/sql/workspace`, {
     method: "PUT",
-    body: JSON.stringify({ connId, tabs: state.tabs, activeId: state.activeId }),
+    body: JSON.stringify({
+      connId,
+      tabs: state.tabs,
+      activeId: state.activeId,
+      tabSettings: state.tabSettings,
+    }),
   })
 
 // 获取对象创建语句（表/视图/函数/存储过程 DDL）

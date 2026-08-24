@@ -324,15 +324,16 @@ func handleGetWorkspace(svc *service.Service) gin.HandlerFunc {
 
 // WorkspaceSaveReq 查询工作区保存请求（整体覆盖）
 type WorkspaceSaveReq struct {
-	ConnID   string                 `json:"connId" binding:"required"`
-	Tabs     []service.WorkspaceTab `json:"tabs" binding:"required"`
-	ActiveID string                 `json:"activeId"`
+	ConnID      string                 `json:"connId" binding:"required"`
+	Tabs        []service.WorkspaceTab `json:"tabs" binding:"required"`
+	ActiveID    string                 `json:"activeId"`
+	TabSettings *service.TabSettings   `json:"tabSettings,omitempty"`
 }
 
 // handleSaveWorkspace 保存某连接的查询工作区（整体覆盖）。
 func handleSaveWorkspace(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req WorkspaceSaveReq) (map[string]any, error) {
-		state := service.WorkspaceState{Tabs: req.Tabs, ActiveID: req.ActiveID}
+		state := service.WorkspaceState{Tabs: req.Tabs, ActiveID: req.ActiveID, TabSettings: req.TabSettings}
 		if err := svc.SaveWorkspace(req.ConnID, state); err != nil {
 			return nil, renderErr(c, err)
 		}

@@ -655,11 +655,20 @@ export interface WorkspaceTab {
   objType?: ObjectDDLType // object tab：table / view / function / procedure
   subTab?: "data" | "struct" | "ddl" // object tab
   viewLayout?: TableViewLayout // object tab：表浏览视图布局（过滤/排序/列显隐/页大小）
+  pinned?: boolean // 固定标签页（不参与自动淘汰）
+}
+
+// 工作区标签页设置（后端持久化）
+export interface TabSettings {
+  maxTabs?: number // 最大标签页数（默认 20，范围 5~100）
+  evictOrder?: string[] // 淘汰优先级顺序（5 类分类的排列）
+  maxTabWidth?: number // 标签页最大宽度（像素，默认 160，范围 80~300）
 }
 
 export interface WorkspaceState {
   tabs: WorkspaceTab[]
   activeId: string
+  tabSettings?: TabSettings // 标签页设置
 }
 
 // ---- 数据浏览器 / 对象树 ----

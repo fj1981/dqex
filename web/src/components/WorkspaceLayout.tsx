@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels"
 import { useTranslation } from "react-i18next"
-import { AlertCircle, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, FunctionSquare, Lightbulb, List, Loader2, Plus, SkipForward, Sparkles, Star, Table2, View, X } from "lucide-react"
+import { AlertCircle, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, FunctionSquare, GripVertical, Lightbulb, List, Loader2, Pin, Plus, SlidersHorizontal, SkipForward, Sparkles, Star, Table2, View, X } from "lucide-react"
 import { toast } from "sonner"
 import DbTypeIcon from "@/components/DbTypeIcon"
 import { Button } from "@/components/ui/button"
@@ -37,6 +37,7 @@ import { prompt } from "@/components/ui/alert-dialog"
 import { useQueryStore, type WorkspaceTab } from "@/stores/queryStore"
 import { useObjectTreeStore } from "@/stores/objectTreeStore"
 import { useFavoriteStore } from "@/stores/favoriteStore"
+import { DEFAULT_EVICT_ORDER, type EvictCategory } from "@/lib/tabSettings"
 import SqlEditor, { type SqlEditorInstance } from "@/components/SqlEditor"
 import ResultGrid from "@/components/ResultGrid"
 import ObjectTree from "@/components/ObjectTree"
@@ -89,6 +90,9 @@ export default function WorkspaceLayout() {
     setObjectSubTab,
     setObjectPage,
     setObjectViewLayout,
+    togglePinTab,
+    tabSettings,
+    updateTabSettings,
   } = useQueryStore()
   const { loadTree, nodes: treeNodes } = useObjectTreeStore()
   const { add: addFavorite } = useFavoriteStore()
@@ -134,6 +138,14 @@ export default function WorkspaceLayout() {
   const [canScrollRight, setCanScrollRight] = useState(false)
   // tab 纵向列表弹层：点击按钮展开，列出全部 tab 供快速激活
   const [tabListOpen, setTabListOpen] = useState(false)
+  // tab 设置面板：最大标签页数 + 淘汰优先级排列
+  const [tabSettingsOpen, setTabSettingsOpen] = useState(false)
+  // 本地编辑状态（打开面板时从 store 读取，关闭时写回 store）
+  const [localMaxTabs, setLocalMaxTabs] = useState(tabSettings.maxTabs ?? 20)
+  const [localEvictOrder, setLocalEvictOrder] = useState<EvictCategory[]>((tabSettings.evictOrder ?? DEFAULT_EVICT_ORDER) as EvictCategory[])
+  const [localMaxTabWidth, setLocalMaxTabWidth] = useState(tabSettings.maxTabWidth ?? 160)
+  // 拖拽排序状态
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
   // 实际执行 SQL 详情弹层：点击「实际执行」语句查看完整内容（展示格式化后语句）
   const [sqlDetail, setSqlDetail] = useState<string | null>(null)
   const [sqlDetailFormatted, setSqlDetailFormatted] = useState<string>("")
@@ -150,6 +162,16 @@ export default function WorkspaceLayout() {
   }, [sqlDetail])
   const tabListRef = useRef<HTMLDivElement>(null)
   useClickOutside(tabListRef, () => setTabListOpen(false), tabListOpen)
+  const tabSettingsRef = useRef<HTMLDivElement>(null)
+  useClickOutside(tabSettingsRef, () => {
+    // 关闭时保存设置到 store（store 会自动持久化到后端）
+    updateTabSettings({
+      maxTabs: localMaxTabs,
+      evictOrder: localEvictOrder,
+      maxTabWidth: localMaxTabWidth,
+    })
+    setTabSettingsOpen(false)
+  }, tabSettingsOpen)
 
   // 更新左右滚动按钮的可用状态（依据当前 scrollLeft 与可滚动宽度）
   const updateScrollButtons = useCallback(() => {
@@ -308,6 +330,7 @@ export default function WorkspaceLayout() {
   }
 
   const renderTabLabel = (t: WorkspaceTab) => {
+    const pinIcon = t.pinned && <Pin className="h-3.5 w-3.5 shrink-0 text-primary/70" />
     if (t.kind === "object") {
       const meta = t.objType === "view"
         ? { icon: View, cls: "text-cyan-600" }
@@ -319,6 +342,7 @@ export default function WorkspaceLayout() {
       const { head, tail } = splitTableName(t.name)
       return (
         <>
+          {pinIcon}
           <Icon className={cn("h-3.5 w-3.5", meta.cls)} />
           {/* 表名：头部 flex-1 占满剩余空间可截断、尾部（最后一个 _ 后的部分）永远完整；
               跨库时才带 [库名] 后缀（最多 96px，可截断），不挤占表名空间。 */}
@@ -332,6 +356,7 @@ export default function WorkspaceLayout() {
     }
     return (
       <>
+        {pinIcon}
         <Code2 className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="max-w-32 truncate">{t.title}</span>
       </>
@@ -467,6 +492,7 @@ export default function WorkspaceLayout() {
                   <ContextMenuTrigger asChild>
                     <div
                       ref={tab.id === activeId ? activeTabRef : null}
+                      style={{ maxWidth: localMaxTabWidth }}
                       className={cn(
                         "group flex shrink-0 cursor-pointer items-center gap-1 rounded-t-md border border-b-0 px-2.5 py-1.5 text-xs transition-colors",
                         tab.id === activeId
@@ -522,6 +548,10 @@ export default function WorkspaceLayout() {
                     </div>
                   </ContextMenuTrigger>
                   <ContextMenuContent>
+                    <ContextMenuItem onSelect={() => togglePinTab(tab.id)}>
+                      <Pin className="mr-1.5 h-3.5 w-3.5" />
+                      {tab.pinned ? t("workspace.unpinTab") : t("workspace.pinTab")}
+                    </ContextMenuItem>
                     {tab.kind === "query" && (
                       <>
                         <ContextMenuItem
@@ -532,9 +562,9 @@ export default function WorkspaceLayout() {
                         >
                           {t("common.rename")}
                         </ContextMenuItem>
-                        <ContextMenuSeparator />
                       </>
                     )}
+                    <ContextMenuSeparator />
                     <ContextMenuItem onSelect={() => closeTab(tab.id)}>{t("common.close")}</ContextMenuItem>
                     <ContextMenuItem onSelect={() => closeOthers(tab.id)}>{t("workspace.closeOthers")}</ContextMenuItem>
                     <ContextMenuItem
@@ -603,6 +633,112 @@ export default function WorkspaceLayout() {
                       </button>
                     ))
                   )}
+                </div>
+              )}
+            </div>
+
+            {/* Tab 设置按钮：最大标签页数 + 淘汰优先级排列（与 tab 列表按钮并排，都是 tab 管理操作） */}
+            <div className="relative shrink-0" ref={tabSettingsRef}>
+              <button
+                type="button"
+                className={cn(
+                  "flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                  tabSettingsOpen && "bg-accent text-foreground",
+                )}
+                title={t("workspace.tabSettings")}
+                onClick={() => {
+                  if (!tabSettingsOpen) {
+                    // 打开时从 store 读取当前值
+                    setLocalMaxTabs(tabSettings.maxTabs ?? 20)
+                    setLocalEvictOrder((tabSettings.evictOrder ?? DEFAULT_EVICT_ORDER) as EvictCategory[])
+                    setLocalMaxTabWidth(tabSettings.maxTabWidth ?? 160)
+                  } else {
+                    // 关闭时保存到 store
+                    updateTabSettings({
+                      maxTabs: localMaxTabs,
+                      evictOrder: localEvictOrder,
+                      maxTabWidth: localMaxTabWidth,
+                    })
+                  }
+                  setTabSettingsOpen((v) => !v)
+                }}
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+              </button>
+              {tabSettingsOpen && (
+                <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-md border bg-popover p-3 text-popover-foreground shadow-md">
+                  <div className="mb-3">
+                    <label className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                      {t("workspace.maxTabs")}
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={100}
+                      value={localMaxTabs}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10)
+                        if (!isNaN(v) && v >= 5 && v <= 100) setLocalMaxTabs(v)
+                      }}
+                      className="h-7 w-full rounded-md border bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </div>
+                  <div className="mb-3">
+                    <label className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                      {t("workspace.maxTabWidth")}
+                    </label>
+                    <div className="mb-1 text-[10px] text-muted-foreground">{t("workspace.maxTabWidthHint")}</div>
+                    <input
+                      type="number"
+                      min={80}
+                      max={300}
+                      value={localMaxTabWidth}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10)
+                        if (!isNaN(v) && v >= 80 && v <= 300) setLocalMaxTabWidth(v)
+                      }}
+                      className="h-7 w-full rounded-md border bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                      {t("workspace.evictPriority")}
+                    </label>
+                    <div className="mb-1 text-[10px] text-muted-foreground">{t("workspace.evictPriorityHint")}</div>
+                    <div className="space-y-0.5">
+                      {localEvictOrder.map((cat, idx) => (
+                        <div
+                          key={cat}
+                          draggable
+                          onDragStart={() => setDragIdx(idx)}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={() => {
+                            if (dragIdx === null || dragIdx === idx) return
+                            const next = [...localEvictOrder]
+                            const [item] = next.splice(dragIdx, 1)
+                            next.splice(idx, 0, item)
+                            setLocalEvictOrder(next)
+                            setDragIdx(null)
+                          }}
+                          onDragEnd={() => setDragIdx(null)}
+                          className={cn(
+                            "flex cursor-grab items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs transition-colors active:cursor-grabbing",
+                            dragIdx === idx && "opacity-50",
+                          )}
+                        >
+                          <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <span className="flex-1">
+                            {cat === "empty_query" && t("workspace.evictEmptyQuery")}
+                            {cat === "sql_no_result" && t("workspace.evictSqlNoResult")}
+                            {cat === "query_with_result" && t("workspace.evictQueryWithResult")}
+                            {cat === "object_no_data" && t("workspace.evictObjectNoData")}
+                            {cat === "object_with_data" && t("workspace.evictObjectWithData")}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">{idx + 1}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

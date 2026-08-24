@@ -63,6 +63,8 @@ type (
 	WorkspaceTab = store.WorkspaceTab
 	// WorkspaceState 查询工作区状态
 	WorkspaceState = store.WorkspaceState
+	// TabSettings 工作区标签页设置
+	TabSettings = store.TabSettings
 	// AISessionRecord AI 会话持久化记录
 	AISessionRecord = store.AISessionRecord
 )

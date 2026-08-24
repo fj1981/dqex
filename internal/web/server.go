@@ -490,23 +490,34 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 			browserHost = "127.0.0.1"
 		}
 	}
-	openURL := "http://" + net.JoinHostPort(browserHost, strconv.Itoa(port)) + "/"
-	if !isLoopback(host) {
+	cleanURL := "http://" + net.JoinHostPort(browserHost, strconv.Itoa(port)) + "/"
+	loopback := isLoopback(host)
+	if !loopback {
 		cylog.Warnf("服务已对外暴露（监听 %s）：白名单内来源可访问，请确保仅面向可信网络", server.Config.Address)
 	}
 	if token != "" {
-		openURL += "?token=" + token
-		cylog.Infof("dqex Web 服务启动: %s", openURL)
-		cylog.Infof("令牌有效期至 %s（过期后请重启服务刷新）", issuedAt.Add(tokenTTL).Format("2006-01-02 15:04:05"))
-		cylog.Infof("API 认证: 本机回环（127.0.0.1/localhost）免认证；外部来源需请求头 Authorization: Bearer <token> / X-Auth-Token，或查询参数 ?token=")
+		if loopback {
+			// 本机监听：本机免认证，令牌仅供外部访问参考
+			cylog.Infof("dqex Web 服务启动: %s", cleanURL)
+			cylog.Infof("本机访问免认证；外部来源需令牌（Authorization: Bearer <token> 或 ?token=）")
+			cylog.Infof("令牌: %s（有效期至 %s，重启刷新）", token, issuedAt.Add(tokenTTL).Format("2006-01-02 15:04:05"))
+		} else {
+			cylog.Infof("dqex Web 服务启动: %s?token=%s", cleanURL, token)
+			cylog.Infof("令牌有效期至 %s（过期后请重启服务刷新）", issuedAt.Add(tokenTTL).Format("2006-01-02 15:04:05"))
+			cylog.Infof("API 认证: 本机回环（127.0.0.1/localhost）免认证；外部来源需请求头 Authorization: Bearer <token> / X-Auth-Token，或查询参数 ?token=")
+		}
 	} else {
-		cylog.Warnf("dqex Web 服务启动: %s（已完全禁用认证 --no-auth，请勿暴露到不可信网络）", openURL)
+		cylog.Warnf("dqex Web 服务启动: %s（已完全禁用认证 --no-auth，请勿暴露到不可信网络）", cleanURL)
 	}
 	if !noBrowser {
-		// 延迟至监听就绪后自动打开浏览器（携带 token，前端会存入 sessionStorage 供后续请求使用）
+		// 延迟至监听就绪后自动打开浏览器（回环监听用干净 URL，外部监听携带 token）
+		browserURL := cleanURL
+		if !loopback && token != "" {
+			browserURL += "?token=" + token
+		}
 		go func() {
 			time.Sleep(500 * time.Millisecond)
-			openBrowser(openURL)
+			openBrowser(browserURL)
 		}()
 	}
 	_ = server.Run(context.Background())

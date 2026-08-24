@@ -7,7 +7,8 @@ import { describeWriteOp, isWriteSQL, previewSQL } from "@/lib/sql"
 import i18n from "@/lib/i18n"
 import { getSqlEditor } from "@/lib/editorRef"
 import { loadQueryResult, removeQueryResult, resultCacheKey, saveQueryResult } from "@/lib/queryResultCache"
-import type { ObjectDDLType, SQLExecMode, SQLQueryResult, TableViewLayout, WorkspaceTab as WorkspaceTabDTO } from "@/types"
+import { DEFAULT_EVICT_ORDER, type EvictCategory } from "@/lib/tabSettings"
+import type { ObjectDDLType, SQLExecMode, SQLQueryResult, TabSettings, TableViewLayout, WorkspaceTab as WorkspaceTabDTO } from "@/types"
 
 export type WorkspaceTabKind = "query" | "object"
 
@@ -26,6 +27,7 @@ export interface QueryTab {
   error: string | null
   lastExecSql: string // 上次实际执行的 SQL 文本（选中执行=选中部分，全文执行=全文）；不持久化，供「修复/解释/优化」定位作用对象
   createdAt: number
+  pinned?: boolean // 固定标签页（不参与自动淘汰）
 }
 
 // 对象 tab：从对象树打开（表/视图/函数/存储过程），展示数据/结构/DDL；同一对象去重打开
@@ -38,6 +40,7 @@ export interface ObjectTab {
   subTab: "data" | "struct" | "ddl"
   page: number
   viewLayout?: TableViewLayout // 表浏览视图布局（过滤/排序/列显隐/页大小），随 tab 持久化
+  pinned?: boolean // 固定标签页（不参与自动淘汰）
 }
 
 export type WorkspaceTab = QueryTab | ObjectTab
@@ -48,9 +51,11 @@ interface QueryState {
   activeId: string
   running: boolean
   mask: boolean // 结果集脱敏开关（敏感列统一打码）
+  tabSettings: TabSettings // 标签页设置（后端持久化）
   persistFailed: boolean // 工作区持久化失败标记（用于 UI 提示，下次成功保存时清除）
   clearPersistFailed: () => void
   setConnId: (connId: string) => void
+  updateTabSettings: (settings: Partial<TabSettings>) => void // 更新标签页设置
   addTab: (db?: string) => void // 新建查询 tab（可选指定目标库，空 = 连接默认库）
   openObjectTab: (db: string, name: string, objType: ObjectDDLType) => void // 打开对象 tab（已存在则激活）
   closeTab: (id: string) => void
@@ -66,6 +71,7 @@ interface QueryState {
   setObjectPage: (id: string, page: number) => void
   setObjectViewLayout: (id: string, layout: TableViewLayout) => void
   setMask: (mask: boolean) => void
+  togglePinTab: (id: string) => void // 切换 tab 固定状态
   runActive: (selection?: string) => Promise<void>
   runTab: (id: string, selection?: string) => Promise<void>
   clearTabResult: (id: string) => void
@@ -130,6 +136,7 @@ function toDTO(t: WorkspaceTab): WorkspaceTabDTO {
       sql: t.sql,
       mode: t.mode,
       ...(t.title !== defaultTitle ? { title: t.title } : {}),
+      ...(t.pinned ? { pinned: true } : {}),
     }
   }
   return {
@@ -140,6 +147,7 @@ function toDTO(t: WorkspaceTab): WorkspaceTabDTO {
     objType: t.objType,
     subTab: t.subTab,
     ...(t.viewLayout ? { viewLayout: t.viewLayout } : {}),
+    ...(t.pinned ? { pinned: true } : {}),
   }
 }
 
@@ -153,6 +161,7 @@ function fromDTO(d: WorkspaceTabDTO): WorkspaceTab {
     }
     if (d.title) base.title = d.title
     if (d.mode === "raw") base.mode = "raw"
+    if (d.pinned) base.pinned = true
     return base
   }
   return {
@@ -164,12 +173,13 @@ function fromDTO(d: WorkspaceTabDTO): WorkspaceTab {
     subTab: (d.subTab ?? "data") as "data" | "struct" | "ddl",
     page: 1,
     ...(d.viewLayout ? { viewLayout: d.viewLayout } : {}),
+    ...(d.pinned ? { pinned: true } : {}),
   }
 }
 
 // 从后端恢复某连接的 tabs；无记录时返回空。
 // query tab 恢复后，异步从本地 IndexedDB 缓存回填结果集（刷新/重开连接不丢结果、不重跑）。
-async function restoreConn(connId: string): Promise<{ tabs: WorkspaceTab[]; activeId: string }> {
+async function restoreConn(connId: string): Promise<{ tabs: WorkspaceTab[]; activeId: string; tabSettings?: TabSettings }> {
   try {
     const state = await fetchWorkspace(connId)
     const tabs = (state.tabs ?? []).map(fromDTO)
@@ -189,11 +199,44 @@ async function restoreConn(connId: string): Promise<{ tabs: WorkspaceTab[]; acti
         }
       }
     })()
-    return { tabs, activeId }
+    return { tabs, activeId, tabSettings: state.tabSettings }
   } catch {
     // 加载失败（如后端不可用）不阻塞，返回空工作区
     return { tabs: [], activeId: "" }
   }
+}
+
+// 淘汰候选选择：按用户排列的 evictOrder 从末尾（最低优先级）开始找候选，
+// 同分类内取最久未激活的。固定 tab 不参与淘汰。
+function pickEvictCandidate(tabs: WorkspaceTab[], evictOrder: EvictCategory[]): WorkspaceTab | null {
+  const candidates = tabs.filter((t) => !t.pinned)
+  if (candidates.length === 0) return null
+
+  // 将每个 tab 归类
+  const categorize = (t: WorkspaceTab): EvictCategory => {
+    if (t.kind === "query") {
+      if (!t.sql.trim() && t.results.length === 0) return "empty_query"
+      if (t.results.length === 0) return "sql_no_result"
+      return "query_with_result"
+    }
+    // object tab：page<=1 视为尚未浏览数据
+    return t.page <= 1 ? "object_no_data" : "object_with_data"
+  }
+
+  // 按 evictOrder 从末尾（最低优先级）开始找候选
+  for (let i = evictOrder.length - 1; i >= 0; i--) {
+    const cat = evictOrder[i]
+    const matches = candidates.filter((t) => categorize(t) === cat)
+    if (matches.length > 0) {
+      // 同分类内取最久未激活的
+      return matches.reduce((oldest, t) => {
+        const oldestTime = oldest.kind === "query" ? oldest.createdAt : 0
+        const tTime = t.kind === "query" ? t.createdAt : 0
+        return tTime < oldestTime ? t : oldest
+      })
+    }
+  }
+  return candidates[0] // fallback
 }
 
 // 批量清理被关闭 query tab 的本地结果缓存 + 后端 AI 会话（均随 tab 生命周期，关闭即失效）。
@@ -211,9 +254,9 @@ function cleanupResultCaches(connId: string, tabs: WorkspaceTab[]) {
 
 // 立即落盘：直接把给定快照写入后端（fire-and-forget，失败不阻塞主流程）。
 // 仅用于「切换连接前保存旧连接」等必须即时写入、不能等待防抖的场景。
-function persistNow(connId: string, tabs: WorkspaceTab[], activeId: string) {
+function persistNow(connId: string, tabs: WorkspaceTab[], activeId: string, tabSettings: TabSettings) {
   if (!connId) return
-  const state = { tabs: tabs.map(toDTO), activeId }
+  const state = { tabs: tabs.map(toDTO), activeId, tabSettings }
   saveWorkspace(connId, state).catch((e) => {
     // 持久化失败不阻塞主流程，但记录告警并标记状态，便于用户感知排查
     console.warn(`[workspace] 工作区持久化失败 conn=${connId}:`, e)
@@ -230,8 +273,8 @@ function persistCurrent() {
   if (persistTimer) clearTimeout(persistTimer)
   persistTimer = setTimeout(() => {
     persistTimer = null
-    const { connId, tabs, activeId } = useQueryStore.getState()
-    persistNow(connId, tabs, activeId)
+    const { connId, tabs, activeId, tabSettings } = useQueryStore.getState()
+    persistNow(connId, tabs, activeId, tabSettings)
   }, 300)
 }
 
@@ -241,12 +284,20 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   activeId: "",
   running: false,
   mask: false,
+  tabSettings: {}, // 默认空，从后端恢复
   persistFailed: false,
 
   clearPersistFailed: () => set({ persistFailed: false }),
 
+  updateTabSettings: (settings) => {
+    const { tabSettings } = get()
+    const next = { ...tabSettings, ...settings }
+    set({ tabSettings: next })
+    persistCurrent()
+  },
+
   setConnId: (connId) => {
-    const { connId: prev, tabs, activeId } = get()
+    const { connId: prev, tabs, activeId, tabSettings } = get()
     if (prev === connId) return
     // 清掉 SQL 输入的防抖持久化，避免窗口期结束后误把旧连接快照写进新连接
     if (persistTimer) {
@@ -256,32 +307,61 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     // 先保存旧连接的工作区（若已进入过某连接），再异步恢复新连接的工作区
     // 必须立即落盘：防抖窗口内 get() 已切到新连接，不能用 persistCurrent（会读错连接）
     if (prev) {
-      persistNow(prev, tabs, activeId)
+      persistNow(prev, tabs, activeId, tabSettings)
     }
-    set({ connId, tabs: [], activeId: "", running: false })
+    set({ connId, tabs: [], activeId: "", running: false, tabSettings: {} })
     // 异步恢复目标连接的工作区
     void (async () => {
       const restored = await restoreConn(connId)
       // 恢复期间用户可能已切换连接，仅在仍停留在目标连接时应用
       if (get().connId === connId) {
-        set({ tabs: restored.tabs, activeId: restored.activeId })
+        set({ tabs: restored.tabs, activeId: restored.activeId, tabSettings: restored.tabSettings ?? {} })
       }
     })()
   },
 
   setMask: (mask) => set({ mask }),
 
+  togglePinTab: (id) => {
+    const { connId, tabs, activeId } = get()
+    // 切换固定状态
+    const toggled = tabs.map((t) =>
+      t.id === id ? { ...t, pinned: !t.pinned } : t,
+    ) as WorkspaceTab[]
+    // 重新排列：固定 tab 移到最左（保持固定 tab 之间的相对顺序），非固定 tab 保持原顺序
+    const pinned = toggled.filter((t) => t.pinned)
+    const unpinned = toggled.filter((t) => !t.pinned)
+    const next = [...pinned, ...unpinned]
+    set({ tabs: next })
+    persistCurrent()
+  },
+
   addTab: (db = "") => {
-    const { connId, tabs } = get()
+    const { connId, tabs, tabSettings } = get()
+    const maxTabs = tabSettings.maxTabs ?? 20
+    const evictOrder = (tabSettings.evictOrder ?? DEFAULT_EVICT_ORDER) as EvictCategory[]
+    // 若已达上限，执行智能淘汰
+    if (tabs.length >= maxTabs) {
+      const evicted = pickEvictCandidate(tabs, evictOrder)
+      if (evicted) {
+        get().closeTab(evicted.id)
+      } else {
+        toast.warning(i18n.t("workspace.allTabsPinned"))
+        return
+      }
+    }
     // 序号 = 当前连接已有 query tab 最大序号 + 1（每连接独立，object tab 不参与）
-    const tab = newQueryTab(db, maxQuerySeq(tabs) + 1)
-    const nextTabs = [...tabs, tab]
+    const tab = newQueryTab(db, maxQuerySeq(get().tabs) + 1)
+    // 新 tab 插入到固定 tab 之后、非固定 tab 末尾
+    const currentTabs = get().tabs
+    const pinnedEnd = currentTabs.filter((t) => t.pinned).length
+    const nextTabs = [...currentTabs.slice(0, pinnedEnd), tab, ...currentTabs.slice(pinnedEnd)]
     set({ tabs: nextTabs, activeId: tab.id })
     persistCurrent()
   },
 
   openObjectTab: (db, name, objType) => {
-    const { connId, tabs } = get()
+    const { connId, tabs, tabSettings } = get()
     // 去重：同一对象已有 tab 时仅激活，不重复打开
     const existing = tabs.find(
       (t) => t.kind === "object" && t.db === db && t.name === name && t.objType === objType,
@@ -290,6 +370,18 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       set({ activeId: existing.id })
       persistCurrent()
       return
+    }
+    const maxTabs = tabSettings.maxTabs ?? 20
+    const evictOrder = (tabSettings.evictOrder ?? DEFAULT_EVICT_ORDER) as EvictCategory[]
+    // 若已达上限，执行智能淘汰
+    if (tabs.length >= maxTabs) {
+      const evicted = pickEvictCandidate(tabs, evictOrder)
+      if (evicted) {
+        get().closeTab(evicted.id)
+      } else {
+        toast.warning(i18n.t("workspace.allTabsPinned"))
+        return
+      }
     }
     // 表/视图默认看数据，函数/存储过程只有 DDL
     const initialSubTab: ObjectTab["subTab"] = objType === "table" || objType === "view" ? "data" : "ddl"
@@ -302,7 +394,10 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       subTab: initialSubTab,
       page: 1,
     }
-    const nextTabs = [...tabs, tab]
+    // 新 tab 插入到固定 tab 之后、非固定 tab 末尾
+    const currentTabs = get().tabs
+    const pinnedEnd = currentTabs.filter((t) => t.pinned).length
+    const nextTabs = [...currentTabs.slice(0, pinnedEnd), tab, ...currentTabs.slice(pinnedEnd)]
     set({ tabs: nextTabs, activeId: tab.id })
     persistCurrent()
   },

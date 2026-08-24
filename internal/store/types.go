@@ -190,6 +190,13 @@ type WebAccessInfo struct {
 
 // ---- 查询工作区（SQL 终端 Tab 布局，按连接持久化，可重跑上下文，不含结果集） ----
 
+// TabSettings 工作区标签页设置（最大数量、淘汰优先级、最大宽度）
+type TabSettings struct {
+	MaxTabs     int      `json:"maxTabs,omitempty"`     // 最大标签页数（默认 20，范围 5~100）
+	EvictOrder  []string `json:"evictOrder,omitempty"`  // 淘汰优先级顺序（5 类分类的排列）
+	MaxTabWidth int      `json:"maxTabWidth,omitempty"` // 标签页最大宽度（像素，默认 160，范围 80~300）
+}
+
 // WorkspaceTab 工作区 tab。仅持久化「可重跑」的上下文字段（结果集靠重新执行恢复）。
 // QueryKind/ObjectKind 用 kind 判别；具体字段见 QueryTab / ObjectTab。
 type WorkspaceTab struct {
@@ -206,12 +213,15 @@ type WorkspaceTab struct {
 	SubTab  string `json:"subTab,omitempty"`  // data / struct / ddl
 	// 表浏览视图布局（过滤/排序/列显隐/页大小），原样 JSON 存取，后端不解析语义
 	ViewLayout json.RawMessage `json:"viewLayout,omitempty"`
+	// 固定标签页（不参与自动淘汰）
+	Pinned bool `json:"pinned,omitempty"`
 }
 
 // WorkspaceState 某连接的工作区状态。
 type WorkspaceState struct {
-	Tabs     []WorkspaceTab `json:"tabs"`
-	ActiveID string         `json:"activeId"`
+	Tabs       []WorkspaceTab `json:"tabs"`
+	ActiveID   string         `json:"activeId"`
+	TabSettings *TabSettings  `json:"tabSettings,omitempty"` // 标签页设置（可选）
 }
 
 // ---- AI 会话（对话历史，按连接持久化到 SQLite） ----
