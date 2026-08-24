@@ -219,9 +219,9 @@ type WorkspaceTab struct {
 
 // WorkspaceState 某连接的工作区状态。
 type WorkspaceState struct {
-	Tabs       []WorkspaceTab `json:"tabs"`
-	ActiveID   string         `json:"activeId"`
-	TabSettings *TabSettings  `json:"tabSettings,omitempty"` // 标签页设置（可选）
+	Tabs        []WorkspaceTab `json:"tabs"`
+	ActiveID    string         `json:"activeId"`
+	TabSettings *TabSettings   `json:"tabSettings,omitempty"` // 标签页设置（可选）
 }
 
 // ---- AI 会话（对话历史，按连接持久化到 SQLite） ----

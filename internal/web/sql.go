@@ -5,8 +5,8 @@ import (
 	"dqex/internal/engine"
 	"dqex/internal/service"
 
-	"github.com/gin-gonic/gin"
 	"github.com/fj1981/infrakit/pkg/cygin"
+	"github.com/gin-gonic/gin"
 )
 
 // SQLRunReq SQL 执行请求（统一查询与写操作，支持多语句批量执行）
