@@ -7,6 +7,8 @@ VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev-$(shell 
 # 短 commit id：package 汇总包命名用（git rev-parse 取短哈希，如 d59e502）
 SHORT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILDTIME = $(shell date '+%y%m%d%H%M')
+# 编译标签：make build TAGS=opensource 或 make release TAGS=opensource 时启用开源构建（"关于"弹窗展示项目 Git 地址与联系方式）
+TAGS ?=
 LDFLAGS_REL := -s -w -X dqex/internal/cli.Version=$(VERSION) -X 'dqex/internal/cli.BuildTime=$(BUILDTIME)'
 
 # 检测 air 是否已安装
@@ -47,7 +49,7 @@ web-stub:
 
 # 构建单二进制（内嵌真实前端产物，注入版本号与构建时间）
 build: web-dist
-	$(GO) build -ldflags "-X dqex/internal/cli.Version=$(VERSION) -X 'dqex/internal/cli.BuildTime=$(BUILDTIME)'" -o dqex ./cmd
+	$(GO) build $(if $(TAGS),-tags $(TAGS),) -ldflags "-X dqex/internal/cli.Version=$(VERSION) -X 'dqex/internal/cli.BuildTime=$(BUILDTIME)'" -o dqex ./cmd
 	@echo ">> 构建完成: ./dqex（版本 $(VERSION)，构建于 $(BUILDTIME)）"
 
 # 构建并安装到本机（默认 /usr/local/bin，无写权限时自动 sudo；可 make install PREFIX=$HOME/bin 覆盖）
@@ -118,7 +120,7 @@ release: web-dist
 		bin=dqex; stage=release/$$os-$$arch; mkdir -p $$stage; \
 		if [ "$$os" = "windows" ]; then bin=dqex.exe; fi; \
 		echo ">> 构建 $$os/$$arch (版本 $(VERSION))"; \
-		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "$(LDFLAGS_REL)" -o $$stage/$$bin ./cmd || exit 1; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath $(if $(TAGS),-tags $(TAGS),) -ldflags "$(LDFLAGS_REL)" -o $$stage/$$bin ./cmd || exit 1; \
 		if [ "$$os" = "windows" ]; then \
 			perl -pe 's/\r?\n/\r\n/' scripts/install.bat | iconv -f UTF-8 -t GBK > $$stage/install.bat || cp scripts/install.bat $$stage/install.bat; \
 			perl -pe 's/\r?\n/\r\n/' scripts/start.bat | iconv -f UTF-8 -t GBK > $$stage/start.bat || cp scripts/start.bat $$stage/start.bat; \

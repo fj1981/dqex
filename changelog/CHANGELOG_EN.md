@@ -2,9 +2,12 @@
 
 ## [1.0.0] - 2026-08-21
 ### Added
-- First public open-source release (GitHub, MIT license, 5-platform packages)
-- Dialect adapter layer extracted into github.com/fj1981/infrakit v1.0.0, providing a stable foundation for cross-dialect capabilities
-- README rewritten as a bilingual (EN/ZH) marketing version with a project banner
+- Official stable v1.0.0 release with multi-platform packages for macOS / Linux / Windows
+
+## [0.6.0] - 2026-08-21
+### Added
+- Database dialect adapter layer extracted as a standalone module, providing a stable foundation for cross-dialect capabilities
+- Complete project documentation in both Chinese and English
 
 ## [0.5.0] - 2026-08-21
 ### Added

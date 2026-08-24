@@ -13,9 +13,9 @@ import (
 	"dqex/internal/engine"
 	"dqex/internal/service"
 
-	"github.com/gin-gonic/gin"
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cylog"
+	"github.com/gin-gonic/gin"
 )
 
 // StartResp 异步任务启动响应
@@ -491,10 +491,12 @@ func handleDBTypes() gin.HandlerFunc {
 }
 
 // VersionInfo 版本信息（构建版本 + 构建时间 + 支持的数据库类型）
+// ShowLinks 为开源构建（-tags opensource）时 true，前端据此展示项目 Git 地址与联系方式
 type VersionInfo struct {
 	Version   string   `json:"version"`
 	BuildTime string   `json:"buildTime"`
 	DBTypes   []string `json:"dbTypes"`
+	ShowLinks bool     `json:"showLinks"`
 }
 
 func handleVersion() gin.HandlerFunc {
@@ -504,7 +506,7 @@ func handleVersion() gin.HandlerFunc {
 			dbTypes = append(dbTypes, t)
 		}
 		sort.Strings(dbTypes)
-		return VersionInfo{Version: cli.Version, BuildTime: cli.BuildTime, DBTypes: dbTypes}, nil
+		return VersionInfo{Version: cli.Version, BuildTime: cli.BuildTime, DBTypes: dbTypes, ShowLinks: cli.OpenSourceBuild}, nil
 	})
 }
 

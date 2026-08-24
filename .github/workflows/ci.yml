@@ -56,7 +56,8 @@ jobs:
         run: cd web && yarn build
 
       - name: Cross-platform package (make release)
-        run: make release
+        # TAGS=opensource：GitHub Release 产物在"关于"弹窗展示项目 Git 地址与联系方式；本地出包不传该变量即不带
+        run: make release TAGS=opensource
 
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2

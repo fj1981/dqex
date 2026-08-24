@@ -637,6 +637,8 @@ export interface VersionInfo {
   version: string
   buildTime: string
   dbTypes: string[]
+  /** 开源构建（后端 -tags opensource）时为 true，展示项目 Git 地址与联系方式 */
+  showLinks?: boolean
 }
 
 // ---- 查询工作区（后端持久化，按连接，可重跑上下文不含结果集） ----
