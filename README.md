@@ -112,6 +112,10 @@ dqex dict camunda -s prod -o data_dict.xlsx
 
 ## 🤖 AI-Assisted SQL (Optional, Offline-Safe)
 
+<p align="center">
+  <img src="docs/demo-ai.gif" alt="AI-Assisted SQL demo — the agent explores the real table schema, then generates verified SQL" width="100%">
+</p>
+
 - **Real schema, not guesses** — the agent queries your actual table structures before generating SQL (Web UI shows live progress)
 - **Generate ≠ Execute** — AI only produces SQL text; write operations require confirmation, dangerous statements are blocked, and you can `\e`-edit before running
 - **Full assist loop** — `\ai continue` for follow-ups; Web UI supports generate / explain / optimize / fix with side-by-side diff preview and one-click apply

@@ -112,6 +112,10 @@ dqex dict camunda -s 生产库 -o 数据字典.xlsx
 
 ## 🤖 AI 辅助写 SQL（可选模块，离线安全）
 
+<p align="center">
+  <img src="docs/demo-ai.gif" alt="AI 辅助写 SQL 演示——Agent 先探索真实表结构，再生成已验证的 SQL" width="100%">
+</p>
+
 - **基于真实表结构，杜绝凭空想象** —— 生成前自动查询库表结构（Web 端实时显示查询进度）
 - **生成 ≠ 执行** —— AI 只产出 SQL 文本；写操作需二次确认、危险语句被拦截，可 `\e` 编辑后再执行
 - **完整辅助闭环** —— `\ai continue` 基于上文续写；Web 端支持生成 / 解释 / 优化 / 修复，diff 预览后一键应用到编辑器
