@@ -56,6 +56,7 @@ type cliTexts struct {
 	urlNoAuth       string // 提示: 上次启动禁用了认证（--no-auth），链接不带 token
 
 	// version 子命令
+	versionCommitID string // 提交: %s
 	versionBuildTime string // 构建时间: %s
 
 	// 任务起止（export/import/migrate/compare/dictionary）
@@ -264,6 +265,7 @@ var cliTextsMap = map[string]cliTexts{
 		urlExpireAt:     "令牌有效期至 %s",
 		urlNoAuth:       "提示: 上次启动禁用了认证（--no-auth），链接不带 token",
 
+		versionCommitID: "提交: %s",
 		versionBuildTime: "构建时间: %s",
 
 		startExport:  "开始导出...",
@@ -447,6 +449,7 @@ var cliTextsMap = map[string]cliTexts{
 		urlExpireAt:     "token valid until %s",
 		urlNoAuth:       "note: auth was disabled at last start (--no-auth), the link has no token",
 
+		versionCommitID: "commit: %s",
 		versionBuildTime: "build time: %s",
 
 		startExport:  "exporting...",

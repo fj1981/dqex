@@ -635,6 +635,7 @@ export interface DirBrowseResult {
 
 export interface VersionInfo {
   version: string
+  commitId?: string
   buildTime: string
   dbTypes: string[]
   /** 开源构建（后端 -tags opensource）时为 true，展示项目 Git 地址与联系方式 */

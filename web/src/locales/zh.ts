@@ -1310,6 +1310,7 @@ const zh = {
     brand: "数据库工作台 dqex",
     tagline: "数据库导入 / 导出 / 迁移 / 对比 / 数据字典工具",
     version: "版本",
+    commitId: "提交",
     buildTime: "构建时间",
     dbTypes: "支持的数据库",
     github: "Git 地址",

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { Calendar, ChevronDown, Clock, Database, Github, Loader2, MessageCircle } from "lucide-react"
+import { Calendar, ChevronDown, Clock, Database, GitBranch, Github, Loader2, MessageCircle } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -113,6 +113,11 @@ export default function AboutDialog({ open, onOpenChange }: { open: boolean; onO
                   <InfoRow icon={<Database className="h-4 w-4" />} label={t("about.version")}>
                     <span className="font-mono font-medium">dqex {version.version}</span>
                   </InfoRow>
+                  {version.commitId && (
+                    <InfoRow icon={<GitBranch className="h-4 w-4" />} label={t("about.commitId")}>
+                      <span className="font-mono text-muted-foreground">{version.commitId}</span>
+                    </InfoRow>
+                  )}
                   {version.buildTime && (
                     <InfoRow icon={<Calendar className="h-4 w-4" />} label={t("about.buildTime")}>
                       <span className="font-mono text-muted-foreground">{version.buildTime}</span>

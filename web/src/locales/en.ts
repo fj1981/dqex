@@ -1309,6 +1309,7 @@ const en: typeof import("./zh").default = {
     brand: "Database Workbench dqex",
     tagline: "Database import / export / migrate / compare / data dictionary tool",
     version: "Version",
+    commitId: "Commit",
     buildTime: "Build time",
     dbTypes: "Supported databases",
     github: "Repository",
