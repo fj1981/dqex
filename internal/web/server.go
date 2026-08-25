@@ -131,12 +131,13 @@ func remoteIP(c *gin.Context) net.IP {
 	return net.ParseIP(host)
 }
 
-// accessControl 访问来源白名单中间件：仅放行白名单内的来源 IP（回环始终放行）。
-// noAuth 为 true 且白名单为空时，仅允许回环访问（禁用认证时默认收紧到本机）。
-func accessControl(f *accessFilter, noAuth bool) gin.HandlerFunc {
+// accessControl 访问来源白名单中间件：仅放行白名单内的来源 IP（本机回环始终放行）。
+// 安全策略：未配置白名单时拒绝所有外部来源——对外暴露（--host 0.0.0.0 等）
+// 必须显式配置 --allow，否则局域网机器一律 403，仅本机可访问。
+func accessControl(f *accessFilter) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := remoteIP(c)
-		if f.allow(ip, noAuth) {
+		if f.allow(ip) {
 			c.Next()
 			return
 		}
@@ -313,13 +314,14 @@ on stripQuery(u)
 end stripQuery`, appName, urlProp, activateStmt)
 }
 
-// RunWeb 启动 Web 服务。allow 为访问来源白名单（IP/CIDR/域名），空 = 不限制。
+// RunWeb 启动 Web 服务。allow 为访问来源白名单（IP/CIDR/域名）。
 //
 // 安全默认：
-//   - host 默认 127.0.0.1 仅本机访问；对外暴露（--host 0.0.0.0 等）时外部来源强制令牌认证
+//   - host 默认 127.0.0.1 仅本机访问；对外暴露（--host 0.0.0.0 等）时外部来源强制令牌认证，
+//     且必须配置白名单 --allow / web.allow，否则外部来源一律拒绝（仅本机可访问）
 //   - 默认启用随机令牌认证，但仅校验外部来源：本机回环（127.0.0.1/localhost/::1）免认证，
 //     本地访问开箱即用；noAuth=true 完全关闭认证（对外暴露时给安全警告但不拒绝）
-//   - 白名单为可选增强：对外暴露时可配置 --allow / web.allow 进一步限制来源 IP
+//   - 白名单内来源仍需令牌（noAuth=true 时免认证）；本机回环始终放行，不受白名单约束
 //   - 前端与 API 同源部署，不开启 CORS 通配
 func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth, noBrowser bool) {
 	// --no-auth 对外暴露：给强风险警告但不拒绝（用户已明确选择忽略安全）
@@ -450,9 +452,9 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 		// 前端资源：直接内嵌 web/dist（构建前需先 npm run build）
 		cygin.WithEmbeddedFiles("/", webui.DistFS, "dist"),
 	}
-	// 始终挂载访问控制中间件：空规则放行，配置保存后热更新（无需重启）
+	// 始终挂载访问控制中间件：空规则 = 仅本机可访问，配置保存后热更新（无需重启）
 	// langCtx 将请求语言注入 ctx，service 同步方法在真实出错点按语言渲染 details
-	middlewares := []gin.HandlerFunc{langCtx(), securityHeaders(), accessControl(filter, noAuth)}
+	middlewares := []gin.HandlerFunc{langCtx(), securityHeaders(), accessControl(filter)}
 	if len(filter.rules) > 0 {
 		cylog.Infof("访问来源白名单已启用: %d 条规则（本机回环始终放行，保存配置后热更新）", len(filter.rules))
 	}
@@ -492,7 +494,10 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 	}
 	cleanURL := "http://" + net.JoinHostPort(browserHost, strconv.Itoa(port)) + "/"
 	loopback := isLoopback(host)
-	if !loopback {
+	if !loopback && len(allow) == 0 {
+		cylog.Warnf("服务已对外暴露（监听 %s）但未配置白名单：外部来源将被拒绝，仅本机可访问", server.Config.Address)
+		cylog.Warnf("局域网访问请配置 --allow 来源白名单（IP/CIDR/域名，逗号分隔）后重启")
+	} else if !loopback {
 		cylog.Warnf("服务已对外暴露（监听 %s）：白名单内来源可访问，请确保仅面向可信网络", server.Config.Address)
 	}
 	if token != "" {

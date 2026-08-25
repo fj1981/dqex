@@ -48,7 +48,7 @@ type cliTexts struct {
 	cfgDirUploads string // 上传临时目录: %s
 	cfgDirExports string // 最终产物目录: %s
 	cfgAllow      string // 访问来源白名单: %s（本机回环始终放行）
-	cfgAllowNone  string // 访问来源白名单: （未配置，不限制来源）
+	cfgAllowNone  string // 访问来源白名单: （未配置，外部来源一律拒绝，仅本机可访问）
 
 	// url 子命令
 	urlTokenExpired string // ⚠️  令牌已过期（签发给 24 小时有效期），请重启 Web 服务刷新后重新执行 dqex url
@@ -259,7 +259,7 @@ var cliTextsMap = map[string]cliTexts{
 		cfgDirUploads: "上传临时目录: %s",
 		cfgDirExports: "最终产物目录: %s",
 		cfgAllow:      "访问来源白名单: %s（本机回环始终放行）",
-		cfgAllowNone:  "访问来源白名单: （未配置，不限制来源）",
+		cfgAllowNone:  "访问来源白名单: （未配置，外部来源一律拒绝，仅本机可访问）",
 
 		urlTokenExpired: "⚠️ 令牌已过期（有效期 24 小时），请重启 Web 服务后重新执行 dqex url",
 		urlExpireAt:     "令牌有效期至 %s",
@@ -443,7 +443,7 @@ var cliTextsMap = map[string]cliTexts{
 		cfgDirUploads: "uploads temp dir: %s",
 		cfgDirExports: "exports dir: %s",
 		cfgAllow:      "allowlist: %s (loopback always allowed)",
-		cfgAllowNone:  "allowlist: (not configured, no restrictions)",
+		cfgAllowNone:  "allowlist: (not configured, external access denied, loopback only)",
 
 		urlTokenExpired: "⚠️ token expired (24h validity); restart the Web service, then re-run dqex url",
 		urlExpireAt:     "token valid until %s",

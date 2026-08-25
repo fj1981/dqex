@@ -31,7 +31,7 @@ type DirConfig struct {
 
 // WebConfig Web 服务安全配置
 type WebConfig struct {
-	Allow []string `yaml:"allow" json:"allow"` // 允许访问的来源白名单（IP/CIDR/域名），留空 = 不限制；本机回环始终放行
+	Allow []string `yaml:"allow" json:"allow"` // 访问来源白名单（IP/CIDR/域名）；对外暴露时必须配置，留空 = 外部来源一律拒绝、仅本机可访问；本机回环始终放行
 }
 
 // AI schema 参考的默认上限（可在 ai.max_schema_chars 中覆盖）

@@ -80,7 +80,7 @@ CLI 子命令与 Web 功能对齐：export / import / migrate / compare / conn /
 func Execute() *WebArgs {
 	rootCmd.PersistentFlags().StringVar(&webArgs.Host, "host", "127.0.0.1", "Web 服务监听地址（默认仅本机回环；对外暴露用 0.0.0.0，外部来源强制令牌认证）")
 	rootCmd.PersistentFlags().IntVar(&webArgs.Port, "port", 8181, "Web 服务端口")
-	rootCmd.PersistentFlags().StringVar(&webArgs.Allow, "allow", "", "访问来源白名单（IP/CIDR/域名，逗号分隔；留空不限制，优先于配置 web.allow；本机回环始终放行）")
+	rootCmd.PersistentFlags().StringVar(&webArgs.Allow, "allow", "", "访问来源白名单（IP/CIDR/域名，逗号分隔；对外暴露时必须配置，留空则外部来源一律拒绝、仅本机可访问；优先于配置 web.allow；本机回环始终放行）")
 	rootCmd.PersistentFlags().BoolVar(&webArgs.NoAuth, "no-auth", false, "完全禁用令牌认证")
 	rootCmd.PersistentFlags().BoolVar(&webArgs.NoBrowser, "no-browser", false, "启动时不自动打开浏览器")
 	rootCmd.PersistentFlags().StringVar(&webArgs.DataDir, "data-dir", "", "数据根目录（默认取全局配置，否则 ~/.dqex）")

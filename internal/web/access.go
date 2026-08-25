@@ -18,7 +18,8 @@ type allowRule struct {
 	domain string
 }
 
-// accessFilter 访问来源过滤器：无规则 = 不限制；本机回环始终放行（避免误锁自己）
+// accessFilter 访问来源过滤器：本机回环始终放行（避免误锁自己）；
+// 无规则 = 拒绝所有外部来源（对外暴露必须显式配置白名单）
 type accessFilter struct {
 	rules []allowRule
 	mu    sync.RWMutex
@@ -76,8 +77,10 @@ func looksLikeDomain(s string) bool {
 }
 
 // allow 判定客户端 IP 是否允许访问。
-// noAuth 为 true 且白名单为空时，仅允许回环访问（禁用认证时默认收紧到本机）。
-func (f *accessFilter) allow(ip net.IP, noAuth bool) bool {
+// 安全策略：本机回环始终放行；白名单为空时一律拒绝外部来源——
+// 对外暴露（非回环监听）必须显式配置白名单（--allow / web.allow），
+// 避免令牌泄露后任意来源 IP 都能访问（noAuth 场景更是完全裸奔）。
+func (f *accessFilter) allow(ip net.IP) bool {
 	if ip == nil || ip.IsLoopback() {
 		return true
 	}
@@ -87,11 +90,8 @@ func (f *accessFilter) allow(ip net.IP, noAuth bool) bool {
 	copy(rules, f.rules)
 	f.mu.RUnlock()
 	if len(rules) == 0 {
-		// --no-auth 且无白名单：禁用认证时默认收紧到本机，仅允许回环
-		if noAuth {
-			return false
-		}
-		return true
+		// 未配置白名单：拒绝所有外部来源（仅本机回环可访问）
+		return false
 	}
 	for _, r := range rules {
 		switch {

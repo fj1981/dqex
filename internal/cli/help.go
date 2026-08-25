@@ -130,7 +130,7 @@ CLI 子命令与 Web 功能对齐：export / import / migrate / compare / dictio
 			flags: map[string]string{
 				"host":        "Web 服务监听地址（默认仅本机回环；对外暴露用 0.0.0.0，外部来源强制令牌认证）",
 				"port":        "Web 服务端口",
-				"allow":       "访问来源白名单（IP/CIDR/域名，逗号分隔；留空不限制，优先于配置 web.allow；本机回环始终放行）",
+				"allow":       "访问来源白名单（IP/CIDR/域名，逗号分隔；对外暴露时必须配置，留空则外部来源一律拒绝、仅本机可访问；优先于配置 web.allow；本机回环始终放行）",
 				"no-auth":     "完全禁用令牌认证",
 				"no-browser":  "启动时不自动打开浏览器",
 				"data-dir":    "数据根目录（默认取全局配置，否则 ~/.dqex）",
@@ -437,7 +437,7 @@ CLI subcommands align with Web features: export / import / migrate / compare / d
 			flags: map[string]string{
 				"host":        "Web listen address (loopback only by default; use 0.0.0.0 to expose, which requires token auth for external access)",
 				"port":        "Web service port",
-				"allow":       "Allowed origin whitelist (IP/CIDR/domain, comma-separated; empty = unrestricted, takes priority over config web.allow; loopback always allowed)",
+				"allow":       "Allowed origin whitelist (IP/CIDR/domain, comma-separated; required when exposing the service, empty = external access denied, loopback-only; takes priority over config web.allow; loopback always allowed)",
 				"no-auth":     "Fully disable token auth",
 				"no-browser":  "Do not auto-open the browser on startup",
 				"data-dir":    "Data root directory (default from global config, else ~/.dqex)",

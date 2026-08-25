@@ -117,7 +117,8 @@ dev-debug: web-deps web-stub stop
 	cd web && yarn dev
 
 # 跨平台打包：输出 release/dqex-$(VERSION)-{os}-{arch}.zip（CGO 关闭，纯静态二进制）；
-# zip 内包含 dqex（Windows 为 dqex.exe）+ 安装/启动/停止/查看链接脚本 + CLI.md 使用手册，解压即用；
+# zip 内包含 dqex（Windows 为 dqex.exe）+ 安装/启动/停止/查看链接脚本 + 中文安装使用说明 README.md + CLI.md 使用手册，解压即用；
+# docs/README.release.md 为发行包专用中文说明（仅安装使用方法，不含开源/GitHub 信息），复制进包时改名为 README.md；
 # install.bat/start.bat/stop.bat 打包时转 CRLF + GBK，避免 Windows cmd（GBK 代码页）中文乱码与解析问题
 release: web-dist
 	@rm -rf release && mkdir -p release
@@ -138,7 +139,7 @@ release: web-dist
 			cp scripts/url.sh $$stage/ && chmod +x $$stage/url.sh; \
 		fi; \
 		cp CLI.md $$stage/; \
-		cp README.md $$stage/; \
+		cp docs/README.release.md $$stage/README.md; \
 		(cd $$stage && zip -q ../dqex-$(VERSION)-$$os-$$arch.zip *) || exit 1; \
 		rm -rf $$stage; \
 	done
