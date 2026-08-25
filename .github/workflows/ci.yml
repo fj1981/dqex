@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.25.1'
           cache: true
@@ -36,24 +36,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.25.1'
           cache: true
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: '20'
-          cache: yarn
-          cache-dependency-path: web/yarn.lock
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
       - name: Install frontend dependencies
-        run: |
-          corepack enable
-          cd web && yarn install --frozen-lockfile
+        run: cd web && npm ci
 
       - name: Build frontend
-        run: cd web && yarn build
+        run: cd web && npm run build
 
       - name: Cross-platform package (make release)
         # TAGS=opensource：GitHub Release 产物在"关于"弹窗展示项目 Git 地址与联系方式；本地出包不传该变量即不带
