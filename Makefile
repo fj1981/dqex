@@ -16,7 +16,7 @@ HAS_AIR := $(shell command -v $(AIR) 2>/dev/null)
 # dev 模式 air 配置：DEBUG=1 时使用 .air-debug.toml（后端加 --debug，输出全局 debug 日志）
 AIR_CFG := $(if $(DEBUG),.air-debug.toml,.air.toml)
 
-.PHONY: all build install uninstall web web-deps web-dist web-stub dev dev-debug stop release package clean air-install
+.PHONY: all build build-oss install install-oss uninstall web web-deps web-dist web-stub dev dev-debug stop release package clean air-install
 
 all: build
 
@@ -63,6 +63,12 @@ install: build
 		sudo cp dqex "$(PREFIX)/dqex" && sudo chmod +x "$(PREFIX)/dqex"; \
 	fi
 	@echo ">> 安装完成: $$($(PREFIX)/dqex version | head -1) -> $(PREFIX)/dqex"
+
+# 开源构建：带项目 Git 地址与联系方式（等效 make build/install TAGS=opensource）
+build-oss:
+	@$(MAKE) build TAGS=opensource
+install-oss:
+	@$(MAKE) install TAGS=opensource
 
 # 卸载本机安装
 uninstall:

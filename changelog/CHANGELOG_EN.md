@@ -4,17 +4,12 @@
 ### Added
 - Workspace tab settings: configurable tab limit and pinned tabs
 - Web service authentication strategy upgrade: loopback (127.0.0.1/localhost) access is auth-free, external sources require token, optional access whitelist, and `--no-auth` mode to fully disable authentication
-- Open-source build tag (`-tags opensource`) to control project links and changelog visibility in the About dialog
 - GitHub repository and contact info links in the About dialog
-- GitHub Issue templates: Bug Report and Feature Request
-- CI workflow: cross-platform automated build and release packaging
 
 ### Changed
 - Web service startup log optimized for loopback listeners: simplified auth prompt, emphasizing "local access is auth-free"
-- Code formatting and dependency import order cleanup
 
 ### Docs
-- Added CONTRIBUTING.md, CODE_OF_CONDUCT.md, and SECURITY.md
 - AI conversation demo GIF added to README
 
 ## [1.0.0] - 2026-08-21
