@@ -2,8 +2,8 @@ GO ?= go
 DLV ?= dlv
 AIR ?= air
 PLATFORMS := darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64
-# 版本号：优先 git tag（含落后提交数），无 tag 时用短哈希，非 git 环境回退 dev-日期；可 make release VERSION=v1.2.3 覆盖
-VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev-$(shell date +%Y%m%d))
+# 版本号：取最近 git tag（不含落后提交数/短哈希），无 tag 时回退 dev-日期；可 make release VERSION=v1.2.3 覆盖
+VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev-$(shell date +%Y%m%d))
 # 短 commit id：package 汇总包命名用（git rev-parse 取短哈希，如 d59e502）
 SHORT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILDTIME = $(shell date '+%y%m%d%H%M')
