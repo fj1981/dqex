@@ -252,6 +252,9 @@ function cleanupResultCaches(connId: string, tabs: WorkspaceTab[]) {
   }
 }
 
+// 上次选中的连接 ID（localStorage 持久化）：刷新/重开后恢复上次选择，而不是总是回落到第一个连接
+const LAST_CONN_ID_KEY = "dqex.lastConnId"
+
 // 立即落盘：直接把给定快照写入后端（fire-and-forget，失败不阻塞主流程）。
 // 仅用于「切换连接前保存旧连接」等必须即时写入、不能等待防抖的场景。
 function persistNow(connId: string, tabs: WorkspaceTab[], activeId: string, tabSettings: TabSettings) {
@@ -279,7 +282,7 @@ function persistCurrent() {
 }
 
 export const useQueryStore = create<QueryState>((set, get) => ({
-  connId: "",
+  connId: localStorage.getItem(LAST_CONN_ID_KEY) ?? "",
   tabs: [],
   activeId: "",
   running: false,
@@ -299,6 +302,12 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   setConnId: (connId) => {
     const { connId: prev, tabs, activeId, tabSettings } = get()
     if (prev === connId) return
+    // 记住用户最后选择的连接；清空（连接失效）时移除记录，避免下次恢复失效 ID
+    if (connId) {
+      localStorage.setItem(LAST_CONN_ID_KEY, connId)
+    } else {
+      localStorage.removeItem(LAST_CONN_ID_KEY)
+    }
     // 清掉 SQL 输入的防抖持久化，避免窗口期结束后误把旧连接快照写进新连接
     if (persistTimer) {
       clearTimeout(persistTimer)

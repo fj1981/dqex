@@ -83,10 +83,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 		if err != nil {
 			return nil, err
 		}
-		all, err := cli.GetTables(db, nil, nil)
-		if err == nil {
-			all = excludeViews(cli, db, opts.Source.Schema, all) // 视图走对象通道，不当作表导出
-		}
+		all, err := listSchemaTables(cli, db, &opts.Source.Schema)
 		cli.Close()
 		if err != nil {
 			return nil, NewMsgErrf(errExpListTables, err, db)
@@ -515,7 +512,7 @@ func exportObjectsToWriter(ctx context.Context, cli *cydb.DBCli, db, schema stri
 		if objects != nil {
 			filtered := make([]string, 0, len(names))
 			for _, name := range names {
-				if objectInWhitelist(allowed, db, dirName+"/"+name) {
+				if objectInWhitelist(allowed, db, objectWhitelistID(dirName, name)) {
 					filtered = append(filtered, name)
 				}
 			}
@@ -554,27 +551,58 @@ func exportObjectsToWriter(ctx context.Context, cli *cydb.DBCli, db, schema stri
 }
 
 // filterTables 按指定表名过滤：nil=全部，空数组=不过滤出任何表。
-// 条目支持限定形式 "库.表"（仅在对应库生效）与裸表名（匹配任意库，便于 CLI 手输）
+// wanted 条目支持（PG 枚举表名为 "schema.table" 限定形式）：
+//
+//	"库.schema.表"：库匹配时按 schema.表 精确比较（PG 分层）
+//	"库.表"：库匹配时按裸表名比较（任意 schema 同名表均命中，兼容旧配置）
+//	裸表名：匹配任意库/schema 的同名表（便于 CLI 手输）
 func filterTables(all []string, wanted []string, db string) []string {
 	if wanted == nil {
 		return all
 	}
-	bare := make(map[string]bool, len(wanted))
-	qualified := make(map[string]bool, len(wanted))
+	type entry struct {
+		bare   string // 裸表名（小写）
+		schema string // schema（小写，空=任意）
+		db     string // 库（小写，空=任意）
+	}
+	entries := make([]entry, 0, len(wanted))
 	for _, w := range wanted {
 		w = strings.TrimSpace(w)
-		if d, t, ok := splitQualifiedName(w); ok {
-			if strings.EqualFold(d, db) {
-				qualified[t] = true
-			}
-		} else {
-			bare[w] = true
+		if w == "" {
+			continue
 		}
+		parts := strings.Split(w, ".")
+		e := entry{bare: strings.ToLower(parts[len(parts)-1])}
+		switch len(parts) {
+		case 1:
+			// 裸名：任意库/schema
+		case 2:
+			e.db = strings.ToLower(parts[0])
+		case 3:
+			e.db = strings.ToLower(parts[0])
+			e.schema = strings.ToLower(parts[1])
+		default:
+			continue // 超过三级不支持
+		}
+		entries = append(entries, e)
 	}
+	dbLower := strings.ToLower(db)
 	ret := make([]string, 0, len(all))
 	for _, tb := range all {
-		if bare[tb] || qualified[tb] {
+		schema, bare := splitTableBare(tb)
+		lb := strings.ToLower(bare)
+		for _, e := range entries {
+			if e.bare != lb {
+				continue
+			}
+			if e.db != "" && e.db != dbLower {
+				continue
+			}
+			if e.schema != "" && !strings.EqualFold(e.schema, schema) {
+				continue
+			}
 			ret = append(ret, tb)
+			break
 		}
 	}
 	return ret

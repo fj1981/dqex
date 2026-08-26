@@ -100,6 +100,74 @@ func handleGetTables(svc *service.Service) gin.HandlerFunc {
 	})
 }
 
+// GetDatabaseListReq 获取库名列表请求（分级加载第一层，不枚举对象；force=true 绕过缓存刷新）
+type GetDatabaseListReq struct {
+	ID    string `uri:"id" binding:"required"`
+	Force bool   `query:"force"`
+}
+
+func handleGetDatabases(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req GetDatabaseListReq) (any, error) {
+		names, err := svc.GetDatabaseList(c.Request.Context(), req.ID, req.Force)
+		if err != nil {
+			return nil, renderErr(c, err)
+		}
+		return gin.H{"databases": names}, nil
+	})
+}
+
+// GetDbSchemasReq 获取库的 schema 列表请求（分级加载第二层，PG 系；force=true 绕过缓存刷新）
+type GetDbSchemasReq struct {
+	ID    string `uri:"id" binding:"required"`
+	DB    string `query:"db" binding:"required"`
+	Force bool   `query:"force"`
+}
+
+func handleGetDbSchemas(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req GetDbSchemasReq) (any, error) {
+		schemas, err := svc.GetDbSchemas(c.Request.Context(), req.ID, req.DB, req.Force)
+		if err != nil {
+			return nil, renderErr(c, err)
+		}
+		return gin.H{"schemas": schemas}, nil
+	})
+}
+
+// GetSchemaObjectsReq 获取 schema 对象清单请求（分级加载第三层，PG 系；force=true 绕过缓存刷新）
+type GetSchemaObjectsReq struct {
+	ID     string `uri:"id" binding:"required"`
+	DB     string `query:"db" binding:"required"`
+	Schema string `query:"schema" binding:"required"`
+	Force  bool   `query:"force"`
+}
+
+func handleGetSchemaObjects(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req GetSchemaObjectsReq) (any, error) {
+		sc, err := svc.GetSchemaObjects(c.Request.Context(), req.ID, req.DB, req.Schema, req.Force)
+		if err != nil {
+			return nil, renderErr(c, err)
+		}
+		return gin.H{"schema": sc}, nil
+	})
+}
+
+// GetDbObjectsReq 获取库对象清单请求（分级加载第二层，MySQL/Oracle 无 schema 层；force=true 绕过缓存刷新）
+type GetDbObjectsReq struct {
+	ID    string `uri:"id" binding:"required"`
+	DB    string `query:"db" binding:"required"`
+	Force bool   `query:"force"`
+}
+
+func handleGetDbObjects(svc *service.Service) gin.HandlerFunc {
+	return cygin.Handle(func(c *gin.Context, req GetDbObjectsReq) (any, error) {
+		d, err := svc.GetDbObjects(c.Request.Context(), req.ID, req.DB, req.Force)
+		if err != nil {
+			return nil, renderErr(c, err)
+		}
+		return gin.H{"db": d}, nil
+	})
+}
+
 // GetTableColumnsReq 获取表列信息请求
 type GetTableColumnsReq struct {
 	ID    string `uri:"id" binding:"required"`

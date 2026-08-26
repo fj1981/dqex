@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.0] - 2026-08-26
+### Added
+- Object tree progressive loading: database list → schemas (with table counts) → objects, loaded level by level on click; unloaded nodes are grayed out (Navicat-style interaction)
+- Metadata caching & refresh: 10-minute cache speeds up repeated expansion; tree-top refresh button and hover refresh on database/schema nodes bypass the cache to query the database directly
+- SQL completion supports PG schema hierarchy: `db.` suggests schema names, `schema.` suggests tables/views
+- Export table filter supports `db.schema.table` three-level qualified names (PG)
+
+### Changed
+- Metadata enumeration aggregated in the dialect layer: schema list + table counts in a single round-trip; system databases/users auto-filtered (MySQL system DBs, Oracle system users, PG/Kingbase system schemas)
+
+### Fixed
+- Kingbase connections still showing system schema `sys` in the object tree
+- Upgraded infrakit to v1.1.0: fixed PG dialect `?` placeholder causing metadata/structure export failures
+
 ## [1.1.0] - 2026-08-25
 ### Added
 - Workspace tab settings: configurable tab limit and pinned tabs

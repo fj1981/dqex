@@ -43,12 +43,11 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 
 	// 1. 确定迁移表清单
 	crossType := !strings.EqualFold(sourceCli.DBType(), targetCli.DBType())
-	all, err := sourceCli.GetTables(opts.Source.DBName, nil, nil)
+	// 视图走对象迁移通道 _views，不当作表迁移（视图无数据且无法按表建表）
+	all, err := listSchemaTables(sourceCli, opts.Source.DBName, &opts.Source.Schema)
 	if err != nil {
 		return nil, NewMsgErrf(errMigListTables, err)
 	}
-	// 视图走对象迁移通道 _views，不当作表迁移（视图无数据且无法按表建表）
-	all = excludeViews(sourceCli, opts.Source.DBName, opts.Source.Schema, all)
 	tables := filterTables(all, opts.Tables, opts.Source.DBName)
 	if len(tables) == 0 {
 		if crossType {
@@ -188,7 +187,7 @@ func migrateDBObjects(ctx context.Context, sourceCli, targetCli *cydb.DBCli, db,
 		if objects != nil {
 			filtered := make([]string, 0, len(names))
 			for _, name := range names {
-				if objectInWhitelist(allowed, db, dirName+"/"+name) {
+				if objectInWhitelist(allowed, db, objectWhitelistID(dirName, name)) {
 					filtered = append(filtered, name)
 				}
 			}

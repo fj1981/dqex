@@ -258,9 +258,12 @@ const en: typeof import("./zh").default = {
     loading: "Loading object tree...",
     noDb: "No databases available, check the connection",
     filter: "Filter...",
+    refresh: "Refresh object tree (bypass cache)",
+    refreshNode: "Refresh this node (bypass cache)",
     // Object type names (leaf node title tooltip)
     type: {
       db: "Database",
+      schema: "Schema",
       table: "Table",
       view: "View",
       function: "Function",

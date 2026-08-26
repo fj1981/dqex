@@ -200,6 +200,7 @@ var engineErrMap = map[string]map[string]string{
 		errMetaType:        "不支持的数据库类型: %s",
 		errMetaListTables:  "获取库 %s 的表列表失败",
 		errMetaListDBs:     "获取数据库列表失败",
+		errMetaAnchorDB:    "枚举数据库列表失败：请为该连接填写实例上实际存在的数据库名（如 postgres / TEST / security），或确认实例存在可连接的库",
 		errMetaListSchemas: "获取 schema %s 的表列表失败",
 		errMetaSchemaList:  "获取 schema 列表失败",
 		errMetaTableInfo:   "获取表 %s 的元数据失败",
@@ -360,6 +361,7 @@ var engineErrMap = map[string]map[string]string{
 		errMetaType:        "unsupported database type: %s",
 		errMetaListTables:  "failed to get table list of database %s",
 		errMetaListDBs:     "failed to get database list",
+		errMetaAnchorDB:    "failed to enumerate databases: please specify an existing database name (e.g. postgres / TEST / security) for this connection, or make sure a connectable database exists on the instance",
 		errMetaListSchemas: "failed to get table list of schema %s",
 		errMetaSchemaList:  "failed to get schema list",
 		errMetaTableInfo:   "failed to get metadata of table %s",
@@ -512,6 +514,7 @@ const (
 	errMetaType             = "errMetaType"
 	errMetaListTables       = "errMetaListTables"
 	errMetaListDBs          = "errMetaListDBs"
+	errMetaAnchorDB         = "errMetaAnchorDB"
 	errMetaListSchemas      = "errMetaListSchemas"
 	errMetaSchemaList       = "errMetaSchemaList"
 	errMetaTableInfo        = "errMetaTableInfo"

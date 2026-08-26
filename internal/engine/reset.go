@@ -2,12 +2,17 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/fj1981/infrakit/pkg/cydb"
 )
 
-// backupTableName 生成备份表名
+// backupTableName 生成备份表名：限定名 "schema.table" 时保留 schema 前缀，
+// 仅对表名段加前缀（否则会拼成 "前缀schema.table" 落错 schema）
 func backupTableName(table string) string {
+	if i := strings.Index(table, "."); i > 0 {
+		return table[:i+1] + BackupTablePrefix + table[i+1:]
+	}
 	return BackupTablePrefix + table
 }
 

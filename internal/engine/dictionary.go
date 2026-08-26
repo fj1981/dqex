@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xuri/excelize/v2"
 	"github.com/fj1981/infrakit/pkg/cydb/def"
+	"github.com/xuri/excelize/v2"
 )
 
 // 数据字典 Excel 常量
@@ -150,10 +150,7 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 		if err != nil {
 			return nil, err
 		}
-		all, err := cli.GetTables(db, nil, nil)
-		if err == nil {
-			all = excludeViews(cli, db, opts.Source.Schema, all)
-		}
+		all, err := listSchemaTables(cli, db, &opts.Source.Schema)
 		cli.Close()
 		if err != nil {
 			return nil, NewMsgErrf(errDictListTables, err, db)

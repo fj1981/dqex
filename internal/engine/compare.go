@@ -275,7 +275,7 @@ func listCompareTables(cli *cydb.DBCli, conn *DBConnInfo, wanted []string) ([]st
 }
 
 // filterTablesBare 按裸表名过滤：nil=全部，空数组=无表。
-// "库.表" 限定名条目：库前缀匹配时按裸名比较；前缀不匹配时降级按裸名比较
+// wanted 条目支持 "库.schema.表" / "库.表" / 裸名：库前缀匹配时按裸名比较；前缀不匹配时降级按裸名比较
 // （对比作用域为单个库对，目标独有表的限定前缀可能与源侧库名不同，不能因此失配）
 func filterTablesBare(all []string, wanted []string, db string) []string {
 	if wanted == nil {
@@ -284,8 +284,9 @@ func filterTablesBare(all []string, wanted []string, db string) []string {
 	bare := make(map[string]bool, len(wanted))
 	for _, w := range wanted {
 		w = strings.TrimSpace(w)
-		if _, tbl, ok := splitQualifiedName(w); ok {
-			bare[strings.ToLower(tbl)] = true
+		parts := strings.Split(w, ".")
+		if len(parts) >= 2 {
+			bare[strings.ToLower(parts[len(parts)-1])] = true
 		} else if w != "" {
 			bare[strings.ToLower(w)] = true
 		}

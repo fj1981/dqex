@@ -259,9 +259,12 @@ const zh = {
     loading: "加载对象树…",
     noDb: "无可用库，请检查连接",
     filter: "过滤...",
+    refresh: "刷新对象树（绕过缓存）",
+    refreshNode: "刷新该节点（绕过缓存）",
     // 对象类型名（叶子节点 title 提示）
     type: {
       db: "数据库",
+      schema: "模式",
       table: "表",
       view: "视图",
       function: "函数",

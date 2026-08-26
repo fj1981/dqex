@@ -33,8 +33,28 @@ export function emptyConn(): DBConn {
 export interface DBTables {
   name: string
   tables: string[]
+  // 库内 schema 清单（PG 系按 schema 分层时返回；表名为裸名，跨 schema 同名表在各 schema 下区分）
+  schemas?: DBSchema[]
   // 库内对象：_views/_functions/_procedures → 对象名
   objects?: Record<string, string[]>
+  // 前端分级加载标记：true=已加载（含真实数据）；缺省/undefined=仅库名（点击后加载）
+  _loaded?: boolean
+  // 前端分级加载失败信息（点击可重试）
+  _error?: string
+}
+
+// 库内 schema（PG 系）：schema 及其表/对象清单
+// （表/对象名均为裸名；前端构建对象树时叶子名称需带 "schema." 前缀以限定查询）
+export interface DBSchema {
+  name: string
+  tables: string[]
+  objects?: Record<string, string[]>
+}
+
+// 库内 schema 概要（分级加载第二层：点击库后返回 schema 列表与表计数）
+export interface SchemaSummary {
+  name: string
+  tableCount: number
 }
 
 export type TableDataMode = "" | "skip" | "condition"
@@ -675,8 +695,14 @@ export interface WorkspaceState {
 // ---- 数据浏览器 / 对象树 ----
 export interface ObjectNode {
   name: string
-  type: "db" | "table" | "view" | "function" | "procedure" | "other"
+  type: "db" | "schema" | "table" | "view" | "function" | "procedure" | "other"
   children?: ObjectNode[]
+  // 分级加载：false 表示节点内容尚未请求（灰显，点击加载）；缺省视为已加载
+  loaded?: boolean
+  // 节点加载失败（点击可重试）
+  error?: string
+  // 分级加载下的展示计数（库=schema 数，PG schema=表数）
+  count?: number
 }
 
 // 列过滤操作符（与后端 engine.FilterOp 严格对齐）

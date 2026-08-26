@@ -38,8 +38,18 @@ var dirObjectKinds = func() map[string]objectKind {
 // objectExportOrder 导出顺序（导入执行顺序与此一致）
 var objectExportOrder = []objectKind{objectView, objectFunction, objectProcedure}
 
-// objectInWhitelist 判断对象（id 格式 目录/名）是否命中白名单。
-// 白名单条目支持限定形式 "库.目录/名"（仅对应库生效）与裸形式 "目录/名"（匹配任意库，便于 CLI 手输）
+// objectWhitelistID 由对象枚举名构造白名单匹配 id：
+// PG 限定名 "schema.对象名" → "schema.目录/对象名"（匹配 "库.schema.目录/对象名" 三级白名单）；
+// 裸名 → "目录/对象名"（匹配 "库.目录/对象名" 旧格式与 CLI 裸条目）
+func objectWhitelistID(dirName, name string) string {
+	if schema, bare, ok := strings.Cut(name, "."); ok && schema != "" && bare != "" {
+		return schema + "." + dirName + "/" + bare
+	}
+	return dirName + "/" + name
+}
+
+// objectInWhitelist 判断对象（id 格式 目录/名 或 schema.目录/名）是否命中白名单。
+// 白名单条目支持限定形式 "库.schema.目录/名"（PG 分层）/ "库.目录/名" 与裸形式 "目录/名"（匹配任意库，便于 CLI 手输）
 func objectInWhitelist(allowed map[string]bool, db, id string) bool {
 	return allowed[id] || allowed[db+"."+id]
 }
@@ -47,10 +57,25 @@ func objectInWhitelist(allowed map[string]bool, db, id string) bool {
 // dbObjects 一个库内的各类对象清单
 type dbObjects map[objectKind][]string
 
-// listDBObjects 枚举库内的视图/函数/存储过程（触发器随建表语句由底层库一并导出，不单独枚举）。
-// 对象列表查询复用底层库 GetObjects 方言能力；单类失败仅跳过，不阻断表数据导出
-func listDBObjects(cli *cydb.DBCli, db, schema string) dbObjects {
+// listDBObjectsInSchema 枚举单个 schema 内的对象清单（裸名），复用底层库 GetObjects 方言能力；
+// PG 系走 listSchemaObjects 一次往返拿全（避免与表枚举重复查视图）
+func listDBObjectsInSchema(cli *cydb.DBCli, db, schema string) dbObjects {
 	objs := dbObjects{}
+	if strings.EqualFold(cli.DBType(), "postgresql") {
+		_, views, funcs, procs, err := listSchemaObjects(cli, db, schema)
+		if err == nil {
+			if len(views) > 0 {
+				objs[objectView] = views
+			}
+			if len(funcs) > 0 {
+				objs[objectFunction] = funcs
+			}
+			if len(procs) > 0 {
+				objs[objectProcedure] = procs
+			}
+			return objs
+		}
+	}
 	var schemaPtr *string
 	if schema != "" {
 		schemaPtr = &schema
@@ -63,6 +88,35 @@ func listDBObjects(cli *cydb.DBCli, db, schema string) dbObjects {
 		names, err := cli.GetObjects(db, schemaPtr, kindObjectType[kind])
 		if err == nil {
 			objs[kind] = names
+		}
+	}
+	return objs
+}
+
+// listDBObjects 枚举库内的视图/函数/存储过程（触发器随建表语句由底层库一并导出，不单独枚举）。
+// PG 系按 schema 分层（schema 为空时遍历全部用户 schema），返回限定名 "schema.对象名"；
+// MySQL/Oracle 返回裸名（schema 透传方言）。单类失败仅跳过，不阻断主流程
+func listDBObjects(cli *cydb.DBCli, db, schema string) dbObjects {
+	objs := dbObjects{}
+	if !strings.EqualFold(cli.DBType(), "postgresql") {
+		return listDBObjectsInSchema(cli, db, schema)
+	}
+	schemas := make([]string, 0, 1)
+	if schema != "" {
+		schemas = append(schemas, schema)
+	} else {
+		names, err := cli.GetSchemas(db)
+		if err != nil {
+			return objs
+		}
+		schemas = append(schemas, names...)
+	}
+	for _, sch := range schemas {
+		sub := listDBObjectsInSchema(cli, db, sch)
+		for _, kind := range objectExportOrder {
+			for _, n := range sub[kind] {
+				objs[kind] = append(objs[kind], sch+"."+n)
+			}
 		}
 	}
 	return objs

@@ -4,37 +4,149 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/fj1981/infrakit/pkg/cydb"
 )
+
+// DBSchema 一个库内的 schema（PG 系）及其表与对象清单
+// （PG 系对象树按 库 → schema → 分组 → 对象 分层；MySQL/Oracle 不使用）
+type DBSchema struct {
+	Name    string              `json:"name"`
+	Tables  []string            `json:"tables"`
+	Objects map[string][]string `json:"objects,omitempty"`
+}
 
 // DBTables 一个数据库（Oracle 为 schema）及其表与对象清单
 type DBTables struct {
 	Name   string   `json:"name"`
 	Tables []string `json:"tables"`
+	// Schemas 库内 schema 清单（PG 系按 schema 分层时填充；MySQL/Oracle 为空）
+	Schemas []DBSchema `json:"schemas,omitempty"`
 	// Objects 库内对象：_views/_functions/_procedures → 对象名（枚举失败的类型不返回）
 	Objects map[string][]string `json:"objects,omitempty"`
 }
 
-// MySQL 系统库（遍历时排除）
-var mysqlSystemDBs = map[string]bool{
-	"information_schema": true,
-	"mysql":              true,
-	"performance_schema": true,
-	"sys":                true,
+// listDatabases 连接默认库并枚举全部库名（MySQL/Oracle 通用；错误包装用指定文案）
+func listDatabases(conn DBConnInfo, errMsg string) ([]string, error) {
+	cli, err := ConnectPooled(conn, conn.DBName)
+	if err != nil {
+		return nil, err
+	}
+	dbs, err := cli.GetDatabases()
+	if err != nil {
+		return nil, NewMsgErrf(errMsg, err)
+	}
+	return dbs, nil
 }
 
-// Oracle 系统用户（遍历时排除）
-var oracleSystemUsers = map[string]bool{
-	"SYS": true, "SYSTEM": true, "OUTLN": true, "DIP": true, "DBSNMP": true,
-	"APPQOSYS": true, "WMSYS": true, "EXFSYS": true, "XDB": true, "CTXSYS": true,
-	"MDSYS": true, "OLAPSYS": true, "ORDDATA": true, "ORDSYS": true, "AUDSYS": true,
-	"DBSFWUSER": true, "GGSYS": true, "GSMADMIN_INTERNAL": true, "SYSBACKUP": true,
-	"SYSDG": true, "SYSKM": true, "SYSRAC": true, "SYS$UMF": true, "OJVMSYS": true,
-	"LBACSYS": true, "SI_INFORMTN_SCHEMA": true, "XS$NULL": true, "DVF": true,
-	"DVSYS": true, "MDDATA": true, "ANONYMOUS": true, "APEX_PUBLIC_USER": true,
-	"REMOTE_SCHEDULER_AGENT": true, "FLOWS_FILES": true, "SPATIAL_WFS_ADMIN_USR": true,
-	"SPATIAL_CSW_ADMIN_USR": true,
+// GetDatabaseList 仅返回库（Oracle 为 schema）名列表，不做对象枚举（对象树分级加载第一层）。
+// 连接配置指定库时只返回该库（名称已知无需连接）；未指定时枚举全部，
+// 系统库/用户过滤与库枚举 SQL 由方言 GetDatabases 承担（与 GetTableTree 口径一致）。
+func GetDatabaseList(conn DBConnInfo) ([]string, error) {
+	switch strings.ToLower(conn.Type) {
+	case "postgresql":
+		// PG 枚举 pg_database 需锚点库连接（库名未知时 postgres→template1 回退）
+		if conn.DBName != "" {
+			return []string{conn.DBName}, nil
+		}
+		cli, err := connectPostgresAnchor(conn)
+		if err != nil {
+			return nil, err
+		}
+		dbs, err := cli.GetDatabases()
+		if err != nil {
+			return nil, NewMsgErrf(errMetaListDBs, err)
+		}
+		return dbs, nil
+	case "oracle":
+		// Oracle 以 schema(user) 为树节点：连接配置指定 schema/库时只返回该 schema
+		schema := conn.Schema
+		if schema == "" {
+			schema = conn.DBName
+		}
+		if schema != "" {
+			return []string{strings.ToUpper(schema)}, nil
+		}
+		return listDatabases(conn, errMetaSchemaList)
+	case "mysql":
+		if conn.DBName != "" {
+			return []string{conn.DBName}, nil
+		}
+		return listDatabases(conn, errMetaListDBs)
+	default:
+		return nil, NewMsgErr(errMetaType, conn.Type)
+	}
+}
+
+// SchemaSummary 库内 schema 概要（对象树分级第二层，PG 系）
+type SchemaSummary struct {
+	Name       string `json:"name"`
+	TableCount int    `json:"tableCount"` // 表数量（视图/函数等不计入，展开后见明细）
+}
+
+// GetDbSchemas 返回库的 schema 列表（含表计数，PG 系，一次往返）；
+// 非 PG 系返回空列表（前端走 GetDbObjects 加载库对象）。
+// 实现下沉方言层 GetSchemaSummaries，系统 schema 黑名单由方言一处维护。
+func GetDbSchemas(conn DBConnInfo, db string) ([]SchemaSummary, error) {
+	cli, err := ConnectPooled(conn, db)
+	if err != nil {
+		return nil, err
+	}
+	sums, err := cli.GetSchemaSummaries(db)
+	if err != nil {
+		return nil, NewMsgErrf(errMetaSchemaList, err)
+	}
+	out := make([]SchemaSummary, 0, len(sums))
+	for _, s := range sums {
+		out = append(out, SchemaSummary{Name: s.Name, TableCount: s.TableCount})
+	}
+	return out, nil
+}
+
+// GetSchemaObjects 返回单 schema 的对象清单（对象树分级第三层，PG 系，一次往返）
+func GetSchemaObjects(conn DBConnInfo, db, schema string) (*DBSchema, error) {
+	cli, err := ConnectPooled(conn, db)
+	if err != nil {
+		return nil, err
+	}
+	tables, views, funcs, procs, err := listSchemaObjects(cli, db, schema)
+	if err != nil {
+		// 回退：单查表清单（兼容库元数据视图异常时至少能显示表）
+		tables, err = cli.GetTables(db, &schema, nil)
+		if err != nil {
+			return nil, NewMsgErrf(errMetaListTables, err, db)
+		}
+	}
+	sc := &DBSchema{Name: schema, Tables: tables}
+	if len(views) > 0 || len(funcs) > 0 || len(procs) > 0 {
+		m := make(map[string][]string, 3)
+		if len(views) > 0 {
+			m[objectKindDirs[objectView]] = views
+		}
+		if len(funcs) > 0 {
+			m[objectKindDirs[objectFunction]] = funcs
+		}
+		if len(procs) > 0 {
+			m[objectKindDirs[objectProcedure]] = procs
+		}
+		sc.Objects = m
+	}
+	return sc, nil
+}
+
+// GetDbObjects 返回单库对象清单（对象树分级第二层，MySQL/Oracle 无 schema 层）：
+// 复用 GetTableTree 单库逻辑（指定库名后返回首元素）
+func GetDbObjects(conn DBConnInfo, db string) (*DBTables, error) {
+	conn.DBName = db
+	tree, err := GetTableTree(conn)
+	if err != nil {
+		return nil, err
+	}
+	if len(tree) == 0 {
+		return nil, NewMsgErrf(errMetaListTables, fmt.Errorf("empty result"), db)
+	}
+	return &tree[0], nil
 }
 
 // GetTableTree 获取 "库 → 表" 树形结构。
@@ -69,16 +181,13 @@ func mysqlTableTree(conn DBConnInfo) ([]DBTables, error) {
 		return []DBTables{d}, nil
 	}
 
-	rows, err := cli.DirectQuery("SHOW DATABASES")
+	// 库清单走方言 GetDatabases（含系统库过滤）
+	dbs, err := cli.GetDatabases()
 	if err != nil {
 		return nil, NewMsgErrf(errMetaListDBs, err)
 	}
-	tree := make([]DBTables, 0, len(rows))
-	for _, r := range rows {
-		db := firstString(r)
-		if db == "" || mysqlSystemDBs[db] {
-			continue
-		}
+	tree := make([]DBTables, 0, len(dbs))
+	for _, db := range dbs {
 		tables, err := cli.GetTables(db, nil, nil)
 		if err != nil {
 			// 单个库无权限/查询失败不应中断整棵树加载（与 PostgreSQL 行为一致）
@@ -94,47 +203,161 @@ func mysqlTableTree(conn DBConnInfo) ([]DBTables, error) {
 // postgresTableTree PostgreSQL：pg_database 枚举后逐库连接查表（复用池化连接）
 func postgresTableTree(conn DBConnInfo) ([]DBTables, error) {
 	base := conn
-	if base.DBName == "" {
-		base.DBName = "postgres" // 枚举需要一个可连接的库
+	if base.DBName != "" {
+		cli, err := ConnectPooled(conn, base.DBName)
+		if err != nil {
+			return nil, err
+		}
+		d, err := postgresDbNode(cli, conn, base.DBName)
+		if err != nil {
+			return nil, err
+		}
+		return []DBTables{*d}, nil
 	}
-	cli, err := ConnectPooled(conn, base.DBName)
+
+	// 枚举需要一个可连接的锚点库：标准 PostgreSQL 必有 postgres；
+	// Kingbase/GaussDB 等兼容库默认库名不同（如 TEST/security），回退尝试 PG 系通用模板库 template1
+	cli, err := connectPostgresAnchor(conn)
 	if err != nil {
 		return nil, err
 	}
 
-	if conn.DBName != "" {
-		tables, err := cli.GetTables(conn.DBName, nil, nil)
-		if err != nil {
-			return nil, NewMsgErrf(errMetaListTables, err, conn.DBName)
-		}
-		d := DBTables{Name: conn.DBName, Tables: excludeViews(cli, conn.DBName, conn.Schema, tables)}
-		attachObjects(cli, conn.DBName, conn.Schema, &d)
-		return []DBTables{d}, nil
-	}
-
-	rows, err := cli.DirectQuery("SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname")
+	// 库清单走方言 GetDatabases（含 datistemplate 过滤）
+	dbs, err := cli.GetDatabases()
 	if err != nil {
 		return nil, NewMsgErrf(errMetaListDBs, err)
 	}
-	tree := make([]DBTables, 0, len(rows))
-	for _, r := range rows {
-		db := firstString(r)
-		if db == "" {
-			continue
-		}
-		dbCli, err := ConnectPooled(conn, db)
-		if err != nil {
-			continue // 无权限连接的库跳过
-		}
-		tables, err := dbCli.GetTables(db, nil, nil)
-		if err != nil {
-			continue
-		}
-		d := DBTables{Name: db, Tables: excludeViews(dbCli, db, conn.Schema, tables)}
-		attachObjects(dbCli, db, conn.Schema, &d)
-		tree = append(tree, d)
+	// 多库并发枚举（信号量限流；单库失败跳过，与串行口径一致），收集后按库名排序
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	tree := make([]*DBTables, 0, len(dbs))
+	for _, db := range dbs {
+		wg.Add(1)
+		go func(dbName string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			dbCli, err := ConnectPooled(conn, dbName)
+			if err != nil {
+				return // 无权限连接的库跳过
+			}
+			d, err := postgresDbNode(dbCli, conn, dbName)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			tree = append(tree, d)
+			mu.Unlock()
+		}(db)
 	}
-	return tree, nil
+	wg.Wait()
+	sort.Slice(tree, func(i, j int) bool { return tree[i].Name < tree[j].Name })
+	out := make([]DBTables, 0, len(tree))
+	for _, d := range tree {
+		out = append(out, *d)
+	}
+	return out, nil
+}
+
+// postgresDbNode 构建单个 PG 库的树节点：
+// 连接配置指定 schema 时只枚举该 schema；否则枚举全部用户 schema 并按 schema 分层。
+// Tables 为各 schema 表合并（裸名去重，兼容 TablePicker/导出白名单的 "库.表" 口径）。
+// schema 枚举并发执行（每 schema 一次往返，信号量限流防连接池排队）。
+func postgresDbNode(cli *cydb.DBCli, conn DBConnInfo, db string) (*DBTables, error) {
+	d := &DBTables{Name: db}
+	schemas := []string{conn.Schema}
+	if conn.Schema == "" {
+		names, err := cli.GetSchemas(db)
+		if err != nil {
+			return nil, NewMsgErrf(errMetaSchemaList, err)
+		}
+		schemas = names
+	}
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	results := make([]*DBSchema, 0, len(schemas))
+	for _, s := range schemas {
+		if s == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(sch string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			sc := attachSchema(cli, db, sch)
+			if sc != nil {
+				mu.Lock()
+				results = append(results, sc)
+				mu.Unlock()
+			}
+		}(s)
+	}
+	wg.Wait()
+	sort.Slice(results, func(i, j int) bool { return results[i].Name < results[j].Name })
+	d.Schemas = make([]DBSchema, 0, len(results))
+	for _, sc := range results {
+		d.Schemas = append(d.Schemas, *sc)
+	}
+	seen := make(map[string]bool)
+	for _, sc := range results {
+		for _, t := range sc.Tables {
+			if !seen[t] {
+				seen[t] = true
+				d.Tables = append(d.Tables, t)
+			}
+		}
+	}
+	return d, nil
+}
+
+// attachSchema 枚举单个 schema 的表与对象并构建 schema 节点（PG 系专用）：
+// 一次往返拿全表/视图/函数/过程（视图从表清单剔除，避免重复枚举）；
+// 空 schema 返回 nil 不挂载。
+func attachSchema(cli *cydb.DBCli, db, schema string) *DBSchema {
+	tables, views, funcs, procs, err := listSchemaObjects(cli, db, schema)
+	if err != nil {
+		// 回退：单查表清单（兼容库元数据视图异常时树至少能显示表）
+		tables, err = cli.GetTables(db, &schema, nil)
+		if err != nil {
+			return nil
+		}
+	}
+	if len(tables) == 0 {
+		return nil
+	}
+	sc := DBSchema{Name: schema, Tables: tables}
+	if len(views) > 0 || len(funcs) > 0 || len(procs) > 0 {
+		m := make(map[string][]string, 3)
+		if len(views) > 0 {
+			m[objectKindDirs[objectView]] = views
+		}
+		if len(funcs) > 0 {
+			m[objectKindDirs[objectFunction]] = funcs
+		}
+		if len(procs) > 0 {
+			m[objectKindDirs[objectProcedure]] = procs
+		}
+		sc.Objects = m
+	}
+	return &sc
+}
+
+// connectPostgresAnchor 获取 pg_database 枚举的锚点连接：
+// 依次尝试候选库名，返回首个可连上的（失败连接不会进池，GetOrCreateCli 仅成功才缓存）；
+// 全部失败时返回带操作提示的错误，引导用户为连接填写实例上实际存在的库名
+func connectPostgresAnchor(conn DBConnInfo) (*cydb.DBCli, error) {
+	var lastErr error
+	for _, anchor := range pgAnchorCandidates {
+		cli, err := ConnectPooled(conn, anchor)
+		if err == nil {
+			return cli, nil
+		}
+		lastErr = err
+	}
+	return nil, NewMsgErrf(errMetaAnchorDB, lastErr, conn.Un, conn.Host, conn.Port)
 }
 
 // oracleTableTree Oracle：以 schema(user) 为树节点（复用池化连接）
@@ -159,16 +382,13 @@ func oracleTableTree(conn DBConnInfo) ([]DBTables, error) {
 		return []DBTables{d}, nil
 	}
 
-	rows, err := cli.DirectQuery("SELECT username FROM all_users ORDER BY username")
+	// 用户清单走方言 GetDatabases（含系统用户过滤）
+	users, err := cli.GetDatabases()
 	if err != nil {
 		return nil, NewMsgErrf(errMetaSchemaList, err)
 	}
-	tree := make([]DBTables, 0, len(rows))
-	for _, r := range rows {
-		user := firstString(r)
-		if user == "" || oracleSystemUsers[user] || strings.HasPrefix(user, "APEX_") {
-			continue
-		}
+	tree := make([]DBTables, 0, len(users))
+	for _, user := range users {
 		tables, err := cli.GetTables("", &user, nil)
 		if err != nil || len(tables) == 0 {
 			continue

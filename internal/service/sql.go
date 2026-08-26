@@ -355,12 +355,14 @@ func (s *Service) newInsertAuditEntry(connID, dbName string, p engine.InsertRowP
 }
 
 // PingConnection 检测连接可用性（SELECT 1），返回耗时（毫秒）。
+// 库名为空的 PG 系连接依次尝试锚点候选库（postgres → template1），与对象树枚举逻辑一致，
+// 避免 Kingbase/GaussDB 等兼容库因无 postgres 库误报连接失败。
 func (s *Service) PingConnection(ctx context.Context, connKey string) (int64, error) {
 	conn, err := s.resolveConn(connKey, nil)
 	if err != nil {
 		return 0, err
 	}
-	cli, err := engine.Connect(*conn)
+	cli, err := engine.ConnectPGWithAnchor(*conn)
 	if err != nil {
 		return 0, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}

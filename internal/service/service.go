@@ -16,6 +16,8 @@ import (
 
 	"github.com/rs/xid"
 
+	"github.com/fj1981/infrakit/pkg/cydb"
+	"github.com/fj1981/infrakit/pkg/cydist"
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cylog"
 )
@@ -29,6 +31,78 @@ type Service struct {
 	dataDirFlag string // --data-dir 启动参数（用于 ResolveDirs 覆盖）
 	ai          *aiMgr // AI 会话管理（懒加载，见 ai.go）
 }
+
+// ---- 元数据分级接口缓存 ----
+// 对象树/选表器分级接口（库列表/schema 列表/对象清单）走 cydist 缓存加速，
+// 避免每次展开节点都请求数据库；force=true（界面刷新）时绕过缓存直接查库并覆盖回写。
+// 连接配置增删改时全量失效，避免旧连接信息残留。
+const metaCacheTTL = 10 * time.Minute
+
+var metaCache = cydist.NewCacheWrapper(
+	cydist.WithTTL(metaCacheTTL),
+	cydist.WithKeyPrefix("dqex:meta"),
+)
+
+// invalidateMetaCache 连接配置变更（保存/删除）时全量失效元数据缓存
+func invalidateMetaCache(ctx context.Context) {
+	for _, base := range []string{"dbs", "schemas", "objects", "dbobjs"} {
+		_ = metaCache.ResetCacheByBaseKey(ctx, base)
+	}
+}
+
+// metaConnKey 连接在缓存 key 中的标识（类型|主机|端口|用户；SQLite 用文件路径）：
+// 同一连接配置共享缓存条目，force 刷新与连接变更失效按此粒度定位。
+func metaConnKey(conn *engine.DBConnInfo) string {
+	if conn.Path != "" {
+		return "sqlite|" + conn.Path
+	}
+	return strings.ToLower(conn.Type) + "|" + conn.Host + "|" + fmt.Sprint(conn.Port) + "|" + conn.Un
+}
+
+// 分级接口缓存包装：key 由 KeyGenerator 动态生成（连接标识 + 参数），
+// WithKey 仅提供 baseKey 层级结构，供 invalidateMetaCache 全量失效。
+// force 时调用方先 ResetCacheByKey 删除对应条目，包装函数 miss 后直查并回写。
+var (
+	metaCachedDatabases = cydist.CacheWrap1(metaCache,
+		func(ctx context.Context, conn *engine.DBConnInfo) ([]string, error) {
+			return engine.GetDatabaseList(*conn)
+		},
+		cydist.WithKey("dbs:id"),
+		cydist.WithKeyGenerator(func(ctx context.Context, args ...interface{}) string {
+			return "dbs:" + metaConnKey(args[0].(*engine.DBConnInfo))
+		}),
+	)
+
+	metaCachedSchemas = cydist.CacheWrap2(metaCache,
+		func(ctx context.Context, conn *engine.DBConnInfo, db string) ([]engine.SchemaSummary, error) {
+			return engine.GetDbSchemas(*conn, db)
+		},
+		cydist.WithKey("schemas:id:db"),
+		cydist.WithKeyGenerator(func(ctx context.Context, args ...interface{}) string {
+			return "schemas:" + metaConnKey(args[0].(*engine.DBConnInfo)) + ":" + args[1].(string)
+		}),
+	)
+
+	metaCachedObjects = cydist.CacheWrap3(metaCache,
+		func(ctx context.Context, conn *engine.DBConnInfo, db, schema string) (*engine.DBSchema, error) {
+			return engine.GetSchemaObjects(*conn, db, schema)
+		},
+		cydist.WithKey("objects:id:db:schema"),
+		cydist.WithKeyGenerator(func(ctx context.Context, args ...interface{}) string {
+			return "objects:" + metaConnKey(args[0].(*engine.DBConnInfo)) + ":" + args[1].(string) + ":" + args[2].(string)
+		}),
+	)
+
+	metaCachedDbObjects = cydist.CacheWrap2(metaCache,
+		func(ctx context.Context, conn *engine.DBConnInfo, db string) (*engine.DBTables, error) {
+			return engine.GetDbObjects(*conn, db)
+		},
+		cydist.WithKey("dbobjs:id:db"),
+		cydist.WithKeyGenerator(func(ctx context.Context, args ...interface{}) string {
+			return "dbobjs:" + metaConnKey(args[0].(*engine.DBConnInfo)) + ":" + args[1].(string)
+		}),
+	)
+)
 
 // NewService 创建业务服务（自动发现全局配置 config.yaml）
 func NewService(dataDirFlag string) (*Service, error) {
@@ -134,6 +208,8 @@ func (s *Service) AddConnection(ctx context.Context, rec ConnRecord) (ConnRecord
 	if err != nil {
 		return rec, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
 	}
+	// 连接配置变更：元数据缓存全量失效，避免旧连接信息残留
+	invalidateMetaCache(ctx)
 	return saved, nil
 }
 
@@ -161,12 +237,23 @@ func (s *Service) DeleteConnection(key string) error {
 	// 级联清理该连接的 AI 会话与工作区（连接删除后其对话/布局一并失效）
 	_ = s.persist.DeleteAISessionsByConn(connID)
 	_ = s.persist.DeleteWorkspace(connID)
+	// 连接删除：元数据缓存全量失效，避免旧连接信息残留
+	invalidateMetaCache(context.Background())
 	return nil
 }
 
 // TestConnection 测试连接可用性
 func (s *Service) TestConnection(ctx context.Context, conn DBConnInfo) error {
-	cli, err := engine.Connect(conn)
+	var cli *cydb.DBCli
+	var err error
+	// PG 系（Kingbase/GaussDB 等兼容库）未指定库名时依次尝试锚点候选库（postgres → template1），
+	// 与 PingConnection/对象树枚举口径一致，避免因实例无 postgres 库误报连接失败；
+	// 指定了库名则直接连接（验证目标库本身可达）。
+	if conn.DBName == "" && strings.EqualFold(conn.Type, "postgresql") {
+		cli, err = engine.ConnectPGWithAnchor(conn)
+	} else {
+		cli, err = engine.Connect(conn)
+	}
 	if err != nil {
 		return cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
@@ -189,6 +276,83 @@ func (s *Service) GetTableTree(ctx context.Context, connKey, dbName string) ([]e
 		return nil, cygin.NewError(ErrExecFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
 	return tree, nil
+}
+
+// GetDatabaseList 获取指定连接的库名列表（分级加载第一层，不枚举对象）；
+// force=true 绕过缓存直查并覆盖回写（界面刷新），平时命中 10 分钟缓存加速展开。
+func (s *Service) GetDatabaseList(ctx context.Context, connKey string, force bool) ([]string, error) {
+	conn, err := s.resolveConn(connKey, nil)
+	if err != nil {
+		return nil, err
+	}
+	if force {
+		_ = metaCache.ResetCacheByKey(ctx, "dbs:"+metaConnKey(conn))
+	}
+	names, err := metaCachedDatabases(ctx, conn)
+	if err != nil {
+		return nil, cygin.NewError(ErrExecFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
+	}
+	return names, nil
+}
+
+// GetDbSchemas 获取指定库的 schema 列表（分级加载第二层，PG 系；非 PG 返回空）；
+// force=true 绕过缓存直查并覆盖回写（界面刷新），平时命中 10 分钟缓存加速展开。
+func (s *Service) GetDbSchemas(ctx context.Context, connKey, dbName string, force bool) ([]engine.SchemaSummary, error) {
+	conn, err := s.resolveConn(connKey, nil)
+	if err != nil {
+		return nil, err
+	}
+	if dbName != "" {
+		conn.DBName = dbName
+	}
+	if force {
+		_ = metaCache.ResetCacheByKey(ctx, "schemas:"+metaConnKey(conn)+":"+dbName)
+	}
+	schemas, err := metaCachedSchemas(ctx, conn, dbName)
+	if err != nil {
+		return nil, cygin.NewError(ErrExecFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
+	}
+	return schemas, nil
+}
+
+// GetSchemaObjects 获取指定库/schema 的对象清单（分级加载第三层，PG 系）；
+// force=true 绕过缓存直查并覆盖回写（界面刷新），平时命中 10 分钟缓存加速展开。
+func (s *Service) GetSchemaObjects(ctx context.Context, connKey, dbName, schema string, force bool) (*engine.DBSchema, error) {
+	conn, err := s.resolveConn(connKey, nil)
+	if err != nil {
+		return nil, err
+	}
+	if dbName != "" {
+		conn.DBName = dbName
+	}
+	if force {
+		_ = metaCache.ResetCacheByKey(ctx, "objects:"+metaConnKey(conn)+":"+dbName+":"+schema)
+	}
+	sc, err := metaCachedObjects(ctx, conn, dbName, schema)
+	if err != nil {
+		return nil, cygin.NewError(ErrExecFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
+	}
+	return sc, nil
+}
+
+// GetDbObjects 获取指定库的对象清单（分级加载第二层，MySQL/Oracle 无 schema 层）；
+// force=true 绕过缓存直查并覆盖回写（界面刷新），平时命中 10 分钟缓存加速展开。
+func (s *Service) GetDbObjects(ctx context.Context, connKey, dbName string, force bool) (*engine.DBTables, error) {
+	conn, err := s.resolveConn(connKey, nil)
+	if err != nil {
+		return nil, err
+	}
+	if dbName != "" {
+		conn.DBName = dbName
+	}
+	if force {
+		_ = metaCache.ResetCacheByKey(ctx, "dbobjs:"+metaConnKey(conn)+":"+dbName)
+	}
+	d, err := metaCachedDbObjects(ctx, conn, dbName)
+	if err != nil {
+		return nil, cygin.NewError(ErrExecFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
+	}
+	return d, nil
 }
 
 // GetTableColumns 获取指定连接/库下某表的列信息（名称/类型/可空/主键/默认值）

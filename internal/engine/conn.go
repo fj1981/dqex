@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/fj1981/infrakit/pkg/cydb"
@@ -32,6 +33,28 @@ func Connect(info DBConnInfo) (*cydb.DBCli, error) {
 		return nil, NewMsgErrf(errConnFail, err, conn.Un, conn.Host, conn.Port)
 	}
 	return cli, nil
+}
+
+// pgAnchorCandidates PG 系枚举/健康检测的可连接锚点库候选：
+// 标准 PostgreSQL 必有 postgres；Kingbase/GaussDB 等兼容库默认库名不同（如 TEST/security），
+// template1 为 PG 系实例必有的模板库，可作通用兜底
+var pgAnchorCandidates = []string{"postgres", "template1"}
+
+// ConnectPGWithAnchor 连接 PG 系实例：连接未指定库名时依次尝试候选锚点库，返回首个可连上的连接。
+// 每次新建（调用方需 Close），适合健康检测等短生命周期场景；指定了库名则直接连接。
+func ConnectPGWithAnchor(info DBConnInfo) (*cydb.DBCli, error) {
+	if info.DBName != "" || !strings.EqualFold(info.Type, "postgresql") {
+		return Connect(info)
+	}
+	var lastErr error
+	for _, anchor := range pgAnchorCandidates {
+		cli, err := ConnectDB(info, anchor)
+		if err == nil {
+			return cli, nil
+		}
+		lastErr = err
+	}
+	return nil, NewMsgErrf(errMetaAnchorDB, lastErr, info.Un, info.Host, info.Port)
 }
 
 // ConnectDB 建立到指定库的连接（覆盖连接信息中的库名，每次新建，调用方需 Close）
@@ -87,20 +110,107 @@ func EscapeColumn(dbType, subType, columnName string) string {
 	return "`" + columnName + "`"
 }
 
-// findCondition 查找指定表的过滤条件。
-// TableName 支持限定形式 "库.表"（仅匹配对应库）与裸表名（匹配任意库，便于 CLI 手输），限定形式优先
-func findCondition(conditions []TableCondition, db, tableName string) *TableCondition {
-	var bare *TableCondition
-	for i := range conditions {
-		name := conditions[i].TableName
-		if d, t, ok := splitQualifiedName(name); ok {
-			if strings.EqualFold(d, db) && t == tableName {
-				return &conditions[i]
-			}
+// splitTableBare 拆分当前表名为 schema + 裸名（首个 . 分隔，无点时 schema 为空）
+func splitTableBare(tableName string) (schema, bare string) {
+	if i := strings.Index(tableName, "."); i > 0 {
+		return tableName[:i], tableName[i+1:]
+	}
+	return "", tableName
+}
+
+// schemaPtrValue 解引用 schema 指针（nil 返回空串）
+func schemaPtrValue(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+// listSchemaObjects 枚举 schema 内全部对象（PG 系专用）：
+// 实现下沉方言层 GetSchemaObjects（一次往返，pg_tables + information_schema 的 views/routines UNION ALL），
+// 返回按类型分组的裸名清单（函数/过程重载名不去重，与方言 GetObjects 口径一致）。
+// 非 PG 系不适用（返回 err，调用方应回退方言逐类枚举）。
+func listSchemaObjects(cli *cydb.DBCli, db, schema string) (tables, views, funcs, procs []string, err error) {
+	if !strings.EqualFold(cli.DBType(), "postgresql") {
+		return nil, nil, nil, nil, fmt.Errorf("listSchemaObjects: only for postgresql dialect")
+	}
+	objs, err := cli.GetSchemaObjects(db, schema)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return objs.Tables, objs.Views, objs.Functions, objs.Procedures, nil
+}
+
+// firstStringOf 取查询结果行中指定列（小写列名）的字符串值
+func firstStringOf(r map[string]any, key string) string {
+	if v, ok := r[key]; ok && v != nil {
+		return fmt.Sprint(v)
+	}
+	return ""
+}
+
+// listSchemaTables 枚举库内表清单并剔除视图，返回可执行表名：
+// PG 系按 schema 分层（连接指定 schema 时仅枚举该 schema；否则枚举全部用户 schema），
+// 返回限定名 "schema.table"（方言层 DDL/元数据/构建器均支持限定名）；
+// MySQL/Oracle 返回裸名（schemaPtr 透传方言）。
+func listSchemaTables(cli *cydb.DBCli, db string, schemaPtr *string) ([]string, error) {
+	if !strings.EqualFold(cli.DBType(), "postgresql") {
+		all, err := cli.GetTables(db, schemaPtr, nil)
+		if err != nil {
+			return nil, err
+		}
+		return excludeViews(cli, db, schemaPtrValue(schemaPtr), all), nil
+	}
+	schemas := make([]string, 0, 1)
+	if schemaPtr != nil && *schemaPtr != "" {
+		schemas = append(schemas, *schemaPtr)
+	} else {
+		names, err := cli.GetSchemas(db)
+		if err != nil {
+			return nil, err
+		}
+		schemas = append(schemas, names...)
+	}
+	var out []string
+	for _, s := range schemas {
+		if s == "" {
 			continue
 		}
-		if name == tableName && bare == nil {
-			bare = &conditions[i]
+		ts, _, _, _, err := listSchemaObjects(cli, db, s)
+		if err != nil {
+			continue // 单 schema 枚举失败不阻断（与对象树枚举口径一致）
+		}
+		for _, t := range ts {
+			out = append(out, s+"."+t)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// findCondition 查找指定表的过滤条件。
+// 条件表名支持限定形式 "库.schema.表"（PG 分层）/"库.表" 与裸表名（便于 CLI 手输），
+// 限定形式优先；tableName 可能为 "schema.table"（PG 分层枚举）或裸名（MySQL/Oracle）
+func findCondition(conditions []TableCondition, db, tableName string) *TableCondition {
+	curSchema, curBare := splitTableBare(tableName)
+	var bare *TableCondition
+	for i := range conditions {
+		name := strings.TrimSpace(conditions[i].TableName)
+		parts := strings.Split(name, ".")
+		switch len(parts) {
+		case 1:
+			// 裸名：匹配任意库/schema 的同名表
+			if name != "" && strings.EqualFold(name, curBare) && bare == nil {
+				bare = &conditions[i]
+			}
+		case 2:
+			if strings.EqualFold(parts[0], db) && strings.EqualFold(parts[1], curBare) {
+				return &conditions[i]
+			}
+		case 3:
+			if strings.EqualFold(parts[0], db) && strings.EqualFold(parts[1], curSchema) && strings.EqualFold(parts[2], curBare) {
+				return &conditions[i]
+			}
 		}
 	}
 	return bare

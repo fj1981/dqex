@@ -2,6 +2,8 @@ import i18n from "@/lib/i18n"
 import { post, request } from "@/api"
 import type {
   ColumnFilter,
+  DBSchema,
+  DBTables,
   GenSQLKind,
   ObjectDDLResult,
   ObjectDDLType,
@@ -89,18 +91,70 @@ export const getObjectDDL = (connId: string, db: string, type: ObjectDDLType, na
 // ---- 数据浏览器 / 对象树（复用连接表树接口） ----
 
 // 从连接表树接口转换为对象树。
-// 后端 objects 的 key 为 _views/_functions/_procedures（带下划线前缀，见 engine/objects.go objectKindDirs）
-export const buildObjectTree = (databases: { name: string; tables: string[]; objects?: Record<string, string[]> }[]): ObjectNode[] =>
+// 后端 objects 的 key 为 _views/_functions/_procedures（带下划线前缀，见 engine/objects.go objectKindDirs）。
+// PG 系返回 schemas 分层（库 → schema → 分组 → 对象），叶子名称带 "schema." 前缀，
+// 打开对象时可直接作为限定名传给后端；MySQL/Oracle 保持 库 → 分组 → 对象 结构。
+export const buildObjectTree = (databases: { name: string; tables: string[]; objects?: Record<string, string[]>; schemas?: DBSchema[] }[]): ObjectNode[] =>
   databases.map((db) => ({
     name: db.name,
     type: "db",
-    children: [
-      ...(db.tables ?? []).map((t) => ({ name: t, type: "table" as const })),
-      ...(db.objects?.["_views"] ?? []).map((v) => ({ name: v, type: "view" as const })),
-      ...(db.objects?.["_functions"] ?? []).map((f) => ({ name: f, type: "function" as const })),
-      ...(db.objects?.["_procedures"] ?? []).map((p) => ({ name: p, type: "procedure" as const })),
-    ],
+    children: db.schemas?.length
+      ? db.schemas.map((s) => ({
+          name: s.name,
+          type: "schema" as const,
+          children: [
+            ...(s.tables ?? []).map((t) => ({ name: `${s.name}.${t}`, type: "table" as const })),
+            ...(s.objects?.["_views"] ?? []).map((v) => ({ name: `${s.name}.${v}`, type: "view" as const })),
+            ...(s.objects?.["_functions"] ?? []).map((f) => ({ name: `${s.name}.${f}`, type: "function" as const })),
+            ...(s.objects?.["_procedures"] ?? []).map((p) => ({ name: `${s.name}.${p}`, type: "procedure" as const })),
+          ],
+        }))
+      : [
+          ...(db.tables ?? []).map((t) => ({ name: t, type: "table" as const })),
+          ...(db.objects?.["_views"] ?? []).map((v) => ({ name: v, type: "view" as const })),
+          ...(db.objects?.["_functions"] ?? []).map((f) => ({ name: f, type: "function" as const })),
+          ...(db.objects?.["_procedures"] ?? []).map((p) => ({ name: p, type: "procedure" as const })),
+        ],
   }))
+
+// ---- 对象树分级加载构建辅助 ----
+
+// buildDbStub 未加载的库节点（灰显，点击加载）
+export const buildDbStub = (name: string): ObjectNode => ({ name, type: "db", loaded: false })
+
+// buildSchemaStub 未加载的 schema 节点（灰显 + 表计数，点击加载）
+export const buildSchemaStub = (name: string, tableCount: number): ObjectNode => ({
+  name,
+  type: "schema",
+  count: tableCount,
+  loaded: false,
+})
+
+// buildSchemaLeafs 已加载 schema 的叶子节点（表/视图/函数/过程，限定名）
+export const buildSchemaLeafs = (s: DBSchema): ObjectNode[] => [
+  ...(s.tables ?? []).map((t) => ({ name: `${s.name}.${t}`, type: "table" as const })),
+  ...(s.objects?.["_views"] ?? []).map((v) => ({ name: `${s.name}.${v}`, type: "view" as const })),
+  ...(s.objects?.["_functions"] ?? []).map((f) => ({ name: `${s.name}.${f}`, type: "function" as const })),
+  ...(s.objects?.["_procedures"] ?? []).map((p) => ({ name: `${s.name}.${p}`, type: "procedure" as const })),
+]
+
+// buildDbLeafs 已加载库的非 PG 叶子节点（MySQL/Oracle 无 schema 层，裸名）
+export const buildDbLeafs = (db: DBTables): ObjectNode[] => [
+  ...(db.tables ?? []).map((t) => ({ name: t, type: "table" as const })),
+  ...(db.objects?.["_views"] ?? []).map((v) => ({ name: v, type: "view" as const })),
+  ...(db.objects?.["_functions"] ?? []).map((f) => ({ name: f, type: "function" as const })),
+  ...(db.objects?.["_procedures"] ?? []).map((p) => ({ name: p, type: "procedure" as const })),
+]
+
+// buildDbNode 已加载库节点：PG 系 children 为 schema 节点；MySQL/Oracle 为分组叶子
+export const buildDbNode = (db: DBTables): ObjectNode => ({
+  name: db.name,
+  type: "db",
+  loaded: true,
+  children: db.schemas?.length
+    ? db.schemas.map((s) => ({ name: s.name, type: "schema" as const, loaded: true, children: buildSchemaLeafs(s) }))
+    : buildDbLeafs(db),
+})
 
 // 查询表数据：走专用分页接口，一次返回当前页数据与全表总行数（total）。
 // 后端内部用 cydb 的 SQLStmt.Count 计算总数，不写审计/历史，避免二次 COUNT 的审计冗余。

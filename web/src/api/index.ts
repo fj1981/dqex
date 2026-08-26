@@ -13,7 +13,9 @@ import type {
   ConfigInfo,
   ConnInfo,
   DBConn,
+  DBSchema,
   DBTables,
+  SchemaSummary,
   DirBrowseResult,
   DictionaryOptions,
   ExecutionRecord,
@@ -123,6 +125,24 @@ export const testConnection = (payload: { id?: string; conn?: DBConn }) =>
 
 export const getTableTree = (id: string, db?: string) =>
   request<{ databases: DBTables[] }>(`/api/connections/${encodeURIComponent(id)}/tables${db ? `?db=${encodeURIComponent(db)}` : ""}`)
+
+// ---- 对象树分级加载 ----
+// force=true 绕过后端缓存直查（界面刷新），平时命中缓存加速展开
+// 第一层：库名列表（轻量，不枚举对象）
+export const getDatabases = (id: string, force = false) =>
+  request<{ databases: string[] }>(`/api/connections/${encodeURIComponent(id)}/databases${force ? "?force=1" : ""}`)
+
+// 第二层（PG 系）：库的 schema 列表 + 表计数
+export const getDbSchemas = (id: string, db: string, force = false) =>
+  request<{ schemas: SchemaSummary[] }>(`/api/connections/${encodeURIComponent(id)}/db-schemas?db=${encodeURIComponent(db)}${force ? "&force=1" : ""}`)
+
+// 第三层（PG 系）：单 schema 的对象清单
+export const getSchemaObjects = (id: string, db: string, schema: string, force = false) =>
+  request<{ schema: DBSchema }>(`/api/connections/${encodeURIComponent(id)}/schema-objects?db=${encodeURIComponent(db)}&schema=${encodeURIComponent(schema)}${force ? "&force=1" : ""}`)
+
+// 第二层（MySQL/Oracle 无 schema 层）：单库对象清单
+export const getDbObjects = (id: string, db: string, force = false) =>
+  request<{ db: DBTables }>(`/api/connections/${encodeURIComponent(id)}/db-objects?db=${encodeURIComponent(db)}${force ? "&force=1" : ""}`)
 
 export const getTableColumns = (id: string, db: string, table: string) =>
   request<{ columns: TableColumn[] }>(`/api/connections/${encodeURIComponent(id)}/columns?db=${encodeURIComponent(db)}&table=${encodeURIComponent(table)}`)

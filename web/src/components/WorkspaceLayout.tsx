@@ -338,8 +338,10 @@ export default function WorkspaceLayout() {
           ? { icon: FunctionSquare, cls: "text-violet-600" }
           : { icon: Table2, cls: "text-emerald-600" }
       const Icon = meta.icon
-      // 表名拆分：头部可截断、尾部固定保留（同库时还省去 [库名]，空间更充裕）
-      const { head, tail } = splitTableName(t.name)
+      // 表名拆分：头部可截断、尾部固定保留（同库时还省去 [库名]，空间更充裕）。
+      // PG 限定名 "schema.表" 先去 schema 前缀（tab 去重/查询仍用完整限定名），与对象树叶子展示一致
+      const bare = t.name.includes(".") ? t.name.slice(t.name.indexOf(".") + 1) : t.name
+      const { head, tail } = splitTableName(bare)
       return (
         <>
           {pinIcon}

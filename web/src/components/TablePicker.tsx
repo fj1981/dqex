@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Braces, ChevronDown, ChevronRight, ChevronUp, Code2, Database, Eye, Filter, KeyRound, ListOrdered, Loader2, Plus, Settings2, ShieldCheck, Table2, Trash2, Workflow, X } from "lucide-react"
+import { Braces, ChevronDown, ChevronRight, ChevronUp, Code2, Database, Eye, Filter, KeyRound, ListOrdered, Loader2, Plus, Settings2, ShieldCheck, Table2, Trash2, Workflow, X, AlertCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -20,8 +20,9 @@ import { Label } from "@/components/ui/label"
 import TableIcon from "@/components/ui/table-icon"
 import * as api from "@/api"
 import { NO_VALUE_OPS, restoreSelectViaAst, serializeWhere, type WhereCond } from "@/lib/sqlCond"
-import type { DBTables, TableColumn, TableCondition, TableDataMode } from "@/types"
+import type { DBSchema, DBTables, TableColumn, TableCondition, TableDataMode } from "@/types"
 import { tKey } from "@/lib/i18n"
+import { cn } from "@/lib/utils"
 
 // ---- WHERE 条件可视化构建 ----
 
@@ -165,16 +166,21 @@ export default function TablePicker({
     setLoading(true)
     setError("")
     api
-      .getTableTree(connId, db)
+      .getDatabases(connId)
       .then((r) => {
-        console.log("[TablePicker] sourceTree loaded", { connId, db, dbCount: (r.databases || []).length, totalTables: (r.databases || []).reduce((n: number, d: any) => n + (d.tables?.length || 0), 0) })
-        setTree(r.databases || [])
+        const names = r.databases || []
+        // 分级第一层：仅库名（未加载态），点击库/单库模式自动加载对象
+        const stubs: DBTables[] = names.map((n) => ({ name: n, tables: [] }))
+        setTree(stubs)
+        // 单库模式（db 指定）：自动加载该库（不存在于列表也尝试，便于权限受限场景）
+        if (db) {
+          if (!names.includes(db)) stubs.push({ name: db, tables: [] })
+          void loadDb(db, "src")
+        }
         // 初始全部折叠：库节点与各分组节点
         const c: Record<string, boolean> = {}
-        ;(r.databases || []).forEach((d) => {
+        stubs.forEach((d) => {
           c[dbKey(d.name)] = true
-          c[grpKey(d.name, "tables")] = true
-          OBJECT_GROUPS.forEach((g) => { c[grpKey(d.name, g.dir)] = true })
         })
         setCollapsed(c)
       })
@@ -187,9 +193,39 @@ export default function TablePicker({
         console.log("[TablePicker] sourceTree finally, setLoading(false)", { connId, db })
         setLoading(false)
       })
-  }, [connId, db])
+  }, [connId, db]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 附加连接树加载（对比场景：目标库独有表也可勾选）
+  // 分级加载第二层：单库对象全量（getDbObjects 后端为单库枚举，MySQL/Oracle/PG 通用）
+  const [loadingDb, setLoadingDb] = useState<string | null>(null)
+  const loadDb = async (dbName: string, side: "src" | "extra") => {
+    const key = `${side}:${dbName}`
+    if (loadingDb === key) return
+    setLoadingDb(key)
+    try {
+      const { db: data } = await api.getDbObjects(side === "src" ? connId : extraConnId || "", dbName)
+      const loaded = { ...data, _loaded: true }
+      if (side === "src") {
+        setTree((prev) => prev.map((d) => (d.name === dbName ? loaded : d)))
+      } else {
+        setExtraTree((prev) => prev.map((d) => (d.name === dbName ? loaded : d)))
+      }
+      // 加载成功后自动展开该库，并初始化其分组/schema 折叠态
+      setCollapsed((c) => ({ ...c, [dbKey(dbName)]: false, [grpKey(dbName, "tables")]: true }))
+      OBJECT_GROUPS.forEach((g) => setCollapsed((c) => ({ ...c, [grpKey(dbName, g.dir)]: true })))
+      ;(data.schemas || []).forEach((s) => setCollapsed((c) => ({ ...c, [`sch:${dbName}:${s.name}`]: true })))
+    } catch (e) {
+      const msg = (e as Error).message
+      if (side === "src") {
+        setTree((prev) => prev.map((d) => (d.name === dbName ? { ...d, _error: msg } : d)))
+      } else {
+        setExtraTree((prev) => prev.map((d) => (d.name === dbName ? { ...d, _error: msg } : d)))
+      }
+    } finally {
+      setLoadingDb(null)
+    }
+  }
+
+  // 附加连接树加载（对比场景：目标库独有表也可勾选）；同样分级：仅库名 → 点击/单库自动加载
   const [extraError, setExtraError] = useState("")
   useEffect(() => {
     if (!extraConnId) {
@@ -199,32 +235,61 @@ export default function TablePicker({
     }
     setExtraError("")
     api
-      .getTableTree(extraConnId, extraDb)
+      .getDatabases(extraConnId)
       .then((r) => {
-        setExtraTree(r.databases || [])
+        const names = r.databases || []
+        const stubs: DBTables[] = names.map((n) => ({ name: n, tables: [] }))
+        setExtraTree(stubs)
+        if (extraDb) {
+          if (!names.includes(extraDb)) stubs.push({ name: extraDb, tables: [] })
+          void loadDb(extraDb, "extra")
+        }
       })
       .catch((e: Error) => {
         console.error("[TablePicker] extraTree error", { extraConnId, extraDb }, e)
         setExtraTree([])
         setExtraError(e.message || tr("tablePicker.extraLoadFailed"))
       })
-  }, [extraConnId, extraDb, tr])
+  }, [extraConnId, extraDb, tr]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const dbKey = (db: string) => `db:${db}`
   const grpKey = (db: string, dir: string) => `grp:${db}:${dir}`
 
-  // 选择项 ID 统一用限定形式 "库.表" / "库.目录/名"，避免跨库同名串选
+  // 选择项 ID 统一用限定形式 "库.表" / "库.schema.表" / "库.schema.目录/名"，避免跨库/schema 同名串选
   const qual = (dbName: string, id: string) => `${dbName}.${id}`
   // 解析 ID 的库前缀（裸 ID 返回 ""）
   const entryDB = (id: string): string => {
     const i = id.indexOf(".")
     return i > 0 ? id.slice(0, i) : ""
   }
-  // 去掉库前缀得到裸名（用于取列信息等 API）
+  // 去掉库前缀得到裸名（用于取列信息等 API，PG 下为 "schema.表" 限定名）
   const stripDB = (id: string) => {
     const i = id.indexOf(".")
     return i > 0 ? id.slice(i + 1) : id
   }
+  // 点号计数：区分裸名(0) / 库.表(1) / 库.schema.表(2)
+  const dots = (id: string) => id.split(".").length - 1
+  // 旧格式限定名（"库.表" / "库.目录/名"）：需升级为带 schema 的格式（PG 分层）
+  const isLegacyQual = (id: string) => dots(id) === 1
+  // 库是否按 schema 分层（PG 系）
+  const hasSchemas = (d: DBTables) => (d.schemas?.length ?? 0) > 0
+  // 库下表/对象的全部 ID（PG 带 "schema." 前缀）
+  const dbTableIds = (d: DBTables): string[] =>
+    hasSchemas(d)
+      ? (d.schemas || []).flatMap((s) => s.tables.map((t) => qual(d.name, `${s.name}.${t}`)))
+      : d.tables.map((t) => qual(d.name, t))
+  // 叶子显示名："库.schema.表" → "表"；"库.目录/名" → "名"（schema 归属由分组节点体现）
+  const leafName = (id: string) => {
+    const s = stripDB(id)
+    const i = s.indexOf("/")
+    return i > 0 ? s.slice(i + 1) : s.split(".").pop() || s
+  }
+
+  // 把库树展开为裸表条目（无 schema 层时 schema 为 ""），用于合并附加树时按 schema 维度去重
+  const expandTables = (d: DBTables): { schema: string; table: string }[] =>
+    hasSchemas(d)
+      ? (d.schemas || []).flatMap((s) => s.tables.map((t) => ({ schema: s.name, table: t })))
+      : d.tables.map((t) => ({ schema: "", table: t }))
 
   // 树 = 源库全部表 ∪ 映射目标库全部表，按「映射前源库名」聚合去重。
   // 规则（始终一致，不管是否配置映射）：
@@ -260,10 +325,31 @@ export default function TablePicker({
     const extraByDB = new Map<string, string[]>()
     for (const ed of extraTree) extraByDB.set(ed.name.toLowerCase(), ed.tables)
 
-    const merged: DBTables[] = tree.map((d) => ({ ...d, tables: [...d.tables] }))
+    const merged: DBTables[] = tree.map((d) => ({ ...d, tables: [...d.tables], schemas: d.schemas?.map((s) => ({ ...s, tables: [...s.tables], objects: s.objects })) }))
     const onlySet = new Set<string>()
     for (const d of merged) {
       const targets = targetDBsOf.get(d.name.toLowerCase()) || []
+      if (hasSchemas(d)) {
+        // PG：按 schema.表 维度合并目标库表（同名表在不同 schema 下可分别展示）
+        const have = new Set(expandTables(d).map((e) => `${e.schema.toLowerCase()}.${e.table.toLowerCase()}`))
+        for (const tgtDB of targets) {
+          const tgt = extraTree.find((e) => e.name.toLowerCase() === tgtDB.toLowerCase())
+          if (!tgt) continue
+          for (const s of tgt.schemas ?? []) {
+            for (const t of s.tables) {
+              if (have.has(`${s.name.toLowerCase()}.${t.toLowerCase()}`)) continue
+              const sch = d.schemas?.find((x) => x.name.toLowerCase() === s.name.toLowerCase())
+              if (sch) sch.tables.push(t)
+              else d.schemas?.push({ name: s.name, tables: [t] })
+              have.add(`${s.name.toLowerCase()}.${t.toLowerCase()}`)
+              onlySet.add(qual(d.name, `${s.name}.${t}`)) // 库名用映射前的源库名
+            }
+          }
+        }
+        // 同步裸名表集合（计数/兼容旧逻辑）
+        d.tables = Array.from(new Set((d.schemas || []).flatMap((s) => s.tables)))
+        continue
+      }
       const have = new Set(d.tables.map((t) => t.toLowerCase()))
       for (const tgtDB of targets) {
         const tgtTables = extraByDB.get(tgtDB.toLowerCase())
@@ -283,11 +369,18 @@ export default function TablePicker({
 
   const singleMode = mergedTree.length <= 1
 
-  // 某库的全部对象 ID（多库模式为限定形式 库._views/名）
-  const dbObjectIds = (d: DBTables): string[] =>
-    showObjects ? OBJECT_GROUPS.flatMap((g) => (d.objects?.[g.dir] || []).map((n) => qual(d.name, `${g.dir}/${n}`))) : []
+  // 某库的全部对象 ID（PG 为 "库.schema.目录/名"）
+  const dbObjectIds = (d: DBTables): string[] => {
+    if (!showObjects) return []
+    if (hasSchemas(d)) {
+      return (d.schemas || []).flatMap((s) =>
+        OBJECT_GROUPS.flatMap((g) => (s.objects?.[g.dir] || []).map((n) => qual(d.name, `${s.name}.${g.dir}/${n}`))),
+      )
+    }
+    return OBJECT_GROUPS.flatMap((g) => (d.objects?.[g.dir] || []).map((n) => qual(d.name, `${g.dir}/${n}`)))
+  }
 
-  // 关键字过滤：表名与对象名同时匹配，保留有命中的库与分组
+  // 关键字过滤：表名与对象名同时匹配，保留有命中的库/schema 与分组
   const filteredTree = useMemo<DBTables[]>(() => {
     if (!keyword) return mergedTree
     const kw = keyword.toLowerCase()
@@ -299,18 +392,34 @@ export default function TablePicker({
           const names = (d.objects?.[g.dir] || []).filter((n) => n.toLowerCase().includes(kw))
           if (names.length > 0) objects[g.dir] = names
         })
+        if (hasSchemas(d)) {
+          const schemas = (d.schemas || [])
+            .map((s) => {
+              const st = s.tables.filter((t) => t.toLowerCase().includes(kw))
+              const so: Record<string, string[]> = {}
+              if (showObjects) {
+                OBJECT_GROUPS.forEach((g) => {
+                  const names = (s.objects?.[g.dir] || []).filter((n) => n.toLowerCase().includes(kw))
+                  if (names.length > 0) so[g.dir] = names
+                })
+              }
+              return { ...s, tables: st, objects: Object.keys(so).length > 0 ? so : undefined }
+            })
+            .filter((s) => s.tables.length > 0 || (s.objects && Object.keys(s.objects).length > 0))
+          return { ...d, tables, objects: showObjects ? objects : undefined, schemas }
+        }
         return { ...d, tables, objects: showObjects ? objects : undefined }
       })
-      .filter((d) => d.tables.length > 0 || Object.keys(d.objects || {}).length > 0)
+      .filter((d) => d.tables.length > 0 || (d.schemas?.length ?? 0) > 0 || Object.keys(d.objects || {}).length > 0)
   }, [mergedTree, keyword, showObjects])
 
-  const totalTables = mergedTree.reduce((n, d) => n + d.tables.length, 0)
+  const totalTables = mergedTree.reduce((n, d) => n + dbTableIds(d).length, 0)
   const totalObjects = showObjects ? tree.reduce((n, d) => n + dbObjectIds(d).length, 0) : 0
 
-  // 右侧「已选内容」严格只展示用户手动勾选的表（selected 内均为 "源库.表" 限定名）。
+  // 右侧「已选内容」严格只展示用户手动勾选的表（selected 内均为 "源库.表" 或 "源库.schema.表" 限定名）。
   const effectiveSelected = useMemo<string[]>(() => selected, [selected])
 
-  const allVisibleTables = filteredTree.flatMap((d) => d.tables.map((t) => qual(d.name, t)))
+  const allVisibleTables = filteredTree.flatMap((d) => dbTableIds(d))
   const allVisibleObjects = showObjects ? filteredTree.flatMap((d) => dbObjectIds(d)) : []
   const allChecked = (allVisibleTables.length + allVisibleObjects.length) > 0 &&
     allVisibleTables.every((t) => selected.includes(t)) &&
@@ -325,22 +434,66 @@ export default function TablePicker({
     return dbName ? mergedTree.find((d) => d.name === dbName) : mergedTree.find((d) => dbObjectIds(d).includes(id))
   }
 
-  // 归一化裸名条目（旧格式选择/恢复的任务配置）：升级为限定名，树中无法解析的清除
+  // 归一化旧格式条目（裸名 / "库.表" 旧配置）：升级为当前树结构（PG 下补 schema 前缀），树中无法解析的清除
   useEffect(() => {
     if (loading || mergedTree.length === 0) return
-    if (!selected.some((t) => !entryDB(t)) && !selectedObjects.some((o) => !entryDB(o))) return
+    const legacy = (id: string) => !entryDB(id) || isLegacyQual(id)
+    if (!selected.some(legacy) && !selectedObjects.some(legacy)) return
+    const findSchemaOf = (d: DBTables, bare: string): string => {
+      if (!hasSchemas(d)) return ""
+      for (const s of d.schemas || []) {
+        if (s.tables.some((x) => x.toLowerCase() === bare.toLowerCase())) return s.name
+      }
+      return ""
+    }
     const upTable = (t: string) => {
-      const d = mergedTree.find((x) => x.tables.includes(t))
-      return d ? qual(d.name, t) : ""
+      if (isLegacyQual(t)) {
+        // "库.表"：在该库下定位同名表并补 schema 前缀（找不到则保持原样，后端仍可按裸名匹配）
+        const dbName = entryDB(t)
+        const bare = stripDB(t)
+        const d = mergedTree.find((x) => x.name === dbName)
+        const sch = d ? findSchemaOf(d, bare) : ""
+        return sch ? qual(dbName, `${sch}.${bare}`) : t
+      }
+      const d = mergedTree.find((x) => x.tables.some((tt) => tt.toLowerCase() === t.toLowerCase()))
+      if (!d) return ""
+      const sch = findSchemaOf(d, t)
+      return sch ? qual(d.name, `${sch}.${t}`) : qual(d.name, t)
     }
     const upObj = (o: string) => {
-      const d = mergedTree.find((x) => dbObjectIds(x).some((id) => stripDB(id) === o))
-      return d ? qual(d.name, o) : ""
+      if (isLegacyQual(o)) {
+        // "库.目录/名"：在该库各 schema 的对象分组中定位并补 schema 前缀
+        const dbName = entryDB(o)
+        const rest = stripDB(o)
+        const slash = rest.indexOf("/")
+        const dir = slash > 0 ? rest.slice(0, slash) : ""
+        const name = slash > 0 ? rest.slice(slash + 1) : rest
+        const d = mergedTree.find((x) => x.name === dbName)
+        if (d && hasSchemas(d)) {
+          for (const s of d.schemas || []) {
+            if (dir && (s.objects?.[dir] || []).some((x) => x.toLowerCase() === name.toLowerCase())) return qual(dbName, `${s.name}.${rest}`)
+          }
+        }
+        return o
+      }
+      const slash = o.indexOf("/")
+      const dir = slash > 0 ? o.slice(0, slash) : ""
+      const name = slash > 0 ? o.slice(slash + 1) : o
+      for (const d of mergedTree) {
+        if (hasSchemas(d)) {
+          for (const s of d.schemas || []) {
+            if (dir && (s.objects?.[dir] || []).some((x) => x.toLowerCase() === name.toLowerCase())) return qual(d.name, `${s.name}.${o}`)
+          }
+        } else if (dbObjectIds(d).some((id) => stripDB(id) === o)) {
+          return qual(d.name, o)
+        }
+      }
+      return ""
     }
-    const nextTables = Array.from(new Set(selected.map((t) => (entryDB(t) ? t : upTable(t))).filter(Boolean)))
-    const nextObjs = Array.from(new Set(selectedObjects.map((o) => (entryDB(o) ? o : upObj(o))).filter(Boolean)))
+    const nextTables = Array.from(new Set(selected.map((t) => (entryDB(t) && !isLegacyQual(t) ? t : upTable(t))).filter(Boolean)))
+    const nextObjs = Array.from(new Set(selectedObjects.map((o) => (entryDB(o) && !isLegacyQual(o) ? o : upObj(o))).filter(Boolean)))
     const nextConds = conditions
-      .map((c) => (entryDB(c.tableName) ? c : { ...c, tableName: upTable(c.tableName) }))
+      .map((c) => (entryDB(c.tableName) && !isLegacyQual(c.tableName) ? c : { ...c, tableName: upTable(c.tableName) }))
       .filter((c) => c.tableName)
     onChange(nextTables, nextObjs, nextConds)
   }, [loading, mergedTree, selected, selectedObjects, conditions, onChange])
@@ -409,7 +562,7 @@ export default function TablePicker({
     const cur = selectedDBs || []
     const d = mergedTree.find((x) => x.name === name)
     if (!d) return
-    const dbTables = d.tables.map((t) => qual(d.name, t))
+    const dbTables = dbTableIds(d)
     const dbObjs = dbObjectIds(d)
     onDBsChange?.(checked ? Array.from(new Set([...cur, name])) : cur.filter((n) => n !== name))
     if (checked) {
@@ -537,8 +690,8 @@ export default function TablePicker({
   const switchMode = async (mode: "visual" | "sql") => {
     if (mode === whereMode) return
     if (mode === "sql") {
-      // 可视化→SQL：导出列 + 可视化条件拼装为完整 SELECT
-      setEditQuery(buildSelect(editing || "", editCols, serializeWhere(visConds)))
+      // 可视化→SQL：导出列 + 可视化条件拼装为完整 SELECT（表名用去掉库前缀的可执行名）
+      setEditQuery(buildSelect(stripDB(editing || ""), editCols, serializeWhere(visConds)))
       setWhereMode(mode)
       return
     }
@@ -591,14 +744,14 @@ export default function TablePicker({
         query = editQuery.trim().replace(/;+\s*$/, "")
         if (query && !/^select\s/i.test(query)) {
           // 兼容旧版只写 WHERE 片段的写法
-          query = buildSelect(editing, [], query)
+          query = buildSelect(stripDB(editing), [], query)
         }
         // SELECT * FROM 表（未指定列也无条件）等价全量，不记录
         const sel = parseSelect(query)
         if (sel.ok && sel.cols.length === 0 && !sel.where) query = ""
       } else {
         const whereStr = serializeWhere(visConds)
-        if (whereStr || editCols.length > 0) query = buildSelect(editing, editCols, whereStr)
+        if (whereStr || editCols.length > 0) query = buildSelect(stripDB(editing), editCols, whereStr)
       }
       if (editDataMode === "condition") {
         next.push(query ? { tableName: editing, dataMode: "condition", query } : { tableName: editing, dataMode: "condition" })
@@ -624,8 +777,8 @@ export default function TablePicker({
         <label className="flex flex-1 cursor-pointer items-center gap-2 text-sm">
           <Checkbox checked={isChecked} onCheckedChange={(v) => toggleTable(t, v === true)} />
           <Table2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          {/* 树中库名已由父节点体现，仅显示裸表名；title 保留限定名便于悬停确认 */}
-          <span className="truncate" title={t}>{stripDB(t)}</span>
+          {/* 树中库名已由父节点体现，仅显示裸表名（schema 归属由 schema 节点体现）；title 保留限定名便于悬停确认 */}
+          <span className="truncate" title={t}>{leafName(t)}</span>
           {sourceOnlySet.has(t) && (
             <span className="rounded bg-amber-500/10 px-1 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">{effectiveExtraLabel}</span>
           )}
@@ -665,16 +818,17 @@ export default function TablePicker({
     )
   }
 
-  // 分组区块（表 / 视图 / 函数 / 存储过程）
+  // 分组区块（表 / 视图 / 函数 / 存储过程）；keyPrefix 用于 schema 分层时隔离各 schema 的折叠状态
   const groupSection = (
     dbName: string,
     dir: string,
     label: string,
     Icon: typeof Table2,
     ids: string[],
+    keyPrefix = "",
   ) => {
     if (ids.length === 0) return null
-    const key = grpKey(dbName, dir)
+    const key = keyPrefix ? `${keyPrefix}:${dir}` : grpKey(dbName, dir)
     const isCol = collapsed[key]
     const sel = dir === "tables" ? selected : selectedObjects
     const selCount = ids.filter((id) => sel.includes(id)).length
@@ -706,11 +860,64 @@ export default function TablePicker({
     )
   }
 
-  // 库节点（多库树形模式）
+  // schema 节点（PG 分层：库 → schema → 分组 → 项）；勾选级联该 schema 下全部表与对象
+  const schemaSection = (d: DBTables, s: DBSchema) => {
+    const sk = `sch:${d.name}:${s.name}`
+    const isCol = collapsed[sk]
+    const ids = s.tables.map((t) => qual(d.name, `${s.name}.${t}`))
+    const objIds = showObjects
+      ? OBJECT_GROUPS.flatMap((g) => (s.objects?.[g.dir] || []).map((n) => qual(d.name, `${s.name}.${g.dir}/${n}`)))
+      : []
+    const selCount = ids.filter((t) => selected.includes(t)).length + objIds.filter((o) => selectedObjects.includes(o)).length
+    const total = ids.length + objIds.length
+    const checked: boolean | "indeterminate" = selCount === total ? true : selCount > 0 ? "indeterminate" : false
+    const toggle = (v: boolean) => {
+      const nextSel = v ? Array.from(new Set([...selected, ...ids])) : selected.filter((t) => !ids.includes(t))
+      const nextObj = v ? Array.from(new Set([...selectedObjects, ...objIds])) : selectedObjects.filter((o) => !objIds.includes(o))
+      syncDBs(nextSel, nextObj)
+      onChange(nextSel, nextObj, v ? conditions : conditions.filter((c) => !ids.includes(c.tableName)))
+    }
+    return (
+      <div key={s.name} className="py-0.5">
+        <div className="flex items-center gap-1.5 rounded px-1 py-1 hover:bg-accent/50">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 w-5 p-0"
+            onClick={() => setCollapsed((c) => ({ ...c, [sk]: !c[sk] }))}
+          >
+            {isCol ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </Button>
+          <Checkbox checked={checked} onCheckedChange={(v) => toggle(v === true)} />
+          <span
+            className="flex-1 cursor-pointer text-xs font-medium text-foreground"
+            onClick={() => setCollapsed((c) => ({ ...c, [sk]: !c[sk] }))}
+          >
+            {s.name}
+            <span className="ml-1.5 font-normal text-muted-foreground">{total}</span>
+            {selCount > 0 && <span className="ml-1.5 font-normal text-primary">{tr("tablePicker.selectedCount", { n: selCount })}</span>}
+          </span>
+        </div>
+        {!isCol && (
+          <div className="ml-4 border-l border-border/60 pl-2">
+            {groupSection(d.name, "tables", tr("objectTree.group.table"), Table2, ids, sk)}
+            {showObjects && OBJECT_GROUPS.map((g) =>
+              groupSection(d.name, g.dir, tKey(g.label), g.Icon, (s.objects?.[g.dir] || []).map((n) => qual(d.name, `${s.name}.${g.dir}/${n}`)), sk),
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // 库节点（多库树形模式）；未加载的库灰显，点击才加载对象清单
   const dbSection = (d: DBTables) => {
     const dk = dbKey(d.name)
     const isCol = collapsed[dk]
-    const tableIds = d.tables.map((t) => qual(d.name, t))
+    // 分级加载：_loaded !== true 表示仅库名（灰显，点击加载）
+    const pending = d._loaded !== true
+    const loadingThis = loadingDb === `src:${d.name}`
+    const tableIds = dbTableIds(d)
     const objIds = dbObjectIds(d)
     const selTables = tableIds.filter((t) => selected.includes(t)).length
     const selObjs = objIds.filter((o) => selectedObjects.includes(o)).length
@@ -720,38 +927,54 @@ export default function TablePicker({
       total === 0
         ? !!selectedDBs?.includes(d.name)
         : selTotal === total ? true : selTotal > 0 ? "indeterminate" : !!selectedDBs?.includes(d.name)
+    const onClickRow = () => {
+      if (pending) {
+        void loadDb(d.name, "src")
+        return
+      }
+      setCollapsed((c) => ({ ...c, [dk]: !c[dk] }))
+    }
     return (
       <div key={d.name} className="border-b last:border-0">
-        <div className="flex items-center gap-1.5 rounded px-2 py-1.5 bg-muted/60">
+        <div className={cn("flex items-center gap-1.5 rounded px-2 py-1.5", pending ? "bg-muted/30" : "bg-muted/60")}>
           <Button
             variant="ghost"
             size="sm"
             className="h-5 w-5 p-0"
-            onClick={() => setCollapsed((c) => ({ ...c, [dk]: !c[dk] }))}
+            onClick={onClickRow}
           >
-            {isCol ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            {loadingThis ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : isCol ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           </Button>
           {onDBsChange && (
             <Checkbox checked={dbChecked} onCheckedChange={(v) => toggleDB(d.name, v === true)} />
           )}
-          <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <Database className={cn("h-3.5 w-3.5 shrink-0", pending ? "text-muted-foreground/50" : "text-muted-foreground")} />
           <span
-            className="flex-1 cursor-pointer text-sm font-medium"
-            onClick={() => setCollapsed((c) => ({ ...c, [dk]: !c[dk] }))}
+            className={cn("flex-1 cursor-pointer text-sm font-medium", pending && "text-muted-foreground/70")}
+            onClick={onClickRow}
           >
             {d.name}
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
-              {tr("tablePicker.tablesCount", { n: tableIds.length })}{showObjects && objIds.length > 0 ? tr("tablePicker.totalObjects", { n: objIds.length }) : ""}
-            </span>
-            {selTotal > 0 && <span className="ml-2 text-xs font-normal text-primary">{tr("tablePicker.selectedCount", { n: selTotal })}</span>}
+            {d._error && <span title={d._error} className="ml-2 inline-flex align-middle"><AlertCircle className="h-3 w-3 text-destructive" /></span>}
+            {!pending && (
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {tr("tablePicker.tablesCount", { n: tableIds.length })}{showObjects && objIds.length > 0 ? tr("tablePicker.totalObjects", { n: objIds.length }) : ""}
+              </span>
+            )}
+            {!pending && selTotal > 0 && <span className="ml-2 text-xs font-normal text-primary">{tr("tablePicker.selectedCount", { n: selTotal })}</span>}
           </span>
         </div>
-        {!isCol && (
+        {!isCol && !pending && (
           <div className="ml-5 border-l border-border/60 pl-3">
-            {groupSection(d.name, "tables", tr("objectTree.group.table"), Table2, tableIds)}
-            {showObjects && OBJECT_GROUPS.map((g) =>
-              groupSection(d.name, g.dir, tKey(g.label), g.Icon, (d.objects?.[g.dir] || []).map((n) => qual(d.name, `${g.dir}/${n}`))),
-            )}
+            {hasSchemas(d)
+              ? (d.schemas || []).map((s) => schemaSection(d, s))
+              : (
+                <>
+                  {groupSection(d.name, "tables", tr("objectTree.group.table"), Table2, tableIds)}
+                  {showObjects && OBJECT_GROUPS.map((g) =>
+                    groupSection(d.name, g.dir, tKey(g.label), g.Icon, (d.objects?.[g.dir] || []).map((n) => qual(d.name, `${g.dir}/${n}`))),
+                  )}
+                </>
+              )}
           </div>
         )}
       </div>
@@ -761,10 +984,16 @@ export default function TablePicker({
   // 单库模式：直接渲染分组（无库头）
   const singleGroups = (d: DBTables) => (
     <div className="ml-2 border-l border-border/60 pl-3">
-      {groupSection(d.name, "tables", tr("objectTree.group.table"), Table2, d.tables.map((t) => qual(d.name, t)))}
-      {showObjects && OBJECT_GROUPS.map((g) =>
-        groupSection(d.name, g.dir, tKey(g.label), g.Icon, (d.objects?.[g.dir] || []).map((n) => qual(d.name, `${g.dir}/${n}`))),
-      )}
+      {hasSchemas(d)
+        ? (d.schemas || []).map((s) => schemaSection(d, s))
+        : (
+          <>
+            {groupSection(d.name, "tables", tr("objectTree.group.table"), Table2, d.tables.map((t) => qual(d.name, t)))}
+            {showObjects && OBJECT_GROUPS.map((g) =>
+              groupSection(d.name, g.dir, tKey(g.label), g.Icon, (d.objects?.[g.dir] || []).map((n) => qual(d.name, `${g.dir}/${n}`))),
+            )}
+          </>
+        )}
     </div>
   )
 
@@ -810,7 +1039,11 @@ export default function TablePicker({
           {!loading && !error && filteredTree.length === 0 && (
             <div className="py-8 text-center text-sm text-muted-foreground">{tr("tablePicker.noData")}</div>
           )}
-          {!loading && !error && singleMode && filteredTree[0] && singleGroups(filteredTree[0])}
+          {!loading && !error && singleMode && filteredTree[0] && (filteredTree[0]._loaded === true ? singleGroups(filteredTree[0]) : (
+            <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> {tr("tablePicker.loading")}
+            </div>
+          ))}
           {!loading && !error && !singleMode && filteredTree.map(dbSection)}
           </div>
         </div>
@@ -873,7 +1106,9 @@ export default function TablePicker({
           {selectedObjects.length > 0 && (
             <div className="border-t pt-1">
               {selectedObjects.map((id) => {
-                const [dir, name] = id.split("/")
+                const parts = id.split("/")
+                const name = parts[parts.length - 1]
+                const dir = parts.length > 1 ? (parts[parts.length - 2].split(".").pop() || "") : ""
                 const g = OBJECT_GROUPS.find((x) => x.dir === dir)
                 const Icon = g?.Icon ?? Eye
                 return (
