@@ -408,6 +408,27 @@ export default function TablePicker({
     setSourceOnlySet(onlySet)
   }, [tree, extraTree, dbMappingKey])
 
+  // 分级加载下补充合并数据源：源库已加载而其映射的目标库尚未加载时，自动加载目标侧库表，
+  // 否则 extraTree 只有库名 stub（tables 为空），merge 合并不出「仅目标库有」的表。
+  // 配对规则与上方 merge effect 一致：显式 dbMapping 优先，未配置时同名配对。
+  // 每次只触发一个加载（loadingDb 单飞），加载完成后 extraTree 变化会再次触发本 effect 处理下一个
+  useEffect(() => {
+    if (!extraConnId || extraTree.length === 0) return
+    const parsed: Record<string, string> | undefined = dbMappingKey ? JSON.parse(dbMappingKey) : undefined
+    const hasRealMapping = !!(parsed && Object.keys(parsed).length > 0)
+    const entries: [string, string][] = hasRealMapping
+      ? Object.entries(parsed).filter(([k, v]) => k && v)
+      : tree.map((d) => [d.name, d.name] as [string, string])
+    for (const [src, tgt] of entries) {
+      const sd = tree.find((d) => d.name.toLowerCase() === src.toLowerCase())
+      if (!sd?._loaded) continue
+      const td = extraTree.find((e) => e.name.toLowerCase() === tgt.toLowerCase())
+      if (!td || td._loaded || td._error) continue
+      void loadDb(tgt, "extra")
+      return
+    }
+  }, [extraConnId, tree, extraTree, dbMappingKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const singleMode = mergedTree.length <= 1
 
   // 某库的全部对象 ID（PG 为 "库.schema.目录/名"）

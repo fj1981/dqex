@@ -13,6 +13,7 @@
 - Export progress stuck near 0 in structure+data mode, and progress percentage regression during the object stage
 - PG/Kingbase quoted qualified names (`"schema"."table"`) causing data read failures
 - Migration progress never reaching 100% in DataOnly mode
+- Table merging broken in the compare table-picking step (after the lazy-loading object tree refactor, target-only tables were no longer merged into their mapped source database nodes)
 
 ## [1.2.0] - 2026-08-26
 ### Added
