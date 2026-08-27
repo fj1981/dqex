@@ -9,6 +9,7 @@ import "strings"
 type engineTexts struct {
 	// exporter
 	expNoTables        string // 库 %s 无选中的表，仅处理对象
+	expSkipConn        string // 库 %s 连接失败且无选中项，已跳过: %v
 	expStart           string // 开始导出: %d 个库, %d 张表 → %s
 	expNoFKWarn        string // 警告: 库 %s 未获取到前置约束语句，导入带外键依赖的库可能失败
 	zipPack            string // 打包 zip: %s
@@ -63,6 +64,7 @@ type engineTexts struct {
 
 	// migrator
 	migStart       string // 开始%s: %d 张表, 重置模式=%s
+	migCheckWarn   string // 警告: 挂起目标库约束检查失败(%s): %v，含外键依赖的表可能迁移失败
 	migCreate      string // 已创建目标表 %s
 	migTableDone   string // 表 %s 迁移完成 (%d 行)
 	migCleanFail   string // 清理备份表失败（可忽略）: %v
@@ -97,6 +99,7 @@ type engineTexts struct {
 var engineTextsMap = map[string]engineTexts{
 	"zh": {
 		expNoTables:        "库 %s 无选中的表，仅处理对象",
+		expSkipConn:        "库 %s 连接失败且无选中项，已跳过: %v",
 		expStart:           "开始导出: %d 个库, %d 张表 → %s",
 		expNoFKWarn:        "警告: 库 %s 未获取到前置约束语句，导入带外键依赖的库可能失败",
 		zipPack:            "打包 zip: %s",
@@ -137,6 +140,7 @@ var engineTextsMap = map[string]engineTexts{
 		dictCols:           "%s.%s 元数据采集完成 (%d 列)",
 		dictDone:           "数据字典生成完成: %d 库 %d 表 → %s",
 		migStart:           "开始%s: %d 张表, 重置模式=%s",
+		migCheckWarn:       "警告: 挂起目标库约束检查失败(%s): %v，含外键依赖的表可能迁移失败",
 		migCreate:          "已创建目标表 %s",
 		migTableDone:       "表 %s 迁移完成 (%d 行)",
 		migCleanFail:       "清理备份表失败（可忽略）: %v",
@@ -168,6 +172,7 @@ var engineTextsMap = map[string]engineTexts{
 	},
 	"en": {
 		expNoTables:        "db %s has no selected tables, objects only",
+		expSkipConn:        "db %s connection failed with no selected items, skipped: %v",
 		expStart:           "exporting: %d db(s), %d tables → %s",
 		expNoFKWarn:        "warning: failed to get FK constraints for db %s; importing databases with FK dependencies may fail",
 		zipPack:            "packing zip: %s",
@@ -208,6 +213,7 @@ var engineTextsMap = map[string]engineTexts{
 		dictCols:           "%s.%s metadata collected (%d columns)",
 		dictDone:           "data dictionary generated: %d db(s) %d tables → %s",
 		migStart:           "starting %s: %d tables, reset mode=%s",
+		migCheckWarn:       "warning: failed to suspend target constraint checks (%s): %v; tables with FK dependencies may fail",
 		migCreate:          "target table created: %s",
 		migTableDone:       "table %s migrated (%d rows)",
 		migCleanFail:       "failed to clean backup tables (ignorable): %v",

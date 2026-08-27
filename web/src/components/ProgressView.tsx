@@ -113,6 +113,10 @@ export default function ProgressView({ taskID, taskType, onSaveTask, onBack, onD
   // 后端 percent 已是 0-100 的百分数（非 0-1 比例），不可再乘 100
   const percent = Math.min(100, Math.round(progress?.percent || 0))
 
+  // 当前表只显示表名（限定名取最后一段），完整限定名用 title 悬停展示
+  const currentTableFull = progress?.currentTable || "-"
+  const currentTableName = currentTableFull === "-" ? "-" : (currentTableFull.split('.').pop() || currentTableFull)
+
   // 耗时口径一致：终态回放优先用执行历史的总耗时，实时监控用本地计时
   const elapsedSec = progress?.durationMs ? Math.round(progress.durationMs / 1000) : elapsed
   const logs = progress?.logs || []
@@ -182,7 +186,9 @@ export default function ProgressView({ taskID, taskType, onSaveTask, onBack, onD
           <div className="mt-0.5 break-all text-xs opacity-80">
             {state === "error"
               ? (errTooLong ? errBrief : errFull)
-              : shortPaths(progress?.message || "") || (isRunning ? t("progress.runningHint") : "")}
+              : isRunning
+                ? (progress?.currentTable ? `${t("progress.statCurrent")}: ${currentTableName}` : t("progress.runningHint"))
+                : shortPaths(progress?.message || "")}
           </div>
         </div>
         {state === "error" && errTooLong && (
@@ -244,8 +250,8 @@ export default function ProgressView({ taskID, taskType, onSaveTask, onBack, onD
           <StatBlock label={t("progress.statElapsed")} value={formatDuration(elapsedSec)} />
           <StatBlock
             label={t("progress.statCurrent")}
-            value={progress?.currentTable || "-"}
-            title={progress?.currentTable}
+            value={currentTableName}
+            title={currentTableFull}
           />
         </div>
 

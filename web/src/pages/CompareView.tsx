@@ -23,6 +23,7 @@ import ColumnMultiSelect, { isTimeColumn, toColumnOptions } from "@/components/C
 import { CompareReport } from "@/components/CompareReport"
 import { useAppStore } from "@/stores/app"
 import { tKey } from "@/lib/i18n"
+import { bindTaskOptions } from "@/lib/taskConfig"
 import { cn } from "@/lib/utils"
 import type {
   CompareDBPair,
@@ -168,7 +169,14 @@ export default function CompareView() {
     // URL 参数优先（由上方 effect 消费）；其次会话缓存已同步初始化，无需异步回填；
     // 两者皆无才拉取上次配置（首次进入该页面）
     if (searchParams.get("task") || searchParams.get("running") || cachedTask) return
-    api.getLastTask("compare").then(({ task }) => task && applyTask(task)).catch(() => {})
+    // 自动恢复：库表选择绑定配置的源连接，与页面当前已选源连接不一致时视为无效（只恢复通用选项）
+    api.getLastTask("compare").then(({ task }) => {
+      const to = task?.compareOpts
+      if (!to) return
+      setOpts((o) => ({ ...defaultOptions(), ...bindTaskOptions(to, o.sourceConn) }))
+      setTaskConfigId(task.id)
+      setLastTask(task)
+    }).catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 选好目标连接后加载目标库清单：供「库映射」下拉（选表步骤）与别名配对候选（选项步骤）使用
@@ -509,11 +517,12 @@ export default function CompareView() {
         </ConnectionPair>
       )}
 
-      {step === 1 && (
-        <div className="flex min-h-0 flex-1 flex-col gap-4">
-          <Hint className="shrink-0">
-            {t("compare.hint1")}
-          </Hint>
+      {/* Keep-Alive：TablePicker 常驻（hidden 控制显隐）——步骤切换不卸载组件，已加载的库/表数据与展开、勾选状态全部保留；
+          会话间隔离由连接变化触发重新加载、页面卸载随组件销毁自然实现 */}
+      <div className={cn("flex min-h-0 flex-1 flex-col gap-4", step !== 1 && "hidden")}>
+        <Hint className={cn("shrink-0", step !== 1 && "hidden")}>
+          {t("compare.hint1")}
+        </Hint>
           <TablePicker
             connId={opts.sourceConn}
             extraConnId={opts.targetConn}
@@ -639,9 +648,8 @@ export default function CompareView() {
             </Card>
           )}
 
-          <WizardFooter className="shrink-0" onBack={() => setStep(0)} onNext={() => setStep(2)} />
+          <WizardFooter className={cn("shrink-0", step !== 1 && "hidden")} onBack={() => setStep(0)} onNext={() => setStep(2)} />
         </div>
-      )}
 
       {step === 2 && (
         // min-h-0 防止 Card 被 h-full 父容器拉伸，消除内容下方大片留白

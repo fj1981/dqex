@@ -11,14 +11,15 @@ type tracker struct {
 	p        Progress
 	lang     string // 进度日志语言（引擎文本注册表 key，默认 zh）
 	lastSend time.Time
-	finished bool // 任务已全部完成（含打包等收尾），才允许展示 100%
+	finished bool      // 任务已全部完成（含打包等收尾），才允许展示 100%
+	startAt  time.Time // 任务开始时间，用于实时计算 DurationMs
 }
 
 func newTracker(cb ProgressFunc, lang string) *tracker {
 	if cb == nil {
 		cb = func(Progress) {}
 	}
-	return &tracker{cb: cb, lang: lang, p: Progress{State: "running", Logs: []string{}}}
+	return &tracker{cb: cb, lang: lang, p: Progress{State: "running", Logs: []string{}}, startAt: time.Now()}
 }
 
 // log 追加日志并立即推送
@@ -40,6 +41,7 @@ func (t *tracker) emit(force bool) {
 		return
 	}
 	t.lastSend = time.Now()
+	t.p.DurationMs = time.Since(t.startAt).Milliseconds()
 	t.cb(t.p)
 }
 

@@ -57,7 +57,7 @@ function LeafNode({ node, depth, dbName, onOpenObject, bareName = false }: {
         "flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left text-[12px] transition-colors",
         active ? "bg-primary/10 text-primary" : "text-foreground/85 hover:bg-accent",
       )}
-      style={{ paddingLeft: depth * 14 + 6 }}
+      style={{ paddingLeft: depth * 14 + 24 }}
       title={tKey(meta.labelKey)}
       onClick={() => {
         selectNode(node.name)
@@ -102,8 +102,8 @@ function GroupNode({ group, node, depth, dbName, keyPrefix = "", onOpenObject, b
   return (
     <div>
       <div
-        className="group flex items-center gap-1 rounded-md py-1 pr-2 text-[12px] hover:bg-accent"
-        style={{ paddingLeft: depth * 14 + 4 }}
+        className="group relative flex items-center gap-1 rounded-md py-1 pr-2 text-[12px] hover:bg-accent"
+        style={{ paddingLeft: depth * 14 + 22 }}
       >
         <button
           type="button"
@@ -111,8 +111,8 @@ function GroupNode({ group, node, depth, dbName, keyPrefix = "", onOpenObject, b
           onClick={() => toggleNode(groupKey)}
         >
           <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-90")} />
-          <span className="truncate font-medium text-muted-foreground">{tKey(group.labelKey)}</span>
-          <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">{children.length}</span>
+          <span className="truncate pr-[42px] font-medium text-muted-foreground">{tKey(group.labelKey)}</span>
+          <span className="absolute right-[30px] text-[10px] tabular-nums text-muted-foreground">{children.length}</span>
         </button>
       </div>
       {isOpen && (
@@ -165,7 +165,7 @@ function SchemaNode({ dbName, node, onOpenObject }: {
 
   return (
     <div>
-      <div className="group flex items-center gap-1 rounded-md py-1 pr-2 text-[12px] hover:bg-accent">
+      <div className="group relative flex items-center gap-1 rounded-md py-1 pr-2 text-[12px] hover:bg-accent" style={{ paddingLeft: 20 }}>
         <button
           type="button"
           className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
@@ -183,26 +183,28 @@ function SchemaNode({ dbName, node, onOpenObject }: {
             <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-90", pending && "opacity-0")} />
           )}
           <Icon className={cn("h-3.5 w-3.5 shrink-0", pending ? "text-muted-foreground/60" : "text-amber-600")} />
-          <span className={cn("truncate", pending && "text-muted-foreground/70")}>{node.name}</span>
+          <span className={cn("truncate pr-[42px]", pending && "text-muted-foreground/70")}>{node.name}</span>
           {node.error && <span title={node.error} className="shrink-0"><AlertCircle className="h-3 w-3 text-destructive" /></span>}
           {!pending && childCount > 0 && (
-            <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">{childCount}</span>
+            <span className="absolute right-[30px] text-[10px] tabular-nums text-muted-foreground">{childCount}</span>
           )}
           {pending && !loading && node.count !== undefined && (
-            <span className="ml-auto text-[10px] tabular-nums text-muted-foreground/60">{node.count}</span>
+            <span className="absolute right-[30px] text-[10px] tabular-nums text-muted-foreground/60">{node.count}</span>
           )}
         </button>
-        {/* 节点级刷新：hover 显示，force 绕缓存重拉（Navicat 式） */}
-        {!pending && !loading && (
-          <button
-            type="button"
-            className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-            title={t("objectTree.refreshNode")}
-            onClick={() => void loadSchema(dbName, node.name, true)}
-          >
-            <RefreshCw className="h-3.5 w-3.5 shrink-0" />
-          </button>
-        )}
+        {/* 节点级刷新：始终渲染占位避免计数位移，pending/loading 时 invisible 隐藏 */}
+        <button
+          type="button"
+          className={cn(
+            "shrink-0 rounded p-0.5 text-muted-foreground transition-opacity",
+            pending || loading ? "invisible" : "opacity-0 group-hover:opacity-100 hover:text-foreground",
+          )}
+          title={t("objectTree.refreshNode")}
+          disabled={pending || loading}
+          onClick={() => void loadSchema(dbName, node.name, true)}
+        >
+          <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+        </button>
       </div>
       {isOpen && !pending && (
         <div className="mt-0.5">
@@ -229,7 +231,7 @@ function DbNode({ node, onOpenObject }: { node: ObjectNode; onOpenObject: Props[
 
   return (
     <div>
-      <div className="group flex items-center gap-1 rounded-md py-1 pr-2 text-[12px] hover:bg-accent">
+      <div className="group relative flex items-center gap-1 rounded-md py-1 pr-2 text-[12px] hover:bg-accent">
         <button
           type="button"
           className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
@@ -247,26 +249,28 @@ function DbNode({ node, onOpenObject }: { node: ObjectNode; onOpenObject: Props[
             <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-90", pending && "opacity-0")} />
           )}
           <Icon className={cn("h-3.5 w-3.5 shrink-0", pending ? "text-muted-foreground/60" : "text-blue-600")} />
-          <span className={cn("truncate font-medium", pending && "text-muted-foreground/70")}>{node.name}</span>
+          <span className={cn("truncate pr-[42px] font-medium", pending && "text-muted-foreground/70")}>{node.name}</span>
           {node.error && <span title={node.error} className="shrink-0"><AlertCircle className="h-3 w-3 text-destructive" /></span>}
           {!pending && childCount > 0 && (
-            <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">{childCount}</span>
+            <span className="absolute right-[30px] text-[10px] tabular-nums text-muted-foreground">{childCount}</span>
           )}
           {pending && !loading && node.count !== undefined && (
-            <span className="ml-auto text-[10px] tabular-nums text-muted-foreground/60">{node.count}</span>
+            <span className="absolute right-[30px] text-[10px] tabular-nums text-muted-foreground/60">{node.count}</span>
           )}
         </button>
-        {/* 节点级刷新：hover 显示，force 绕缓存重拉（Navicat 式） */}
-        {!pending && !loading && (
-          <button
-            type="button"
-            className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-            title={t("objectTree.refreshNode")}
-            onClick={() => void loadDb(node.name, true)}
-          >
-            <RefreshCw className="h-3.5 w-3.5 shrink-0" />
-          </button>
-        )}
+        {/* 节点级刷新：始终渲染占位避免计数位移，pending/loading 时 invisible 隐藏 */}
+        <button
+          type="button"
+          className={cn(
+            "shrink-0 rounded p-0.5 text-muted-foreground transition-opacity",
+            pending || loading ? "invisible" : "opacity-0 group-hover:opacity-100 hover:text-foreground",
+          )}
+          title={t("objectTree.refreshNode")}
+          disabled={pending || loading}
+          onClick={() => void loadDb(node.name, true)}
+        >
+          <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+        </button>
       </div>
       {isOpen && !pending && (
         <div className="mt-0.5">
@@ -290,18 +294,6 @@ export default function ObjectTree({ onOpenObject }: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* 树顶工具条：刷新按钮（Navicat 式整树刷新，force 绕缓存） */}
-      <div className="flex shrink-0 items-center justify-end px-2 pt-1">
-        <button
-          type="button"
-          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-          title={t("objectTree.refresh")}
-          disabled={loading || !connId}
-          onClick={() => void refreshTree(connId)}
-        >
-          <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
-        </button>
-      </div>
       {loading ? (
         <div className="flex items-center gap-2 p-4 text-xs text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> {t("objectTree.loading")}

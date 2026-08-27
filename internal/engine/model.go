@@ -35,6 +35,17 @@ type TableCondition struct {
 	Columns   []string      `json:"columns,omitempty" yaml:"columns,omitempty"`   // Deprecated: 旧版导出列，仅读取兼容
 }
 
+// DBSelection 单库导出选择：库 → 该库下的表/对象白名单（与 ExportOptions.Databases/Tables/Objects 二选一，非空时优先）。
+// 表/对象条目保留完整限定名（"库.schema.表" / "库.schema._dir/名"），库归属由前缀确定，杜绝扁平字段间库名残留/错配
+// Tables 为 nil 表示库内全部表（整库导出），空数组表示不导出表
+// Objects 为 nil 表示全部对象，空数组表示不导出对象
+
+type DBSelection struct {
+	DB      string   `json:"db" yaml:"db"`
+	Tables  []string `json:"tables,omitempty" yaml:"tables,omitempty"`
+	Objects []string `json:"objects,omitempty" yaml:"objects,omitempty"`
+}
+
 // ExportOptions 导出选项
 type ExportOptions struct {
 	SourceConn string           `json:"sourceConn" yaml:"sourceConn"` // 已保存连接名（与 Source 二选一）
@@ -44,6 +55,7 @@ type ExportOptions struct {
 	Databases  []string         `json:"databases" yaml:"databases"` // 指定库（空=连接配置的库）
 	Tables     []string         `json:"tables" yaml:"tables"`       // 指定表（nil=全部，空数组=不导出）
 	Objects    []string         `json:"objects" yaml:"objects"`     // 指定对象，格式 _views/名称（nil=全部，空数组=不导出）
+	Selections []DBSelection    `json:"selections,omitempty" yaml:"selections,omitempty"` // 结构化库→表/对象选择（优先于 Databases/Tables/Objects）
 	Conditions []TableCondition `json:"conditions" yaml:"conditions"`
 	SchemaOnly bool             `json:"schemaOnly" yaml:"schemaOnly"` // 仅导出结构
 	DataOnly   bool             `json:"dataOnly" yaml:"dataOnly"`     // 仅导出数据
@@ -68,9 +80,10 @@ type DictionaryOptions struct {
 	Source     *DBConnInfo `json:"source,omitempty" yaml:"source,omitempty"`
 	OutputDir  string      `json:"outputDir" yaml:"outputDir"`           // 导出根目录，默认数据目录下 exports/
 	TaskName   string      `json:"taskName" yaml:"taskName"`             // 用于生成产物文件名
-	Databases  []string    `json:"databases" yaml:"databases"`           // 指定库（空=连接配置的库）
-	Tables     []string    `json:"tables" yaml:"tables"`                 // 指定表（nil=全部，空数组=不导出）
-	Compress   bool        `json:"compress" yaml:"compress"`             // 是否打包 zip，默认 true
+	Databases  []string         `json:"databases" yaml:"databases"`           // 指定库（空=连接配置的库）
+	Tables     []string         `json:"tables" yaml:"tables"`                 // 指定表（nil=全部，空数组=不导出）
+	Selections []DBSelection    `json:"selections,omitempty" yaml:"selections,omitempty"` // 结构化库→表选择（优先于 Databases/Tables）
+	Compress   bool             `json:"compress" yaml:"compress"`             // 是否打包 zip，默认 true
 	Lang       string      `json:"lang,omitempty" yaml:"lang,omitempty"` // 产物文案语言（zh/en），默认 zh
 }
 
@@ -107,6 +120,9 @@ type MigrateOptions struct {
 	Target     *DBConnInfo      `json:"target,omitempty" yaml:"target,omitempty"`
 	Tables     []string         `json:"tables" yaml:"tables"`   // 指定表（nil=全部，空数组=不迁移）
 	Objects    []string         `json:"objects" yaml:"objects"` // 指定对象，格式 _views/名称（nil=全部，空数组=不迁移；仅同类型生效）
+	// Selections 结构化源库→表/对象选择（与 Tables/Objects 二选一，非空时优先）。
+	// 多库迁移逐库执行：目标库为连接配置库（未配置时与源库同名）
+	Selections []DBSelection    `json:"selections,omitempty" yaml:"selections,omitempty"`
 	Conditions []TableCondition `json:"conditions" yaml:"conditions"`
 	SchemaOnly bool             `json:"schemaOnly" yaml:"schemaOnly"`
 	DataOnly   bool             `json:"dataOnly" yaml:"dataOnly"`

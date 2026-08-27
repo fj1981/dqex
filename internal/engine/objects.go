@@ -38,6 +38,35 @@ var dirObjectKinds = func() map[string]objectKind {
 // objectExportOrder 导出顺序（导入执行顺序与此一致）
 var objectExportOrder = []objectKind{objectView, objectFunction, objectProcedure}
 
+// countExportObjects 计算符合白名单的对象总数，用于在任务开始时一次性确定总进度单位，
+// 避免对象导出阶段动态增加 TotalUnits 导致进度百分比回退。
+func countExportObjects(cli *cydb.DBCli, db, schema string, objects []string) int {
+	if objects != nil && len(objects) == 0 {
+		return 0
+	}
+	allowed := make(map[string]bool, len(objects))
+	for _, o := range objects {
+		allowed[strings.TrimSpace(o)] = true
+	}
+	objs := listDBObjects(cli, db, schema)
+	total := 0
+	for _, kind := range objectExportOrder {
+		names := objs[kind]
+		dirName := objectKindDirs[kind]
+		if objects != nil {
+			filtered := make([]string, 0, len(names))
+			for _, name := range names {
+				if objectInWhitelist(allowed, db, objectWhitelistID(dirName, name)) {
+					filtered = append(filtered, name)
+				}
+			}
+			names = filtered
+		}
+		total += len(names)
+	}
+	return total
+}
+
 // objectWhitelistID 由对象枚举名构造白名单匹配 id：
 // PG 限定名 "schema.对象名" → "schema.目录/对象名"（匹配 "库.schema.目录/对象名" 三级白名单）；
 // 裸名 → "目录/对象名"（匹配 "库.目录/对象名" 旧格式与 CLI 裸条目）

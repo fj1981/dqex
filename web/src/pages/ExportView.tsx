@@ -21,6 +21,9 @@ import StepWizard from "@/components/StepWizard"
 import TablePicker from "@/components/TablePicker"
 import { tKey } from "@/lib/i18n"
 import { useAppStore } from "@/stores/app"
+import { buildSelections } from "@/lib/selections"
+import { bindTaskOptions } from "@/lib/taskConfig"
+import { cn } from "@/lib/utils"
 import type { ExportOptions, TaskConfig } from "@/types"
 
 const STEPS = ["export.step1", "export.step2", "export.step3", "export.step4"]
@@ -106,7 +109,14 @@ export default function ExportView() {
     // URL 参数优先（由上方 effect 消费）；其次会话缓存已同步初始化，无需异步回填；
     // 两者皆无才拉取上次配置（首次进入该页面）
     if (searchParams.get("task") || searchParams.get("running") || cachedTask) return
-    api.getLastTask("export").then(({ task }) => task && applyTask(task)).catch(() => {})
+    // 自动恢复：库表选择绑定配置的连接，与页面当前已选连接不一致时视为无效（只恢复通用选项）
+    api.getLastTask("export").then(({ task }) => {
+      const to = task?.exportOpts
+      if (!to) return
+      setOpts((o) => ({ ...defaultOptions(), ...bindTaskOptions(to, o.sourceConn) }))
+      setTaskConfigId(task.id)
+      setLastTask(task)
+    }).catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const startRun = async () => {
@@ -121,7 +131,7 @@ export default function ExportView() {
       return
     }
     try {
-      const { taskID } = await api.startExport(opts, taskConfigId)
+      const { taskID } = await api.startExport({ ...opts, selections: buildSelections(opts.databases, opts.tables, opts.objects) }, taskConfigId)
       setRunningTaskID(taskID)
       setStep(3)
       refreshHistory()
@@ -162,7 +172,8 @@ export default function ExportView() {
               title={t("export.sourceDb")}
               subtitle={t("export.sourceDbDesc")}
               value={opts.sourceConn}
-              onChange={(name) => set({ sourceConn: name })}
+              // 切换连接即清空旧连接的选择（表/对象/条件/库均随连接变化而失效，防残留库名混入导出）
+              onChange={(name) => set({ sourceConn: name, tables: [], objects: [], conditions: [], databases: [] })}
             />
             {/* 提示位置与其他任务页 step0 保持一致：连接卡下方、操作按钮上方 */}
             <Hint>{t("export.hint1")}</Hint>
@@ -170,23 +181,23 @@ export default function ExportView() {
           </div>
         )}
 
-      {step === 1 && (
-        <div className="flex min-h-0 flex-1 flex-col gap-4">
-          <Hint className="shrink-0">
-            {t("export.hint2")}
-          </Hint>
-          <TablePicker
-            connId={opts.sourceConn}
-            selected={opts.tables || []}
-            selectedObjects={opts.objects || []}
-            selectedDBs={opts.databases || []}
-            onDBsChange={(databases) => set({ databases })}
-            conditions={opts.conditions || []}
-            onChange={(tables, objects, conditions) => set({ tables, objects, conditions })}
-          />
-          <WizardFooter className="shrink-0" onBack={() => setStep(0)} onNext={() => setStep(2)} />
-        </div>
-      )}
+      {/* Keep-Alive：TablePicker 常驻（hidden 控制显隐）——步骤切换不卸载组件，已加载的库/表数据与展开、勾选状态全部保留；
+          会话间隔离由连接变化触发重新加载、页面卸载随组件销毁自然实现 */}
+      <div className={cn("flex min-h-0 flex-1 flex-col gap-4", step !== 1 && "hidden")}>
+        <Hint className={cn("shrink-0", step !== 1 && "hidden")}>
+          {t("export.hint2")}
+        </Hint>
+        <TablePicker
+          connId={opts.sourceConn}
+          selected={opts.tables || []}
+          selectedObjects={opts.objects || []}
+          selectedDBs={opts.databases || []}
+          onDBsChange={(databases) => set({ databases })}
+          conditions={opts.conditions || []}
+          onChange={(tables, objects, conditions) => set({ tables, objects, conditions })}
+        />
+        <WizardFooter className={cn("shrink-0", step !== 1 && "hidden")} onBack={() => setStep(0)} onNext={() => setStep(2)} />
+      </div>
 
       {step === 2 && (
         <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-col gap-4">

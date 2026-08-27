@@ -20,6 +20,9 @@ import { CheckRow, Section } from "@/components/Section"
 import StepWizard from "@/components/StepWizard"
 import TablePicker from "@/components/TablePicker"
 import { useAppStore } from "@/stores/app"
+import { buildSelections } from "@/lib/selections"
+import { bindTaskOptions } from "@/lib/taskConfig"
+import { cn } from "@/lib/utils"
 import { tKey } from "@/lib/i18n"
 import type { DictionaryOptions, TaskConfig } from "@/types"
 
@@ -83,7 +86,14 @@ export default function DictionaryView() {
   useEffect(() => {
     loadSavedTasks()
     if (searchParams.get("task") || searchParams.get("running") || cachedTask) return
-    api.getLastTask("dictionary").then(({ task }) => task && applyTask(task)).catch(() => {})
+    // 自动恢复：库表选择绑定配置的连接，与页面当前已选连接不一致时视为无效（只恢复通用选项）
+    api.getLastTask("dictionary").then(({ task }) => {
+      const to = task?.dictionaryOpts
+      if (!to) return
+      setOpts((o) => ({ ...defaultOptions(), ...bindTaskOptions(to, o.sourceConn) }))
+      setTaskConfigId(task.id)
+      setLastTask(task)
+    }).catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const startRun = async () => {
@@ -98,7 +108,7 @@ export default function DictionaryView() {
       return
     }
     try {
-      const { taskID } = await api.startDictionary({ ...opts, lang: i18n.language }, taskConfigId)
+      const { taskID } = await api.startDictionary({ ...opts, selections: buildSelections(opts.databases, opts.tables), lang: i18n.language }, taskConfigId)
       setRunningTaskID(taskID)
       setStep(2)
       refreshHistory()
@@ -138,31 +148,32 @@ export default function DictionaryView() {
             title={t("dictionary.sourceDb")}
             subtitle={t("dictionary.sourceDbDesc")}
             value={opts.sourceConn}
-            onChange={(name) => set({ sourceConn: name })}
+            // 切换连接即清空旧连接的选择（库/表随连接变化而失效）
+            onChange={(name) => set({ sourceConn: name, databases: [], tables: [] })}
           />
           <Hint>{t("dictionary.hint1")}</Hint>
           <WizardFooter onNext={() => setStep(1)} />
         </div>
       )}
 
-      {step === 1 && (
-        <div className="flex min-h-0 flex-1 flex-col gap-4">
-          <Hint className="shrink-0">
-            {t("dictionary.hint2")}
-          </Hint>
-          <TablePicker
-            connId={opts.sourceConn}
-            selected={opts.tables || []}
-            selectedObjects={[]}
-            selectedDBs={opts.databases || []}
-            onDBsChange={(databases) => set({ databases })}
-            conditions={[]}
-            showObjects={false}
-            onChange={(tables) => set({ tables })}
-          />
-          <WizardFooter className="shrink-0" onBack={() => setStep(0)} onNext={() => setStep(2)} />
-        </div>
-      )}
+      {/* Keep-Alive：TablePicker 常驻（hidden 控制显隐）——步骤切换不卸载组件，已加载的库/表数据与展开、勾选状态全部保留；
+          会话间隔离由连接变化触发重新加载、页面卸载随组件销毁自然实现 */}
+      <div className={cn("flex min-h-0 flex-1 flex-col gap-4", step !== 1 && "hidden")}>
+        <Hint className={cn("shrink-0", step !== 1 && "hidden")}>
+          {t("dictionary.hint2")}
+        </Hint>
+        <TablePicker
+          connId={opts.sourceConn}
+          selected={opts.tables || []}
+          selectedObjects={[]}
+          selectedDBs={opts.databases || []}
+          onDBsChange={(databases) => set({ databases })}
+          conditions={[]}
+          showObjects={false}
+          onChange={(tables) => set({ tables })}
+        />
+        <WizardFooter className={cn("shrink-0", step !== 1 && "hidden")} onBack={() => setStep(0)} onNext={() => setStep(2)} />
+      </div>
 
       {step === 2 && !runningTaskID && (
         <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-col gap-4">

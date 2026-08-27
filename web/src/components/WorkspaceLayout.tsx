@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels"
 import { useTranslation } from "react-i18next"
-import { AlertCircle, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, FunctionSquare, GripVertical, Lightbulb, List, Loader2, Pin, Plus, SlidersHorizontal, SkipForward, Sparkles, Star, Table2, View, X } from "lucide-react"
+import { AlertCircle, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, FunctionSquare, GripVertical, Lightbulb, List, Loader2, Pin, Plus, RefreshCw, SlidersHorizontal, SkipForward, Sparkles, Star, Table2, View, X } from "lucide-react"
 import { toast } from "sonner"
 import DbTypeIcon from "@/components/DbTypeIcon"
 import { Button } from "@/components/ui/button"
@@ -94,7 +94,7 @@ export default function WorkspaceLayout() {
     tabSettings,
     updateTabSettings,
   } = useQueryStore()
-  const { loadTree, nodes: treeNodes } = useObjectTreeStore()
+  const { loadTree, nodes: treeNodes, refreshTree, loading: treeLoading, connId: treeConnId } = useObjectTreeStore()
   const { add: addFavorite } = useFavoriteStore()
   // 连接健康状态：null=未检测 / checking=检测中 / ok=正常 / fail=不可用
   const [ping, setPing] = useState<null | "checking" | "ok" | "fail">(null)
@@ -453,7 +453,16 @@ export default function WorkspaceLayout() {
                   )}
                 </SelectContent>
               </Select>
-              <span className="shrink-0 text-xs font-medium text-muted-foreground">{t("workspace.objects")}</span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
+                title={t("objectTree.refresh")}
+                disabled={treeLoading || !treeConnId}
+                onClick={() => void refreshTree(treeConnId)}
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", treeLoading && "animate-spin")} />
+              </Button>
               <Button
                 variant="ghost"
                 size="icon"

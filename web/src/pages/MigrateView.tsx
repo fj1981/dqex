@@ -20,6 +20,9 @@ import { CheckRow, Section } from "@/components/Section"
 import StepWizard from "@/components/StepWizard"
 import TablePicker from "@/components/TablePicker"
 import { useAppStore } from "@/stores/app"
+import { buildSelections } from "@/lib/selections"
+import { bindTaskOptions } from "@/lib/taskConfig"
+import { cn } from "@/lib/utils"
 import { tKey } from "@/lib/i18n"
 import type { MigrateOptions, TaskConfig } from "@/types"
 
@@ -135,7 +138,14 @@ export default function MigrateView() {
     // URL 参数优先（由上方 effect 消费）；其次会话缓存已同步初始化，无需异步回填；
     // 两者皆无才拉取上次配置（首次进入该页面）
     if (searchParams.get("task") || searchParams.get("running") || cachedTask) return
-    api.getLastTask("migrate").then(({ task }) => task && applyTask(task)).catch(() => {})
+    // 自动恢复：库表选择绑定配置的源连接，与页面当前已选源连接不一致时视为无效（只恢复通用选项）
+    api.getLastTask("migrate").then(({ task }) => {
+      const to = task?.migrateOpts
+      if (!to) return
+      setOpts((o) => ({ ...defaultOptions(), ...bindTaskOptions(to, o.sourceConn) }))
+      setTaskConfigId(task.id)
+      setLastTask(task)
+    }).catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const startRun = async () => {
@@ -160,7 +170,7 @@ export default function MigrateView() {
       return
     }
     try {
-      const { taskID } = await api.startMigrate(opts, taskConfigId)
+      const { taskID } = await api.startMigrate({ ...opts, selections: buildSelections(opts.databases, opts.tables, opts.objects) }, taskConfigId)
       setRunningTaskID(taskID)
       setStep(3)
       setTimeout(() => useAppStore.getState().loadHistory(), 800)
@@ -232,24 +242,29 @@ export default function MigrateView() {
         </ConnectionPair>
       )}
 
-      {step === 1 && (
-        <div className="flex min-h-0 flex-1 flex-col gap-4">
-          <Hint className="shrink-0">
-            {t("migrate.hint1")}
-          </Hint>
-          <TablePicker
-            connId={opts.sourceConn}
-            selected={opts.tables || []}
-            selectedObjects={opts.objects || []}
-            showObjects={!crossType}
-            selectedDBs={opts.databases || []}
-            onDBsChange={handleDBsChange}
-            conditions={opts.conditions || []}
-            onChange={(tables, objects, conditions) => set({ tables, objects, conditions })}
-          />
-          <WizardFooter className="shrink-0" onBack={() => setStep(0)} onNext={() => setStep(2)} />
-        </div>
-      )}
+      {/* Keep-Alive：TablePicker 常驻（hidden 控制显隐）——步骤切换不卸载组件，已加载的库/表数据与展开、勾选状态全部保留；
+          会话间隔离由连接变化触发重新加载、页面卸载随组件销毁自然实现 */}
+      <div className={cn("flex min-h-0 flex-1 flex-col gap-4", step !== 1 && "hidden")}>
+        <Hint className={cn("shrink-0", step !== 1 && "hidden")}>
+          {t("migrate.hint1")}
+        </Hint>
+        <TablePicker
+          connId={opts.sourceConn}
+          selected={opts.tables || []}
+          selectedObjects={opts.objects || []}
+          showObjects={!crossType}
+          selectedDBs={opts.databases || []}
+          onDBsChange={handleDBsChange}
+          onBulkChange={({ selected, selectedObjects, conditions, selectedDBs }) => {
+            set({ tables: selected, objects: selectedObjects, conditions, databases: selectedDBs })
+            const src = findConn(opts.sourceConn)
+            if (src && !src.conn.DBName && selectedDBs.length > 0) pickSourceDB(selectedDBs[0])
+          }}
+          conditions={opts.conditions || []}
+          onChange={(tables, objects, conditions) => set({ tables, objects, conditions })}
+        />
+        <WizardFooter className={cn("shrink-0", step !== 1 && "hidden")} onBack={() => setStep(0)} onNext={() => setStep(2)} />
+      </div>
 
       {step === 2 && (
         <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-col gap-4">

@@ -6,7 +6,7 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/cloudwego/eino v0.9.14
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
-	github.com/fj1981/infrakit v1.1.0
+	github.com/fj1981/infrakit v1.2.0
 	github.com/gin-gonic/gin v1.10.1
 	github.com/olekukonko/tablewriter v1.1.4
 	github.com/peterh/liner v1.2.2

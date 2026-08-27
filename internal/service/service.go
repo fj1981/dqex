@@ -690,8 +690,15 @@ func (s *Service) StartExport(opts ExportOptions, taskConfigID string) (string, 
 		return "", err
 	}
 	taskID := newTaskID()
+	dbs, tbls := opts.Databases, opts.Tables
+	if len(opts.Selections) > 0 {
+		dbs = make([]string, 0, len(opts.Selections))
+		for _, sel := range opts.Selections {
+			dbs = append(dbs, sel.DB)
+		}
+	}
 	record := ExecutionRecord{ID: taskID, TaskType: "export", TaskConfigID: taskConfigID, Status: "running", StartedAt: time.Now().UnixMilli(),
-		Target: fmt.Sprintf("%s · %s", s.connLabel(opts.SourceConn, opts.Source), targetTables(opts.Databases, opts.Tables))}
+		Target: fmt.Sprintf("%s · %s", s.connLabel(opts.SourceConn, opts.Source), targetTables(dbs, tbls))}
 	_ = s.persist.SaveHistory(record)
 
 	s.runner.Start(taskID, "export", opts.Lang, func(ctx context.Context, publish ProgressFunc) error {
@@ -724,8 +731,15 @@ func (s *Service) StartDictionary(opts DictionaryOptions, taskConfigID string) (
 		return "", err
 	}
 	taskID := newTaskID()
+	dbs, tbls := opts.Databases, opts.Tables
+	if len(opts.Selections) > 0 {
+		dbs = make([]string, 0, len(opts.Selections))
+		for _, sel := range opts.Selections {
+			dbs = append(dbs, sel.DB)
+		}
+	}
 	record := ExecutionRecord{ID: taskID, TaskType: "dictionary", TaskConfigID: taskConfigID, Status: "running", StartedAt: time.Now().UnixMilli(),
-		Target: fmt.Sprintf("%s · %s", s.connLabel(opts.SourceConn, opts.Source), targetTables(opts.Databases, opts.Tables))}
+		Target: fmt.Sprintf("%s · %s", s.connLabel(opts.SourceConn, opts.Source), targetTables(dbs, tbls))}
 	_ = s.persist.SaveHistory(record)
 
 	s.runner.Start(taskID, "dictionary", opts.Lang, func(ctx context.Context, publish ProgressFunc) error {
@@ -738,6 +752,9 @@ func (s *Service) StartDictionary(opts DictionaryOptions, taskConfigID string) (
 		s.finishRecord(ctx, &record, err, last, func(r *ExecutionRecord) {
 			r.TotalUnits = last.TotalUnits
 			dbCount := len(opts.Databases)
+			if len(opts.Selections) > 0 {
+				dbCount = len(opts.Selections)
+			}
 			if dbCount == 0 {
 				dbCount = 1 // 未显式选库时使用连接配置的库
 			}
@@ -792,8 +809,14 @@ func (s *Service) StartMigrate(opts MigrateOptions, taskConfigID string) (string
 		return "", err
 	}
 	taskID := newTaskID()
+	dbs := []string{}
+	if len(opts.Selections) > 0 {
+		for _, sel := range opts.Selections {
+			dbs = append(dbs, sel.DB)
+		}
+	}
 	record := ExecutionRecord{ID: taskID, TaskType: "migrate", TaskConfigID: taskConfigID, Status: "running", StartedAt: time.Now().UnixMilli(),
-		Target: fmt.Sprintf("%s → %s · %s", s.connLabel(opts.SourceConn, opts.Source), s.connLabel(opts.TargetConn, opts.Target), targetTables(nil, opts.Tables))}
+		Target: fmt.Sprintf("%s → %s · %s", s.connLabel(opts.SourceConn, opts.Source), s.connLabel(opts.TargetConn, opts.Target), targetTables(dbs, opts.Tables))}
 	_ = s.persist.SaveHistory(record)
 
 	s.runner.Start(taskID, "migrate", opts.Lang, func(ctx context.Context, publish ProgressFunc) error {
@@ -1091,7 +1114,7 @@ func newSnapshotID() string {
 	return xid.New().String()
 }
 
-// buildSummary 生成执行摘要，如 "3项, 40000行, 15.3MB"（项 = 表 + 对象）
+// buildSummary 生成执行摘要，如 "3项, 40000行, 15.3MB"（项 = 表 + 对象；双段导出模式下每表计 2 项：结构 + 数据）
 func buildSummary(units int, rows int64, fileSize int64) string {
 	parts := []string{fmt.Sprintf("%d项", units), fmt.Sprintf("%d行", rows)}
 	if fileSize > 0 {

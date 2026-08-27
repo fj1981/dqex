@@ -28,14 +28,27 @@ interface Props {
 export default function ConnectionPair({ source, target, children }: Props) {
   return (
     <div className={`mx-auto w-full space-y-4 ${CONN_PAIR_W}`}>
-      {/* 窗口宽度不足时双卡区域横向滚动，避免目标卡片被裁剪；下方提示/按钮不随动 */}
+      {/* 窗口宽度不足时双卡区域横向滚动，避免目标卡片被裁剪；下方提示/按钮不随动。
+          track 用 minmax(0,1fr)：纯 1fr 隐含 minmax(auto,1fr)，track 最小宽度会取内容 min-content，
+          连接信息过长时把卡片撑破 max-w 限制 */}
       <div className="scrollbar-thin overflow-x-auto pb-1">
-        <div className="grid min-w-[600px] grid-cols-[1fr_auto_1fr] gap-3">
+        <div className="grid min-w-[600px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-3">
           <ConnectionSelect {...source} fill />
-          <div className="flex h-11 items-center justify-center self-center">
-            <span className="flex h-9 w-9 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm">
-              <MoveRight className="h-5 w-5" />
-            </span>
+          {/* 箭头与下拉框垂直对齐：复刻 ConnectionSelect 标题区同构占位
+             （pt-4 = 卡片 padding-top，h-6 图标行 + mt-1 副标题行，高度自动一致），
+             箭头圆圈中心即两侧下拉框中心；调用方均传 subtitle，无 subtitle 时占位会略高 */}
+          <div className="flex flex-col pt-4" aria-hidden>
+            <div className="mb-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <span className="flex h-6 w-6 items-center justify-center" />
+              </div>
+              <div className="mt-1 text-xs">{"\u00A0"}</div>
+            </div>
+            <div className="flex h-11 items-center justify-center">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm">
+                <MoveRight className="h-5 w-5" />
+              </span>
+            </div>
           </div>
           <ConnectionSelect {...target} fill />
         </div>

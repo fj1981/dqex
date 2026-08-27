@@ -250,6 +250,9 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 		if err != nil {
 			return nil, err
 		}
+		// 导入文件内含会话级约束开关（如 SET FOREIGN_KEY_CHECKS=0/1 包裹整个文件），
+		// 钉单连接保证开关与后续语句落在同一连接（连接池下 Exec 可能取到不同连接导致开关随机失效）
+		cli.PinSingleConnection()
 
 		t.p.CurrentTable = f.db
 		t.emit(true)

@@ -16,6 +16,8 @@ type MigrateResult struct {
 }
 
 // RunMigrate 执行迁移：源库 → 目标库。
+// 结构化选择（Selections）时逐库迁移：每库独立连接源侧，目标库为连接配置库（未配置时与源库同名，不存在自动创建）；
+// 旧格式（Tables/Objects）保持单库（源连接配置库）。Oracle 的“库”语义为 schema。
 // 两种模式的数据均以行数据为媒介（源库流式 SELECT → 批量 BatchReplace），不经过 SQL 文本。
 // 同类型：表结构用源库原生 DDL（触发器随建表语句一并迁移），表迁移完成后追加迁移视图/函数/存储过程；
 // 跨类型：仅迁表（结构由源库标准化 TableInfo + 目标方言 MigrationDialect 自动转换），
@@ -26,117 +28,197 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 	}
 	t := newTracker(cb, opts.Lang)
 
-	sourceCli, err := Connect(*opts.Source)
-	if err != nil {
-		return nil, NewMsgErrf(errMigSrcConn, err)
-	}
-	defer sourceCli.Close()
-	// 迁移前确保目标库存在（不存在则自动创建），否则后续连接会直接失败
-	if err := EnsureDBExists(*opts.Target, opts.Target.DBName); err != nil {
-		return nil, NewMsgErrf(errMigEnsureDB, err, opts.Target.DBName)
-	}
-	targetCli, err := Connect(*opts.Target)
-	if err != nil {
-		return nil, NewMsgErrf(errMigTgtConn, err)
-	}
-	defer targetCli.Close()
-
-	// 1. 确定迁移表清单
-	crossType := !strings.EqualFold(sourceCli.DBType(), targetCli.DBType())
-	// 视图走对象迁移通道 _views，不当作表迁移（视图无数据且无法按表建表）
-	all, err := listSchemaTables(sourceCli, opts.Source.DBName, &opts.Source.Schema)
-	if err != nil {
-		return nil, NewMsgErrf(errMigListTables, err)
-	}
-	tables := filterTables(all, opts.Tables, opts.Source.DBName)
-	if len(tables) == 0 {
-		if crossType {
-			return nil, NewMsgErr(errMigNoTablesObj)
-		}
-		if opts.Objects != nil && len(opts.Objects) == 0 {
-			return nil, NewMsgErr(errMigNoSel)
-		}
-	}
-
-	t.p.TotalUnits = len(tables)
-	modeDesc := engineTextsFor(t.lang).modeSame
-	if crossType {
-		modeDesc = fmt.Sprintf(engineTextsFor(t.lang).modeCross, sourceCli.DBType(), targetCli.DBType())
-	} else {
-		modeDesc = engineTextsFor(t.lang).modeSame
-	}
-	t.log(engineTextsFor(t.lang).migStart, modeDesc, len(tables), resetDesc(opts.ResetMode, t.lang))
-
 	batchSize := opts.BatchSize
 	if batchSize <= 0 {
 		batchSize = DefaultBatchSize
 	}
 
+	// 迁移任务列表：结构化选择（库→表/对象）时逐库；旧格式回退单库（源连接配置库）
+	type dbJob struct {
+		srcDB, tgtDB string
+		srcSchema    string // oracle 的“库”=schema
+		tables       []string
+		objects      []string
+	}
+	jobs := make([]dbJob, 0, 1)
+	if len(opts.Selections) > 0 {
+		for _, sel := range opts.Selections {
+			tgtDB := opts.Target.DBName
+			if tgtDB == "" {
+				tgtDB = sel.DB // 目标未配置库时与源库同名
+			}
+			jobs = append(jobs, dbJob{srcDB: sel.DB, tgtDB: tgtDB, tables: sel.Tables, objects: sel.Objects})
+		}
+	} else {
+		jobs = append(jobs, dbJob{srcDB: opts.Source.DBName, tgtDB: opts.Target.DBName, tables: opts.Tables, objects: opts.Objects})
+	}
+
 	var totalRows int64
-	backedUp := []string{}
-	for _, table := range tables {
-		if err := ctx.Err(); err != nil {
-			return nil, NewMsgErr(errCancelled)
+	totalTables := 0
+	for _, job := range jobs {
+		// 连接源库（oracle 的库=schema，写入 Schema 而非 DBName）
+		srcConn := *opts.Source
+		if strings.EqualFold(opts.Source.Type, "oracle") {
+			srcConn.DBName = ""
+			srcConn.Schema = job.srcDB
+			job.srcSchema = job.srcDB
+		} else {
+			srcConn.DBName = job.srcDB
 		}
-		t.p.CurrentTable = table
-		t.emit(true)
-
-		// 2. 重置处理（备份 + truncate/drop）
-		ok, err := resetTable(targetCli, table, opts.ResetMode, opts.Backup, t)
+		sourceCli, err := Connect(srcConn)
 		if err != nil {
-			return nil, err
+			return nil, NewMsgErrf(errMigSrcConn, err)
 		}
-		if ok {
-			backedUp = append(backedUp, table)
+		// 迁移前确保目标库存在（不存在则自动创建），否则后续连接会直接失败
+		tgtConn := *opts.Target
+		if strings.EqualFold(opts.Target.Type, "oracle") {
+			tgtConn.DBName = ""
+			tgtConn.Schema = job.tgtDB
+		} else {
+			tgtConn.DBName = job.tgtDB
 		}
+		if err := EnsureDBExists(tgtConn, job.tgtDB); err != nil {
+			sourceCli.Close()
+			return nil, NewMsgErrf(errMigEnsureDB, err, job.tgtDB)
+		}
+		targetCli, err := Connect(tgtConn)
+		if err != nil {
+			sourceCli.Close()
+			return nil, NewMsgErrf(errMigTgtConn, err)
+		}
+		// 数据写入前挂起目标库约束检查（自引用/跨表外键的行序无法保证，见 suspendTargetChecks 注释）
+		suspendTargetChecks(targetCli, t)
 
-		// 3. 结构迁移（目标表不存在时创建）
-		if !opts.DataOnly {
-			exist, err := targetCli.IsTableExist(table)
+		// 1. 确定迁移表清单
+		crossType := !strings.EqualFold(sourceCli.DBType(), targetCli.DBType())
+		// 视图走对象迁移通道 _views，不当作表迁移（视图无数据且无法按表建表）
+		all, err := listSchemaTables(sourceCli, job.srcDB, &job.srcSchema)
+		if err != nil {
+			sourceCli.Close()
+			targetCli.Close()
+			return nil, NewMsgErrf(errMigListTables, err)
+		}
+		tables := filterTables(all, job.tables, job.srcDB)
+		if len(tables) == 0 {
+			sourceCli.Close()
+			targetCli.Close()
+			if crossType {
+				return nil, NewMsgErr(errMigNoTablesObj)
+			}
+			if job.objects != nil && len(job.objects) == 0 {
+				return nil, NewMsgErr(errMigNoSel)
+			}
+		}
+		// 按外键依赖拓扑排序：被引用表先创建/迁移，避免依赖表找不到父表
+		tables = sortTablesByFK(sourceCli, tables, t)
+
+		t.p.TotalUnits += len(tables)
+		// 同类型且非 DataOnly 才导出对象，跨类型不导出对象；对象数一次性计入，避免后续动态增加 TotalUnits 导致进度回退
+		if !crossType && !opts.DataOnly {
+			t.p.TotalUnits += countExportObjects(sourceCli, job.srcDB, job.srcSchema, job.objects)
+		}
+		modeDesc := engineTextsFor(t.lang).modeSame
+		if crossType {
+			modeDesc = fmt.Sprintf(engineTextsFor(t.lang).modeCross, sourceCli.DBType(), targetCli.DBType())
+		} else {
+			modeDesc = engineTextsFor(t.lang).modeSame
+		}
+		t.log(engineTextsFor(t.lang).migStart, modeDesc, len(tables), resetDesc(opts.ResetMode, t.lang))
+
+		backedUp := []string{}
+		for _, table := range tables {
+			if err := ctx.Err(); err != nil {
+				sourceCli.Close()
+				targetCli.Close()
+				return nil, NewMsgErr(errCancelled)
+			}
+			t.p.CurrentTable = table
+			t.emit(true)
+
+			// 2. 重置处理（备份 + truncate/drop）
+			ok, err := resetTable(targetCli, table, opts.ResetMode, opts.Backup, t)
 			if err != nil {
+				sourceCli.Close()
+				targetCli.Close()
 				return nil, err
 			}
-			if !exist {
-				ddl, err := buildCreateTableDDL(sourceCli, targetCli, table, crossType, opts.CompatCollation)
+			if ok {
+				backedUp = append(backedUp, table)
+			}
+
+			// 3. 结构迁移（目标表不存在时创建）
+			if !opts.DataOnly {
+				exist, err := targetCli.IsTableExist(table)
 				if err != nil {
-					return nil, NewMsgErrf(errMigDDL, err, table)
+					sourceCli.Close()
+					targetCli.Close()
+					return nil, err
 				}
-				if _, err := targetCli.DirectExecute(ddl); err != nil {
-					return nil, NewMsgErrf(errMigCreateTable, err, table)
+				if !exist {
+					ddl, err := buildCreateTableDDL(sourceCli, targetCli, table, crossType, opts.CompatCollation)
+					if err != nil {
+						sourceCli.Close()
+						targetCli.Close()
+						return nil, NewMsgErrf(errMigDDL, err, table)
+					}
+					if _, err := targetCli.DirectExecute(ddl); err != nil {
+						sourceCli.Close()
+						targetCli.Close()
+						return nil, NewMsgErrf(errMigCreateTable, err, table)
+					}
+					t.log(engineTextsFor(t.lang).migCreate, table)
 				}
-				t.log(engineTextsFor(t.lang).migCreate, table)
+			}
+
+			// 4. 数据迁移
+			if opts.SchemaOnly {
+				t.p.DoneUnits++
+				continue
+			}
+			rows, err := migrateTableData(ctx, sourceCli, targetCli, table, opts, batchSize, t, job.srcDB)
+			if err != nil {
+				sourceCli.Close()
+				targetCli.Close()
+				return nil, NewMsgErrf(errMigData, err, table)
+			}
+			totalRows += rows
+			t.p.DoneUnits++
+			t.log(engineTextsFor(t.lang).migTableDone, table, rows)
+		}
+
+		// 5. 对象迁移（仅同类型且非 DataOnly：视图/函数/存储过程；触发器已随建表语句迁移）
+		if !crossType && !opts.DataOnly {
+			migrateDBObjects(ctx, sourceCli, targetCli, job.srcDB, job.srcSchema, job.objects, t)
+		}
+
+		// 6. 成功后清理备份表
+		for _, table := range backedUp {
+			if err := dropBackupTable(targetCli, table); err != nil {
+				t.log(engineTextsFor(t.lang).migCleanFail, err)
 			}
 		}
 
-		// 4. 数据迁移
-		if opts.SchemaOnly {
-			t.p.DoneUnits++
-			continue
-		}
-		rows, err := migrateTableData(ctx, sourceCli, targetCli, table, opts, batchSize, t)
-		if err != nil {
-			return nil, NewMsgErrf(errMigData, err, table)
-		}
-		totalRows += rows
-		t.p.DoneUnits++
-		t.log(engineTextsFor(t.lang).migTableDone, table, rows)
-	}
-
-	// 5. 对象迁移（仅同类型且非 DataOnly：视图/函数/存储过程；触发器已随建表语句迁移）
-	if !crossType && !opts.DataOnly {
-		migrateDBObjects(ctx, sourceCli, targetCli, opts.Source.DBName, opts.Source.Schema, opts.Objects, t)
-	}
-
-	// 6. 成功后清理备份表
-	for _, table := range backedUp {
-		if err := dropBackupTable(targetCli, table); err != nil {
-			t.log(engineTextsFor(t.lang).migCleanFail, err)
-		}
+		sourceCli.Close()
+		targetCli.Close()
+		totalTables += len(tables)
 	}
 
 	t.finish()
-	t.log(engineTextsFor(t.lang).migDone, len(tables), totalRows)
-	return &MigrateResult{TotalTables: len(tables), TotalRows: totalRows}, nil
+	t.log(engineTextsFor(t.lang).migDone, totalTables, totalRows)
+	return &MigrateResult{TotalTables: totalTables, TotalRows: totalRows}, nil
+}
+
+// suspendTargetChecks 数据写入阶段挂起目标库的外键/触发器校验（业界标准做法，mysqldump 导出文件
+// 同样以 SET FOREIGN_KEY_CHECKS 开关包裹）：自引用外键（如 act_ru_execution 的 PROC_INST_ID_ →
+// 本表 ID_）无法靠表级拓扑排序保证行序，父行可能落在后续批次，必须挂起校验后整体写入。
+// 能力下沉 infrakit cydb（PinSingleConnection + SuspendConstraintChecks）；开关为会话级，
+// 连接为本次迁移独占，任务结束随 Close 释放自动失效，无需显式恢复。
+// PG 的 session_replication_role 需要超级用户权限，失败仅告警不阻断；Oracle 暂不支持（保持原校验行为）
+func suspendTargetChecks(targetCli *cydb.DBCli, t *tracker) {
+	targetCli.PinSingleConnection()
+	if sql, err := targetCli.SuspendConstraintChecks(); err != nil {
+		t.log(engineTextsFor(t.lang).migCheckWarn, sql, err)
+	}
 }
 
 // buildCreateTableDDL 生成目标库建表语句：
@@ -196,8 +278,7 @@ func migrateDBObjects(ctx context.Context, sourceCli, targetCli *cydb.DBCli, db,
 		if len(names) == 0 {
 			continue
 		}
-		t.p.TotalUnits += len(names)
-		t.emit(true)
+		// 对象数已在任务开始时计入 TotalUnits，此处不再重复增加
 		for _, name := range names {
 			if err := ctx.Err(); err != nil {
 				t.log("%s", engineTextsFor(t.lang).migCancel)
@@ -224,10 +305,10 @@ func migrateDBObjects(ctx context.Context, sourceCli, targetCli *cydb.DBCli, db,
 }
 
 // migrateTableData 流式迁移单表数据：ForEachQuery → 批量 BatchReplace（目标已有同主键行时覆盖，避免主键冲突）
-func migrateTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, table string, opts MigrateOptions, batchSize int, t *tracker) (int64, error) {
+func migrateTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, table string, opts MigrateOptions, batchSize int, t *tracker, srcDB string) (int64, error) {
 	srcType, srcSub := sourceCli.DBType(), sourceCli.DBSubType()
 
-	cond := findCondition(opts.Conditions, opts.Source.DBName, table)
+	cond := findCondition(opts.Conditions, srcDB, table)
 	// 取数 SQL：条件统一为完整 SELECT（旧版 Where/Columns 归一化拼装），无条件时全表
 	selectSQL := conditionQuery(srcType, srcSub, table, cond)
 	if selectSQL == "" {
@@ -238,10 +319,9 @@ func migrateTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, tab
 	batch := make([]map[string]any, 0, batchSize)
 
 	// 写入模式：REPLACE 覆盖写（MySQL/SQLite 原生支持；PG/Oracle 按主键转 upsert）。
-	// PG/Oracle 目标无主键的表无法冲突覆盖，降级为普通 INSERT
+	// 需要显式冲突列的方言（方言自描述）目标无主键时无法冲突覆盖，降级为普通 INSERT
 	useReplace := true
-	switch targetCli.DBType() {
-	case "postgresql", "oracle":
+	if targetCli.GetWriteCapability().ReplaceNeedsConflictColumns {
 		if ti, err := targetCli.GetTableInfo(table); err != nil || len(ti.GetPrimaryKeys()) == 0 {
 			useReplace = false
 		}
@@ -264,7 +344,9 @@ func migrateTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, tab
 		return nil
 	}
 
-	err := sourceCli.ForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
+	// DirectForEachQuery 跳过 preProcess：GoSQLX 无法解析 PG/Kingbase 双引号限定名（"schema"."table"），
+	// selectSQL 为可执行完整 SQL，直接交由数据库解析执行
+	err := sourceCli.DirectForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
 		if err := ctx.Err(); err != nil {
 			return NewMsgErr(errCancelled)
 		}

@@ -71,28 +71,65 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 
 	// 2. 预扫描：收集各库的表清单
 	type dbTables struct {
-		db     string
-		tables []string
+		db      string
+		tables  []string
+		objects []string // 该库对象白名单（结构化选择时逐库携带；旧格式为全局 opts.Objects）
 	}
 	var plan []dbTables
-	for _, db := range databases {
-		if err := ctx.Err(); err != nil {
-			return nil, NewMsgErr(errCancelled)
+	// 结构化选择（库→表/对象）优先：库归属由 selection 确定，扁平字段（databases/tables/objects）仅作旧格式回退
+	if len(opts.Selections) > 0 {
+		for _, sel := range opts.Selections {
+			if err := ctx.Err(); err != nil {
+				return nil, NewMsgErr(errCancelled)
+			}
+			db := sel.DB
+			cli, err := ConnectDB(*opts.Source, db)
+			if err != nil {
+				// 无任何选中表/对象的库连接失败时跳过（多为旧配置/跨连接残留的库名），不阻断整体导出；
+				// 有选中项则报错，避免静默丢库
+				if len(sel.Tables) == 0 && len(sel.Objects) == 0 {
+					t.log(engineTextsFor(t.lang).expSkipConn, db, err)
+					continue
+				}
+				return nil, err
+			}
+			all, err := listSchemaTables(cli, db, &opts.Source.Schema)
+			cli.Close()
+			if err != nil {
+				return nil, NewMsgErrf(errExpListTables, err, db)
+			}
+			tables := filterTables(all, sel.Tables, db)
+			if len(tables) == 0 {
+				t.log(engineTextsFor(t.lang).expNoTables, db)
+			}
+			plan = append(plan, dbTables{db: db, tables: tables, objects: sel.Objects})
 		}
-		cli, err := ConnectDB(*opts.Source, db)
-		if err != nil {
-			return nil, err
+	} else {
+		for _, db := range databases {
+			if err := ctx.Err(); err != nil {
+				return nil, NewMsgErr(errCancelled)
+			}
+			cli, err := ConnectDB(*opts.Source, db)
+			if err != nil {
+				// 库连接失败且无任何选中表/对象时跳过（多为旧配置/跨连接残留的库名），不阻断整体导出；
+				// 有选中项则报错，避免静默丢库
+				if !dbHasSelection(db, opts.Tables, opts.Objects) {
+					t.log(engineTextsFor(t.lang).expSkipConn, db, err)
+					continue
+				}
+				return nil, err
+			}
+			all, err := listSchemaTables(cli, db, &opts.Source.Schema)
+			cli.Close()
+			if err != nil {
+				return nil, NewMsgErrf(errExpListTables, err, db)
+			}
+			tables := filterTables(all, opts.Tables, db)
+			if len(tables) == 0 {
+				t.log(engineTextsFor(t.lang).expNoTables, db)
+			}
+			plan = append(plan, dbTables{db: db, tables: tables, objects: opts.Objects})
 		}
-		all, err := listSchemaTables(cli, db, &opts.Source.Schema)
-		cli.Close()
-		if err != nil {
-			return nil, NewMsgErrf(errExpListTables, err, db)
-		}
-		tables := filterTables(all, opts.Tables, db)
-		if len(tables) == 0 {
-			t.log(engineTextsFor(t.lang).expNoTables, db)
-		}
-		plan = append(plan, dbTables{db: db, tables: tables})
 	}
 	if len(plan) == 0 {
 		return nil, NewMsgErr(errExpNoDatabases)
@@ -102,7 +139,24 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 	for _, p := range plan {
 		totalTables += len(p.tables)
 	}
-	t.p.TotalUnits = totalTables
+	// 表进度单位：SchemaOnly/DataOnly 单段每表计 1 次；结构+数据双段每表计 2 次（结构完成 + 数据完成），
+	// 避免结构段耗时较长时（如 PG/Kingbase 大库）进度长时间停滞在 0
+	units := totalTables
+	if !opts.SchemaOnly && !opts.DataOnly {
+		units = totalTables * 2
+	}
+	// 对象进度单位：任务开始时一次性加入，避免对象导出阶段动态增加 TotalUnits 导致进度百分比回退
+	if !opts.DataOnly {
+		for _, p := range plan {
+			cli, err := ConnectDB(*opts.Source, p.db)
+			if err != nil {
+				continue
+			}
+			units += countExportObjects(cli, p.db, opts.Source.Schema, p.objects)
+			cli.Close()
+		}
+	}
+	t.p.TotalUnits = units
 	t.log(engineTextsFor(t.lang).expStart, len(plan), totalTables, filepath.Base(baseDir))
 
 	// 3. 逐库导出（每库一个 sql 文件）
@@ -126,7 +180,7 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 		dbFile := filepath.Join(baseDir, sanitizeName(p.db)+sqlFileExt(opts.Gzip))
 		// 一致性快照：启用后全部读取在同一事务内进行，跨表处于同一时间点
 		exportCli, endSnapshot := beginSnapshot(cli, opts.SingleTransaction, t)
-		rows, err := exportDatabase(ctx, exportCli, p.db, p.tables, dbFile, opts, t, beginSQL, endSQL)
+		rows, err := exportDatabase(ctx, exportCli, p.db, p.tables, dbFile, opts, t, beginSQL, endSQL, p.objects)
 		endSnapshot(err == nil)
 		if err != nil {
 			cli.Close()
@@ -212,7 +266,7 @@ func beginSnapshot(cli *cydb.DBCli, enabled bool, t *tracker) (*cydb.DBCli, func
 // 文件内顺序：建表 DDL（含触发器）→ 数据（INSERT）→ 视图 → 函数 → 存储过程。
 // SchemaOnly=true 时跳过数据段；DataOnly=true 时跳过建表段；二者都为 false 时两段都有。
 // 同时生成同名 .desc 描述文件（JSON 格式），导入时直接读取获取元信息。
-func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []string, filePath string, opts ExportOptions, t *tracker, beginSQL, endSQL string) (int64, error) {
+func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []string, filePath string, opts ExportOptions, t *tracker, beginSQL, endSQL string, objects []string) (int64, error) {
 	f, err := os.Create(filePath)
 	if err != nil {
 		return 0, err
@@ -255,10 +309,8 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 			if err := writeTableDDL(cli, table, w, opts.CompatCollation); err != nil {
 				return totalRows, NewMsgErrf(errExpDDL, err, db, table)
 			}
-			// 表进度每表只计一次：SchemaOnly 无数据段在此计数，否则留给数据段
-			if opts.SchemaOnly {
-				t.p.DoneUnits++
-			}
+			// 结构段完成即计一次进度；双段模式下数据段完成后再计一次（TotalUnits 已按双倍预分配）
+			t.p.DoneUnits++
 			t.log(engineTextsFor(t.lang).expStructDone, db, table)
 			fmt.Fprintln(w)
 		}
@@ -318,7 +370,7 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 
 	// ============ 视图/函数/存储过程 ============
 	if !opts.DataOnly {
-		exportedObjs, err := exportObjectsToWriter(ctx, cli, db, opts.Source.Schema, w, opts.Objects, t)
+		exportedObjs, err := exportObjectsToWriter(ctx, cli, db, opts.Source.Schema, w, objects, t)
 		if err != nil {
 			return totalRows, NewMsgErrf(errExpObjects, err, db)
 		}
@@ -454,7 +506,9 @@ func writeTableData(ctx context.Context, cli *cydb.DBCli, db, table string, w *b
 	}
 
 	var rows int64
-	err := cli.ForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
+	// DirectForEachQuery 跳过 preProcess：GoSQLX（MySQL 方言）无法解析 PG/Kingbase 的双引号限定名
+	// （"schema"."table"），而 selectSQL 均为可执行完整 SQL，直接交由数据库解析执行
+	err := cli.DirectForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
 		if err := ctx.Err(); err != nil {
 			return NewMsgErr(errCancelled)
 		}
@@ -521,9 +575,7 @@ func exportObjectsToWriter(ctx context.Context, cli *cydb.DBCli, db, schema stri
 		if len(names) == 0 {
 			continue
 		}
-		t.p.TotalUnits += len(names)
-		t.emit(true)
-
+		// 对象数已在任务开始时计入 TotalUnits，此处不再重复增加
 		fmt.Fprintf(w, "-- ============ %s ============\n\n", kindTitles[kind])
 
 		for _, name := range names {
@@ -548,6 +600,22 @@ func exportObjectsToWriter(ctx context.Context, cli *cydb.DBCli, db, schema stri
 		fmt.Fprintln(w)
 	}
 	return exported, nil
+}
+
+// dbHasSelection 判断库在选中表/对象中是否有对应项（条目以 "库." 前缀限定时才归属该库）
+func dbHasSelection(db string, tables, objects []string) bool {
+	prefix := strings.ToLower(db) + "."
+	for _, t := range tables {
+		if strings.HasPrefix(strings.ToLower(t), prefix) {
+			return true
+		}
+	}
+	for _, o := range objects {
+		if strings.HasPrefix(strings.ToLower(o), prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // filterTables 按指定表名过滤：nil=全部，空数组=不过滤出任何表。

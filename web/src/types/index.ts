@@ -82,6 +82,15 @@ export interface TableColumn {
   comment?: string // 列注释（可为空）
 }
 
+// 单库导出选择：库 → 该库下的表/对象白名单（结构化提交，替代扁平 databases/tables 分离传参）
+// 表/对象条目保留完整限定名（"库.schema.表" / "库.schema._dir/名"），库归属由前缀确定
+// tables 为 null/缺省 = 库内全部表（整库导出）；空数组 = 不导出表
+export interface DBSelection {
+  db: string
+  tables?: string[] | null
+  objects?: string[] | null
+}
+
 export interface ExportOptions {
   sourceConn: string
   source?: DBConn | null
@@ -91,6 +100,8 @@ export interface ExportOptions {
   tables?: string[]
   // 对象白名单，格式 _views/名称；undefined=全部，[]=不导出
   objects?: string[]
+  // 结构化库→表/对象选择（后端优先使用；databases/tables/objects 仅作旧配置回退）
+  selections?: DBSelection[]
   conditions?: TableCondition[]
   schemaOnly: boolean
   dataOnly: boolean
@@ -114,6 +125,8 @@ export interface DictionaryOptions {
   taskName: string
   databases?: string[]
   tables?: string[]
+  // 结构化库→表选择（后端优先使用；databases/tables 仅作旧配置回退）
+  selections?: DBSelection[]
   compress: boolean
   lang?: string // 产物文案语言（zh/en），缺省后端回退 zh
 }
@@ -139,6 +152,8 @@ export interface MigrateOptions {
   tables?: string[]
   // 对象白名单，格式 _views/名称；undefined=全部，[]=不迁移；仅同类型迁移生效
   objects?: string[]
+  // 结构化源库→表/对象选择（后端优先使用；多库迁移逐库执行，目标库为连接配置库或与源库同名）
+  selections?: DBSelection[]
   conditions?: TableCondition[]
   schemaOnly: boolean
   dataOnly: boolean

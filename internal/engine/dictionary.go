@@ -142,26 +142,57 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 		tables []string
 	}
 	var plan []dbTables
-	for _, db := range databases {
-		if err := ctx.Err(); err != nil {
-			return nil, NewMsgErr(errCancelled)
+	// 结构化选择（库→表）优先：库归属由 selection 确定，扁平字段（databases/tables）仅作旧格式回退
+	if len(opts.Selections) > 0 {
+		for _, sel := range opts.Selections {
+			if err := ctx.Err(); err != nil {
+				return nil, NewMsgErr(errCancelled)
+			}
+			db := sel.DB
+			cli, err := ConnectDB(*opts.Source, db)
+			if err != nil {
+				// 无任何选中表的库连接失败时跳过（多为旧配置/跨连接残留的库名），不阻断整体导出
+				if len(sel.Tables) == 0 {
+					t.log(engineTextsFor(t.lang).expSkipConn, db, err)
+					continue
+				}
+				return nil, err
+			}
+			all, err := listSchemaTables(cli, db, &opts.Source.Schema)
+			cli.Close()
+			if err != nil {
+				return nil, NewMsgErrf(errDictListTables, err, db)
+			}
+			tables := filterTables(all, sel.Tables, db)
+			if len(tables) == 0 {
+				t.log(engineTextsFor(t.lang).dictNoTables, db)
+				continue
+			}
+			sort.Strings(tables)
+			plan = append(plan, dbTables{db: db, tables: tables})
 		}
-		cli, err := ConnectDB(*opts.Source, db)
-		if err != nil {
-			return nil, err
+	} else {
+		for _, db := range databases {
+			if err := ctx.Err(); err != nil {
+				return nil, NewMsgErr(errCancelled)
+			}
+			cli, err := ConnectDB(*opts.Source, db)
+			if err != nil {
+				return nil, err
+			}
+			all, err := listSchemaTables(cli, db, &opts.Source.Schema)
+			cli.Close()
+			if err != nil {
+				return nil, NewMsgErrf(errDictListTables, err, db)
+			}
+			tables := filterTables(all, opts.Tables, db)
+			if len(tables) == 0 {
+				t.log(engineTextsFor(t.lang).dictNoTables, db)
+				continue
+			}
+			sort.Strings(tables)
+			plan = append(plan, dbTables{db: db, tables: tables})
 		}
-		all, err := listSchemaTables(cli, db, &opts.Source.Schema)
-		cli.Close()
-		if err != nil {
-			return nil, NewMsgErrf(errDictListTables, err, db)
-		}
-		tables := filterTables(all, opts.Tables, db)
-		if len(tables) == 0 {
-			t.log(engineTextsFor(t.lang).dictNoTables, db)
-			continue
-		}
-		sort.Strings(tables)
-		plan = append(plan, dbTables{db: db, tables: tables})
 	}
 	if len(plan) == 0 {
 		return nil, NewMsgErr(errDictNoTables)
