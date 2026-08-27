@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.1] - 2026-08-27
+### Changed
+- Target database constraint checks are suspended during migration (session-level switch); databases with self-referencing foreign keys no longer fail on row ordering
+- Migration tables are topologically sorted by foreign-key dependencies (referenced tables first)
+- Upgraded infrakit to v1.2.0: batch writes now use multi-row VALUES (faster migration); progress page shows the current table name
+- Table picker keeps loaded databases/tables and selection state across wizard steps; switching connections clears stale selections
+
+### Fixed
+- Multi-database selection & migration experience: per-database table/object selections previously had mismatched database ownership and stale selections survived connection switches; selection is now per-database accurate (checking an unloaded database loads it and cascade-selects), and migration supports multiple source databases per task (target defaults to the source name and is created automatically)
+- Export progress stuck near 0 in structure+data mode, and progress percentage regression during the object stage
+- PG/Kingbase quoted qualified names (`"schema"."table"`) causing data read failures
+- Migration progress never reaching 100% in DataOnly mode
+
 ## [1.2.0] - 2026-08-26
 ### Added
 - Object tree progressive loading: database list → schemas (with table counts) → objects, loaded level by level on click; unloaded nodes are grayed out (Navicat-style interaction)
