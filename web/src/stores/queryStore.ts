@@ -55,6 +55,9 @@ interface QueryState {
   persistFailed: boolean // 工作区持久化失败标记（用于 UI 提示，下次成功保存时清除）
   clearPersistFailed: () => void
   setConnId: (connId: string) => void
+  // 启动恢复：connId 从 localStorage 直接初始化时 setConnId 不会被调用（prev===connId 早退），
+  // 挂载时需显式调用一次，否则 tabs 恒为空，且首次 persistCurrent 会用空快照覆盖后端记录
+  initWorkspace: () => void
   updateTabSettings: (settings: Partial<TabSettings>) => void // 更新标签页设置
   addTab: (db?: string) => void // 新建查询 tab（可选指定目标库，空 = 连接默认库）
   openObjectTab: (db: string, name: string, objType: ObjectDDLType) => void // 打开对象 tab（已存在则激活）
@@ -272,6 +275,8 @@ function persistNow(connId: string, tabs: WorkspaceTab[], activeId: string, tabS
 // 若每次都立即落盘，会在几十毫秒内对同一连接发出多条相同的 PUT /workspace。
 // 这里统一走防抖：窗口内多次变更只落盘一次（回调时重新读最新 store 状态，不会被旧快照覆盖）。
 let persistTimer: ReturnType<typeof setTimeout> | null = null
+// 启动恢复只执行一次的标记（模块级：HMR/严格模式双重渲染下不重复拉取）
+const initDoneRef = { val: false }
 function persistCurrent() {
   if (persistTimer) clearTimeout(persistTimer)
   persistTimer = setTimeout(() => {
@@ -297,6 +302,21 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     const next = { ...tabSettings, ...settings }
     set({ tabSettings: next })
     persistCurrent()
+  },
+
+  // 启动恢复（只执行一次）：恢复 localStorage 记住的上次连接的工作区。
+  // 不判断 tabs 是否为空：首次挂载时必然为空；若恢复期间用户已手动切连接，setConnId 内部会再走各自的恢复，
+  // 两处均以「恢复完成时 connId 仍匹配」作守卫，不会互相覆盖
+  initWorkspace: () => {
+    const { connId } = get()
+    if (!connId || initDoneRef.val) return
+    initDoneRef.val = true
+    void (async () => {
+      const restored = await restoreConn(connId)
+      if (get().connId === connId) {
+        set({ tabs: restored.tabs, activeId: restored.activeId, tabSettings: restored.tabSettings ?? {} })
+      }
+    })()
   },
 
   setConnId: (connId) => {

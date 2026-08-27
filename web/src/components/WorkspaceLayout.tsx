@@ -71,6 +71,7 @@ export default function WorkspaceLayout() {
     mask,
     connId,
     setConnId,
+    initWorkspace,
     addTab,
     openObjectTab,
     closeTab,
@@ -204,6 +205,12 @@ export default function WorkspaceLayout() {
         : ping === "fail"
           ? t("workspace.connFail")
           : t("workspace.connCheck")
+
+  // 启动恢复：connId 从 localStorage 恢复时 setConnId 不会被调用，需显式拉回后端工作区，
+  // 否则刷新后 tab 栏空白且空快照会覆盖后端记录
+  useEffect(() => {
+    initWorkspace()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 连接状态自愈：
   // 1) 首次进入若连接列表已加载、尚未选连接，自动选中第一个（供右侧历史面板感知）；
