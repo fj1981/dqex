@@ -8,6 +8,7 @@
 - Table picker keeps loaded databases/tables and selection state across wizard steps; switching connections clears stale selections
 
 ### Fixed
+- Workspace tabs blank after refresh/reopen, and empty snapshots overwriting saved workspace records (workspace was not restored when the connection was initialized from localStorage)
 - Multi-database selection & migration experience: per-database table/object selections previously had mismatched database ownership and stale selections survived connection switches; selection is now per-database accurate (checking an unloaded database loads it and cascade-selects), and migration supports multiple source databases per task (target defaults to the source name and is created automatically)
 - Export progress stuck near 0 in structure+data mode, and progress percentage regression during the object stage
 - PG/Kingbase quoted qualified names (`"schema"."table"`) causing data read failures
