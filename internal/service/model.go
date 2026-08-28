@@ -3,7 +3,7 @@
 package service
 
 import (
-	"dqex/internal/store"
+	"github.com/fj1981/dqex/internal/store"
 )
 
 // ---- 模型别名（统一定义在 store 包，避免循环依赖；service 通过别名复用） ----

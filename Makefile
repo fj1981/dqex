@@ -9,7 +9,7 @@ SHORT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILDTIME = $(shell date '+%y%m%d%H%M')
 # 编译标签：make build TAGS=opensource 或 make release TAGS=opensource 时启用开源构建（"关于"弹窗展示项目 Git 地址与联系方式）
 TAGS ?=
-LDFLAGS_REL := -s -w -X dqex/internal/cli.Version=$(VERSION) -X dqex/internal/cli.CommitID=$(SHORT_COMMIT) -X 'dqex/internal/cli.BuildTime=$(BUILDTIME)'
+LDFLAGS_REL := -s -w -X github.com/fj1981/dqex/internal/cli.Version=$(VERSION) -X github.com/fj1981/dqex/internal/cli.CommitID=$(SHORT_COMMIT) -X 'dqex/internal/cli.BuildTime=$(BUILDTIME)'
 
 # 检测 air 是否已安装
 HAS_AIR := $(shell command -v $(AIR) 2>/dev/null)
@@ -49,7 +49,7 @@ web-stub:
 
 # 构建单二进制（内嵌真实前端产物，注入版本号与构建时间）
 build: web-dist
-	$(GO) build $(if $(TAGS),-tags $(TAGS),) -ldflags "-X dqex/internal/cli.Version=$(VERSION) -X dqex/internal/cli.CommitID=$(SHORT_COMMIT) -X 'dqex/internal/cli.BuildTime=$(BUILDTIME)'" -o dqex ./cmd
+	$(GO) build $(if $(TAGS),-tags $(TAGS),) -ldflags "-X github.com/fj1981/dqex/internal/cli.Version=$(VERSION) -X github.com/fj1981/dqex/internal/cli.CommitID=$(SHORT_COMMIT) -X 'dqex/internal/cli.BuildTime=$(BUILDTIME)'" -o dqex ./cmd
 	@echo ">> 构建完成: ./dqex（版本 $(VERSION)，构建于 $(BUILDTIME)）"
 
 # 构建并安装到本机（默认 /usr/local/bin，无写权限时自动 sudo；可 make install PREFIX=$HOME/bin 覆盖）

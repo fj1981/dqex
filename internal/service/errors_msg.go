@@ -7,9 +7,10 @@ package service
 import (
 	"context"
 
-	"dqex/internal/engine"
 	"errors"
 	"fmt"
+
+	"github.com/fj1981/dqex/internal/engine"
 )
 
 // SvcError 结构化业务错误

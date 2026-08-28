@@ -3,11 +3,12 @@ package cli
 // 点导入：CLI 层大量复用 service 包的模型别名与入口（NewService/选项模型/错误码）
 import (
 	"context"
-	. "dqex/internal/service"
 	"fmt"
 
-	"github.com/spf13/cobra"
+	. "github.com/fj1981/dqex/internal/service"
+
 	"github.com/fj1981/infrakit/pkg/cygin"
+	"github.com/spf13/cobra"
 )
 
 var migrateSrc, migrateTarget connFlags

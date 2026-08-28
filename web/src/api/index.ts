@@ -1,5 +1,6 @@
 import { toast } from "sonner"
 import i18n from "@/lib/i18n"
+import { notifyTokenExpired } from "@/lib/embedBus"
 import type {
   AIProvider,
   AIStatus,
@@ -49,7 +50,12 @@ function resolveToken(): string {
   return sessionStorage.getItem("dbx_token") || ""
 }
 
-const authToken = resolveToken()
+let authToken = resolveToken()
+
+// 供嵌入模式注入宿主下发的令牌（dqex:init 握手，见 docs/library-api-design.md 6.5.3 方案 b）
+export function setAuthToken(token: string) {
+  authToken = token
+}
 
 // ---- 请求语言：统一以 ?lang= query 携带（cygin FromCtx 中 query 优先于 header），
 // EventSource / 下载等无法自定义请求头的场景同样生效 ----
@@ -90,6 +96,8 @@ export async function request<T>(url: string, init?: RequestInit): Promise<T> {
       // 忽略：响应体非 JSON 时用默认文案
     }
     notifyAuthError(msg)
+    // 嵌入模式下上报宿主令牌过期，由宿主重新握手注入或刷新 iframe（设计文档 6.5.3）
+    notifyTokenExpired()
     throw new Error(msg)
   }
   let body: { code: number; msg?: string; details?: string[]; data?: T }

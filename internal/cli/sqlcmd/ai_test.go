@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"dqex/internal/engine"
-	"dqex/internal/llm"
-	"dqex/internal/service"
+	"github.com/fj1981/dqex/internal/engine"
+	"github.com/fj1981/dqex/internal/llm"
+	"github.com/fj1981/dqex/internal/service"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/fj1981/infrakit/pkg/cydb/def"

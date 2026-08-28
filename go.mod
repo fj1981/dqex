@@ -1,4 +1,4 @@
-module dqex
+module github.com/fj1981/dqex
 
 go 1.25.1
 

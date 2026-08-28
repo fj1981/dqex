@@ -1,10 +1,11 @@
 package cli
 
 import (
-	"dqex/internal/llm"
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/fj1981/dqex/internal/llm"
 )
 
 // printf/fprintf/sprintf 包装 fmt 同名函数：语言注册表文本为动态格式串，

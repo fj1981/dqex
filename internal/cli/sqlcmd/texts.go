@@ -3,11 +3,12 @@ package sqlcmd
 import (
 	"context"
 
-	"dqex/internal/llm"
-	"dqex/internal/service"
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/fj1981/dqex/internal/llm"
+	"github.com/fj1981/dqex/internal/service"
 )
 
 // printf/fprintf/sprintf 包装 fmt 同名函数：语言注册表文本为动态格式串，

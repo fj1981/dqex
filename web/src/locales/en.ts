@@ -74,6 +74,11 @@ const en: typeof import("./zh").default = {
     dictionaryDesc: "Structure → Excel",
   },
 
+  // ---- Embed mode (#/embed/<view> full-page iframe embedding, docs 6.5) ----
+  embed: {
+    invalidView: "Unsupported embed view: {{view}}",
+  },
+
   // ---- App layout (header / right panel / task types) ----
   app: {
     title: "Database Workbench",

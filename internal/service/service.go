@@ -12,11 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"dqex/internal/engine"
+	"github.com/fj1981/dqex/internal/engine"
 
 	"github.com/rs/xid"
 
-	"github.com/fj1981/infrakit/pkg/cydb"
 	"github.com/fj1981/infrakit/pkg/cydist"
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cylog"
@@ -30,6 +29,13 @@ type Service struct {
 	configFile  string // 全局配置文件路径（空 = 未发现，使用默认值）
 	dataDirFlag string // --data-dir 启动参数（用于 ResolveDirs 覆盖）
 	ai          *aiMgr // AI 会话管理（懒加载，见 ai.go）
+
+	// ---- 库模式扩展（docs/library-api-design.md 3.5 / 4.1） ----
+	storeMode    StoreMode             // 持久化模式：StoreNone（库模式默认）/ StoreSQLite（CLI/Web）
+	memMu        sync.RWMutex          // 内存连接注册表锁（Client 并发安全）
+	memConns     map[string]ConnRecord // 内存注册表：WithInlineConns 静态注入 + StoreNone 下 AddConnection
+	connProvider *ConnProvider         // 连接提供者回调（连接完全外部持有）
+	connHooks    *ConnHooks            // 连接生命周期回调（审计/监控，可选）
 }
 
 // ---- 元数据分级接口缓存 ----
@@ -178,7 +184,8 @@ func validShortName(s string) bool {
 	return true
 }
 
-// AddConnection 保存连接配置：rec.ID 非空为按主键更新，否则新建（生成 xid）
+// AddConnection 保存连接配置：rec.ID 非空为按主键更新，否则新建（生成 xid）。
+// StoreNone 库模式下不落盘、仅内存注册表生效（见 3.2/4.1）；StoreSQLite 落盘持久化。
 func (s *Service) AddConnection(ctx context.Context, rec ConnRecord) (ConnRecord, error) {
 	txt := svcTextsFor(langFrom(ctx))
 	rec.Name = strings.TrimSpace(rec.Name)
@@ -190,9 +197,8 @@ func (s *Service) AddConnection(ctx context.Context, rec ConnRecord) (ConnRecord
 		if !validShortName(rec.ShortName) {
 			return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetails(txt.errConnShortName))
 		}
-		// 短名唯一性校验：新建或更新时不能与其他连接重复
-		conns := s.persist.LoadConns()
-		for _, existing := range conns {
+		// 短名唯一性校验：新建或更新时不能与其他连接重复（含内存注册表 + 持久层全量）
+		for _, existing := range s.allConnRecords() {
 			if existing.ShortName == rec.ShortName && existing.ID != rec.ID {
 				return rec, cygin.NewError(cygin.ErrParamsInvalid, cygin.WithErrPrint(), cygin.WithErrDetailf(txt.errConnShortNameDup, rec.ShortName))
 			}
@@ -204,28 +210,65 @@ func (s *Service) AddConnection(ctx context.Context, rec ConnRecord) (ConnRecord
 	if _, ok := SupportedDBTypes[rec.Conn.Type]; !ok {
 		return rec, cygin.NewError(ErrUnsupportedType, cygin.WithErrPrint(), cygin.WithErrDetailf(txt.errConnTypeUnsupported, rec.Conn.Type))
 	}
+	if s.persist == nil {
+		// 库模式（StoreNone）：仅内存注册表生效
+		if rec.ID == "" {
+			rec.ID = xid.New().String()
+		}
+		s.memPut(rec)
+		invalidateMetaCache(ctx)
+		s.fireAdded(rec)
+		return rec, nil
+	}
 	saved, err := s.persist.SaveConn(rec)
 	if err != nil {
 		return rec, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
 	}
 	// 连接配置变更：元数据缓存全量失效，避免旧连接信息残留
 	invalidateMetaCache(ctx)
+	s.fireAdded(saved)
 	return saved, nil
 }
 
-// ListConnections 列出所有连接（按名称排序，保证前端展示稳定）
+// ListConnections 列出所有连接（按名称排序，保证前端展示稳定）。
+// 来源合并：内存注册表 + 持久层（StoreSQLite）+ ConnProvider.ListConns（外部持有）。
 func (s *Service) ListConnections() []ConnInfo {
-	conns := s.persist.LoadConns()
-	ret := make([]ConnInfo, 0, len(conns))
-	for _, rec := range conns {
+	ret := make([]ConnInfo, 0)
+	appendRec := func(rec ConnRecord) {
 		ret = append(ret, ConnInfo{ID: rec.ID, Name: rec.Name, ShortName: rec.ShortName, Env: rec.Env, Conn: rec.Conn, SubTypes: SupportedDBTypes[rec.Conn.Type]})
+	}
+	for _, rec := range s.memList() {
+		appendRec(rec)
+	}
+	if s.persist != nil {
+		for _, rec := range s.persist.LoadConns() {
+			appendRec(rec)
+		}
+	}
+	if s.connProvider != nil && s.connProvider.ListConns != nil {
+		lis, err := s.connProvider.ListConns(context.Background())
+		if err != nil {
+			// 列表失败只告警不阻断（展示场景）；解析链 GetConn 的错误按正常错误返回
+			cylog.Warnf("加载外部连接列表失败: %v", err)
+		} else {
+			ret = append(ret, lis...)
+		}
 	}
 	sort.Slice(ret, func(i, j int) bool { return ret[i].Name < ret[j].Name })
 	return ret
 }
 
-// DeleteConnection 删除连接（按主键 ID，兼容名称）
+// DeleteConnection 删除连接（按主键 ID，兼容名称/短名）。
+// StoreNone 库模式下仅删除内存注册表连接；StoreSQLite 落盘删除并级联清理。
 func (s *Service) DeleteConnection(key string) error {
+	if s.persist == nil {
+		if !s.memDelete(key) {
+			return cygin.NewError(ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("connection not found: %s", key))
+		}
+		invalidateMetaCache(context.Background())
+		s.fireDeleted(key)
+		return nil
+	}
 	// 先取连接主键 ID（兼容名称/短名），用于级联清理其 AI 会话与工作区
 	connID := key
 	if rec, ok := s.persist.GetConn(key); ok {
@@ -239,21 +282,13 @@ func (s *Service) DeleteConnection(key string) error {
 	_ = s.persist.DeleteWorkspace(connID)
 	// 连接删除：元数据缓存全量失效，避免旧连接信息残留
 	invalidateMetaCache(context.Background())
+	s.fireDeleted(key)
 	return nil
 }
 
 // TestConnection 测试连接可用性
 func (s *Service) TestConnection(ctx context.Context, conn DBConnInfo) error {
-	var cli *cydb.DBCli
-	var err error
-	// PG 系（Kingbase/GaussDB 等兼容库）未指定库名时依次尝试锚点候选库（postgres → template1），
-	// 与 PingConnection/对象树枚举口径一致，避免因实例无 postgres 库误报连接失败；
-	// 指定了库名则直接连接（验证目标库本身可达）。
-	if conn.DBName == "" && strings.EqualFold(conn.Type, "postgresql") {
-		cli, err = engine.ConnectPGWithAnchor(conn)
-	} else {
-		cli, err = engine.Connect(conn)
-	}
+	cli, err := s.dial(ctx, conn, "")
 	if err != nil {
 		return cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
@@ -264,7 +299,7 @@ func (s *Service) TestConnection(ctx context.Context, conn DBConnInfo) error {
 // GetTableTree 获取指定连接（可覆盖库名）的 库→表 树形结构；
 // 连接未配置库时遍历所有库（Oracle 遍历 schema）
 func (s *Service) GetTableTree(ctx context.Context, connKey, dbName string) ([]engine.DBTables, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +316,7 @@ func (s *Service) GetTableTree(ctx context.Context, connKey, dbName string) ([]e
 // GetDatabaseList 获取指定连接的库名列表（分级加载第一层，不枚举对象）；
 // force=true 绕过缓存直查并覆盖回写（界面刷新），平时命中 10 分钟缓存加速展开。
 func (s *Service) GetDatabaseList(ctx context.Context, connKey string, force bool) ([]string, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +333,7 @@ func (s *Service) GetDatabaseList(ctx context.Context, connKey string, force boo
 // GetDbSchemas 获取指定库的 schema 列表（分级加载第二层，PG 系；非 PG 返回空）；
 // force=true 绕过缓存直查并覆盖回写（界面刷新），平时命中 10 分钟缓存加速展开。
 func (s *Service) GetDbSchemas(ctx context.Context, connKey, dbName string, force bool) ([]engine.SchemaSummary, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +353,7 @@ func (s *Service) GetDbSchemas(ctx context.Context, connKey, dbName string, forc
 // GetSchemaObjects 获取指定库/schema 的对象清单（分级加载第三层，PG 系）；
 // force=true 绕过缓存直查并覆盖回写（界面刷新），平时命中 10 分钟缓存加速展开。
 func (s *Service) GetSchemaObjects(ctx context.Context, connKey, dbName, schema string, force bool) (*engine.DBSchema, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +373,7 @@ func (s *Service) GetSchemaObjects(ctx context.Context, connKey, dbName, schema 
 // GetDbObjects 获取指定库的对象清单（分级加载第二层，MySQL/Oracle 无 schema 层）；
 // force=true 绕过缓存直查并覆盖回写（界面刷新），平时命中 10 分钟缓存加速展开。
 func (s *Service) GetDbObjects(ctx context.Context, connKey, dbName string, force bool) (*engine.DBTables, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +392,7 @@ func (s *Service) GetDbObjects(ctx context.Context, connKey, dbName string, forc
 
 // GetTableColumns 获取指定连接/库下某表的列信息（名称/类型/可空/主键/默认值）
 func (s *Service) GetTableColumns(ctx context.Context, connKey, dbName, tableName string) ([]engine.TableColumnInfo, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -371,19 +406,43 @@ func (s *Service) GetTableColumns(ctx context.Context, connKey, dbName, tableNam
 	return cols, nil
 }
 
-// resolveConn 解析连接：优先使用内联 conn，否则按主键 ID（兼容名称）查找已保存连接
-func (s *Service) resolveConn(key string, inline *DBConnInfo) (*DBConnInfo, error) {
+// resolveConn 解析连接，优先级（先显式后动态，见 3.5）：
+// 内联 conn（任务参数直接带连接）→ 内存注册表（WithInlineConns + StoreNone 下 AddConnection）
+// → ConnProvider.GetConn（动态外部源）→ 持久化存储（仅 StoreSQLite 应用模式）。
+// 成功解析后触发 ConnHooks.OnResolved。
+func (s *Service) resolveConn(ctx context.Context, key string, inline *DBConnInfo) (*DBConnInfo, error) {
 	if inline != nil && inline.Type != "" {
+		s.fireResolved(ctx, key, ConnSourceInline)
 		return inline, nil
 	}
 	if key == "" {
 		return nil, cygin.NewError(ErrConnNotSpecified, cygin.WithErrPrint(), cygin.WithErrDetailf("database connection not specified"))
 	}
-	rec, ok := s.persist.GetConn(key)
-	if !ok {
-		return nil, cygin.NewError(ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("connection not found: %s", key))
+	if rec, ok := s.memGet(key); ok {
+		s.fireResolved(ctx, key, ConnSourceMemory)
+		c := rec.Conn
+		return &c, nil
 	}
-	return &rec.Conn, nil
+	if s.connProvider != nil && s.connProvider.GetConn != nil {
+		c, err := s.connProvider.GetConn(ctx, key)
+		if err != nil {
+			return nil, cygin.WrapError(err, ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("connection provider failed: %s", key))
+		}
+		if c != nil && c.Type != "" {
+			s.fireResolved(ctx, key, ConnSourceProvider)
+			cp := *c
+			return &cp, nil
+		}
+		// (nil, nil)：不认识该 key，继续尝试后续来源
+	}
+	if s.persist != nil {
+		if rec, ok := s.persist.GetConn(key); ok {
+			s.fireResolved(ctx, key, ConnSourceStore)
+			c := rec.Conn
+			return &c, nil
+		}
+	}
+	return nil, cygin.NewError(ErrConnNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("connection not found: %s", key))
 }
 
 // ---- 核心执行（同步，CLI 直接使用；Web 通过 Start* 异步执行） ----
@@ -397,13 +456,17 @@ func normalizeBatchSize(n int) int {
 
 // RunExport 执行导出，outputPath 返回最终产物路径
 func (s *Service) RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (string, error) {
-	src, err := s.resolveConn(opts.SourceConn, opts.Source)
+	src, err := s.resolveConn(ctx, opts.SourceConn, opts.Source)
 	if err != nil {
 		return "", err
 	}
 	opts.Source = src
 	opts.BatchSize = normalizeBatchSize(opts.BatchSize)
 	if opts.OutputDir == "" {
+		// 库模式（StoreNone 无 DataDir）没有持久化目录可回填，必须显式指定（3.2 产物落位规则）
+		if s.persist == nil {
+			return "", cygin.NewError(ErrExpOutDir, cygin.WithErrPrint(), cygin.WithErrDetailf("output dir is required in StoreNone mode without data dir"))
+		}
 		opts.OutputDir = s.persist.ExportDir()
 	}
 	// 将 CompatCollation 传递到源连接的 DBConnection 中，使导出的 DDL 即为兼容版本
@@ -419,14 +482,18 @@ func (s *Service) RunExport(ctx context.Context, opts ExportOptions, cb Progress
 
 // RunImport 执行导入
 func (s *Service) RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) error {
-	target, err := s.resolveConn(opts.TargetConn, opts.Target)
+	target, err := s.resolveConn(ctx, opts.TargetConn, opts.Target)
 	if err != nil {
 		return err
 	}
 	opts.Target = target
 	opts.BatchSize = normalizeBatchSize(opts.BatchSize)
 	opts.ResetMode = normalizeReset(opts.ResetMode)
-	opts.TempDir = s.persist.TempDir() // 任务处理临时目录（zip 解压）
+	if s.persist != nil {
+		opts.TempDir = s.persist.TempDir() // 任务处理临时目录（zip 解压）
+	} else {
+		opts.TempDir = os.TempDir()
+	}
 	// 将 CompatCollation 传递到目标连接的 DBConnection 中，供底层方言 DDL 处理使用
 	if opts.CompatCollation {
 		opts.Target.CompatCollation = true
@@ -437,11 +504,11 @@ func (s *Service) RunImport(ctx context.Context, opts ImportOptions, cb Progress
 
 // RunMigrate 执行迁移
 func (s *Service) RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) error {
-	src, err := s.resolveConn(opts.SourceConn, opts.Source)
+	src, err := s.resolveConn(ctx, opts.SourceConn, opts.Source)
 	if err != nil {
 		return err
 	}
-	target, err := s.resolveConn(opts.TargetConn, opts.Target)
+	target, err := s.resolveConn(ctx, opts.TargetConn, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -459,12 +526,16 @@ func (s *Service) RunMigrate(ctx context.Context, opts MigrateOptions, cb Progre
 
 // RunDictionary 执行数据字典生成（同步，CLI 直接使用；Web 通过 StartDictionary 异步执行），返回产物路径
 func (s *Service) RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc) (string, error) {
-	src, err := s.resolveConn(opts.SourceConn, opts.Source)
+	src, err := s.resolveConn(ctx, opts.SourceConn, opts.Source)
 	if err != nil {
 		return "", err
 	}
 	opts.Source = src
 	if opts.OutputDir == "" {
+		// 库模式（StoreNone 无 DataDir）没有持久化目录可回填，必须显式指定（3.2 产物落位规则）
+		if s.persist == nil {
+			return "", cygin.NewError(ErrExpOutDir, cygin.WithErrPrint(), cygin.WithErrDetailf("output dir is required in StoreNone mode without data dir"))
+		}
 		opts.OutputDir = s.persist.ExportDir()
 	}
 	result, err := engine.RunDictionary(ctx, opts, cb)
@@ -476,11 +547,11 @@ func (s *Service) RunDictionary(ctx context.Context, opts DictionaryOptions, cb 
 
 // RunCompare 执行数据库对比（作用域为单个库对，两侧必须已选定库）
 func (s *Service) RunCompare(ctx context.Context, opts CompareOptions, cb ProgressFunc) (*CompareResult, error) {
-	src, err := s.resolveConn(opts.SourceConn, opts.Source)
+	src, err := s.resolveConn(ctx, opts.SourceConn, opts.Source)
 	if err != nil {
 		return nil, err
 	}
-	target, err := s.resolveConn(opts.TargetConn, opts.Target)
+	target, err := s.resolveConn(ctx, opts.TargetConn, opts.Target)
 	if err != nil {
 		return nil, err
 	}
@@ -686,7 +757,7 @@ func (r *TaskRunner) Cancel(taskID string) error {
 
 // StartExport 异步启动导出任务，返回 taskID
 func (s *Service) StartExport(opts ExportOptions, taskConfigID string) (string, error) {
-	if _, err := s.resolveConn(opts.SourceConn, opts.Source); err != nil {
+	if _, err := s.resolveConn(context.Background(), opts.SourceConn, opts.Source); err != nil {
 		return "", err
 	}
 	taskID := newTaskID()
@@ -727,7 +798,7 @@ func (s *Service) StartExport(opts ExportOptions, taskConfigID string) (string, 
 
 // StartDictionary 异步启动数据字典任务，返回 taskID；摘要口径为 "X库Y表, 大小"（字典无行数）
 func (s *Service) StartDictionary(opts DictionaryOptions, taskConfigID string) (string, error) {
-	if _, err := s.resolveConn(opts.SourceConn, opts.Source); err != nil {
+	if _, err := s.resolveConn(context.Background(), opts.SourceConn, opts.Source); err != nil {
 		return "", err
 	}
 	taskID := newTaskID()
@@ -775,7 +846,7 @@ func (s *Service) StartDictionary(opts DictionaryOptions, taskConfigID string) (
 
 // StartImport 异步启动导入任务，返回 taskID
 func (s *Service) StartImport(opts ImportOptions, taskConfigID string) (string, error) {
-	if _, err := s.resolveConn(opts.TargetConn, opts.Target); err != nil {
+	if _, err := s.resolveConn(context.Background(), opts.TargetConn, opts.Target); err != nil {
 		return "", err
 	}
 	taskID := newTaskID()
@@ -802,10 +873,10 @@ func (s *Service) StartImport(opts ImportOptions, taskConfigID string) (string, 
 
 // StartMigrate 异步启动迁移任务，返回 taskID
 func (s *Service) StartMigrate(opts MigrateOptions, taskConfigID string) (string, error) {
-	if _, err := s.resolveConn(opts.SourceConn, opts.Source); err != nil {
+	if _, err := s.resolveConn(context.Background(), opts.SourceConn, opts.Source); err != nil {
 		return "", err
 	}
-	if _, err := s.resolveConn(opts.TargetConn, opts.Target); err != nil {
+	if _, err := s.resolveConn(context.Background(), opts.TargetConn, opts.Target); err != nil {
 		return "", err
 	}
 	taskID := newTaskID()
@@ -838,11 +909,11 @@ func (s *Service) StartMigrate(opts MigrateOptions, taskConfigID string) (string
 
 // StartCompare 异步启动对比任务，返回 taskID；完成后结果报告落盘 CompareDir/compare-<taskID>.json
 func (s *Service) StartCompare(opts CompareOptions, taskConfigID string) (string, error) {
-	src, err := s.resolveConn(opts.SourceConn, opts.Source)
+	src, err := s.resolveConn(context.Background(), opts.SourceConn, opts.Source)
 	if err != nil {
 		return "", err
 	}
-	target, err := s.resolveConn(opts.TargetConn, opts.Target)
+	target, err := s.resolveConn(context.Background(), opts.TargetConn, opts.Target)
 	if err != nil {
 		return "", err
 	}
@@ -1125,7 +1196,12 @@ func buildSummary(units int, rows int64, fileSize int64) string {
 
 // connLabel 连接展示名：优先取已保存连接的名称（可标识环境），未找到时回退 Host
 func (s *Service) connLabel(connID string, fallback *DBConnInfo) string {
-	if rec, ok := s.persist.GetConn(connID); ok && rec.Name != "" {
+	if s.persist != nil {
+		if rec, ok := s.persist.GetConn(connID); ok && rec.Name != "" {
+			return rec.Name
+		}
+	}
+	if rec, ok := s.memGet(connID); ok && rec.Name != "" {
 		return rec.Name
 	}
 	if fallback != nil && fallback.Host != "" {

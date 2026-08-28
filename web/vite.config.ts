@@ -19,6 +19,8 @@ function devToken(): string {
 }
 
 export default defineConfig({
+  // 相对资源路径：构建产物可在任意子路径挂载（如宿主 /dqex/ 反代，docs 6.5.1 形态 C）
+  base: "./",
   plugins: [react()],
   resolve: {
     alias: {

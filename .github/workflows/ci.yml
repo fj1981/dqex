@@ -25,6 +25,9 @@ jobs:
       - name: Go vet
         run: go vet ./...
 
+      - name: Build examples (library API compile check)
+        run: go build ./examples/...
+
       - name: Go test
         run: go test ./...
 

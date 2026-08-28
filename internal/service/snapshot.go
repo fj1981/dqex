@@ -10,7 +10,7 @@ import (
 	"sort"
 	"time"
 
-	"dqex/internal/engine"
+	"github.com/fj1981/dqex/internal/engine"
 
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cylog"
@@ -21,7 +21,7 @@ import (
 // CreateSnapshot 创建快照（同步，CLI 使用）。dbNames 支持多库；空库名回退到连接默认库。
 // sampleLimit：每表采样行数上限；<=0 走引擎默认值。lang：进度日志语言（zh/en）。
 func (s *Service) CreateSnapshot(ctx context.Context, connID string, dbNames []string, name, description string, includeSamples bool, sampleLimit int, lang string, cb ProgressFunc) (*Snapshot, error) {
-	conn, err := s.resolveConn(connID, nil)
+	conn, err := s.resolveConn(ctx, connID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -77,16 +77,22 @@ func (s *Service) CreateSnapshot(ctx context.Context, connID string, dbNames []s
 		TotalRows:   totalRows,
 		Databases:   dbs,
 	}
-	if rec, ok := s.persist.GetConn(connID); ok {
+	if rec, ok := s.memGet(connID); ok && rec.Name != "" {
 		snapshot.ConnLabel = rec.Name
+	} else if s.persist != nil {
+		if rec, ok := s.persist.GetConn(connID); ok {
+			snapshot.ConnLabel = rec.Name
+		}
 	}
 
-	// 落盘
-	if err := s.saveSnapshot(snapshot); err != nil {
-		return nil, cygin.WrapError(err, ErrExecFailed, cygin.WithErrPrint())
-	}
-	if err := s.addSnapshotToIndex(snapshotToInfo(snapshot)); err != nil {
-		cylog.Warnf("更新快照索引失败（不影响创建）: %v", err)
+	// 落盘（StoreNone 库模式且未提供 DataDir 时仅内存返回，调用方自行持久化）
+	if s.persist != nil {
+		if err := s.saveSnapshot(snapshot); err != nil {
+			return nil, cygin.WrapError(err, ErrExecFailed, cygin.WithErrPrint())
+		}
+		if err := s.addSnapshotToIndex(snapshotToInfo(snapshot)); err != nil {
+			cylog.Warnf("更新快照索引失败（不影响创建）: %v", err)
+		}
 	}
 
 	return snapshot, nil
@@ -132,7 +138,7 @@ func (s *Service) StartSnapshotCompare(opts SnapshotCompareOptions, taskConfigID
 		return "", newSvcErr(ErrTaskNotFound, svcSnapNotFound, opts.SnapshotID)
 	}
 
-	target, err := s.resolveConn(opts.TargetConn, opts.Target)
+	target, err := s.resolveConn(context.Background(), opts.TargetConn, opts.Target)
 	if err != nil {
 		return "", err
 	}
@@ -181,14 +187,17 @@ func (s *Service) StartSnapshotCompare(opts SnapshotCompareOptions, taskConfigID
 	return taskID, nil
 }
 
-// RunSnapshotCompareRecorded 同步执行快照对比并记录历史（CLI 使用）
+// RunSnapshotCompareRecorded 同步执行快照对比并记录历史（CLI 使用）。
+// StoreNone 库模式（persist 为 nil）下跳过历史与结果落盘，结果直接由内存返回。
 func (s *Service) RunSnapshotCompareRecorded(ctx context.Context, snap *Snapshot, target *DBConnInfo, opts SnapshotCompareOptions, cb ProgressFunc) (string, *CompareResult, error) {
 	taskID := newTaskID()
 	record := ExecutionRecord{
 		ID: taskID, TaskType: "snapshot_compare", Status: "running", StartedAt: time.Now().UnixMilli(),
 		Target: fmt.Sprintf("%s (快照) vs %s · %s", snap.Name, s.connLabel(opts.TargetConn, target), targetTables(nil, opts.Tables)),
 	}
-	_ = s.persist.SaveHistory(record)
+	if s.persist != nil {
+		_ = s.persist.SaveHistory(record)
+	}
 
 	result, err := engine.RunSnapshotCompareWithConn(ctx, snap, target, opts, cb)
 
@@ -199,18 +208,22 @@ func (s *Service) RunSnapshotCompareRecorded(ctx context.Context, snap *Snapshot
 		record.ErrorMsg = renderErrFor(err, opts.Lang).Error()
 	} else {
 		record.Status = "done"
-		outputPath := filepath.Join(s.persist.CompareDir(), "snapshot-compare-"+taskID+".json")
-		if e := saveCompareResult(outputPath, result); e != nil {
-			cylog.Errorf("保存快照对比结果失败: %v", e)
-		} else {
-			record.OutputPath = outputPath
+		if s.persist != nil {
+			outputPath := filepath.Join(s.persist.CompareDir(), "snapshot-compare-"+taskID+".json")
+			if e := saveCompareResult(outputPath, result); e != nil {
+				cylog.Errorf("保存快照对比结果失败: %v", e)
+			} else {
+				record.OutputPath = outputPath
+			}
 		}
 		sm := result.Summary
 		record.Summary = fmt.Sprintf("%d项, 一致%d, 结构差异%d, 数据差异%d", sm.Total, sm.Matched, sm.StructureDiff, sm.DataDiff)
 		record.TotalUnits = sm.Total
 	}
-	if e := s.persist.SaveHistory(record); e != nil {
-		cylog.Errorf("保存执行历史失败: %v", e)
+	if s.persist != nil {
+		if e := s.persist.SaveHistory(record); e != nil {
+			cylog.Errorf("保存执行历史失败: %v", e)
+		}
 	}
 	return taskID, result, err
 }
@@ -236,6 +249,23 @@ func (s *Service) GetSnapshotCompareResult(taskID string) (*CompareResult, error
 }
 
 // ---- 内部持久化 ----
+
+// LoadSnapshotFile 从任意路径读取快照完整数据（离线读文件，不需要连接）。
+// 库模式 LoadSnapshot 门面入口使用；应用模式内的按 ID 读取仍走 loadSnapshot。
+func LoadSnapshotFile(path string) (*Snapshot, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, newSvcErr(ErrTaskNotFound, svcSnapNotFound, path)
+		}
+		return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
+	}
+	var snap Snapshot
+	if err := json.Unmarshal(data, &snap); err != nil {
+		return nil, cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
+	}
+	return &snap, nil
+}
 
 func (s *Service) snapshotIndexPath() string {
 	return filepath.Join(s.persist.SnapshotDir(), "index.json")

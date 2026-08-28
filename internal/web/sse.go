@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"dqex/internal/service"
+	"github.com/fj1981/dqex/internal/service"
 
-	"github.com/gin-gonic/gin"
 	"github.com/fj1981/infrakit/pkg/cygin"
+	"github.com/gin-gonic/gin"
 )
 
 // rawRoutes 原生 gin 路由：SSE 进度推送、取消任务、下载、打开目录

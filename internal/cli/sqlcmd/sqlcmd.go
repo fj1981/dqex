@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"dqex/internal/engine"
-	"dqex/internal/service"
+	"github.com/fj1981/dqex/internal/engine"
+	"github.com/fj1981/dqex/internal/service"
 
-	"github.com/spf13/cobra"
 	"github.com/fj1981/infrakit/pkg/cydb"
 	"github.com/fj1981/infrakit/pkg/cydb/def"
 	"github.com/fj1981/infrakit/pkg/cydb/ss"
+	"github.com/spf13/cobra"
 )
 
 // ---- 颜色函数（自包含） ----

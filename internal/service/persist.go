@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"dqex/internal/store"
+	"github.com/fj1981/dqex/internal/store"
 
 	"github.com/fj1981/infrakit/pkg/cylog"
 )

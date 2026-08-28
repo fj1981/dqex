@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"dqex/internal/service"
+	"github.com/fj1981/dqex/internal/service"
 
 	"github.com/cloudwego/eino/schema"
-	"github.com/gin-gonic/gin"
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cylog"
+	"github.com/gin-gonic/gin"
 )
 
 // ==================== AI 辅助 SQL API ====================

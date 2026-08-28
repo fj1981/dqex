@@ -8,10 +8,10 @@ import (
 	"sort"
 	"strings"
 
-	"dqex/changelog"
-	"dqex/internal/cli"
-	"dqex/internal/engine"
-	"dqex/internal/service"
+	"github.com/fj1981/dqex/changelog"
+	"github.com/fj1981/dqex/internal/cli"
+	"github.com/fj1981/dqex/internal/engine"
+	"github.com/fj1981/dqex/internal/service"
 
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cylog"

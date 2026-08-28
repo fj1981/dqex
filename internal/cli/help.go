@@ -6,8 +6,8 @@ package cli
 // 注册表缺条目时保持定义时中文（zh 基准），新增语言只加 map 条目。
 
 import (
-	"dqex/internal/cli/sqlcmd"
-	"dqex/internal/llm"
+	"github.com/fj1981/dqex/internal/cli/sqlcmd"
+	"github.com/fj1981/dqex/internal/llm"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"

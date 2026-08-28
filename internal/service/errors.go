@@ -32,6 +32,10 @@ const (
 	ErrAINoTables        = 2024 // 目标库没有可用的表
 	ErrAISchemaFailed    = 2025 // 获取表结构失败
 	ErrAIEmptyResponse   = 2026 // 模型未返回有效结果（空结果或仅思考过程）
+	ErrExpOutDir         = 2027 // 库模式（StoreNone 且无 DataDir）下未显式指定产物输出目录
+	ErrClientClosed      = 2028 // 客户端已关闭（Close 后调用能力方法）
+	ErrNotImplemented    = 2029 // 触发式能力尚未实现（WithStoreConn/WithCacheRedis/WithArtifactStore 等）
+	ErrStoreUnavailable  = 2030 // 当前模式无持久化存储，该能力不可用（SQL 历史/任务配置/收藏等）
 )
 
 func init() {
@@ -62,6 +66,10 @@ func init() {
 		ErrAINoTables:        {"zh": "目标库中没有可用的表，请检查连接配置的数据库名，或确认该库下存在表", "en": "No usable tables in the target database; check the configured database name or confirm the database has tables"},
 		ErrAISchemaFailed:    {"zh": "获取表结构失败", "en": "Failed to fetch table structure"},
 		ErrAIEmptyResponse:   {"zh": "模型未返回有效结果，请重试", "en": "Model returned no valid result, please retry"},
+		ErrExpOutDir:         {"zh": "未指定产物输出目录：当前为无持久化的库模式，请在任务选项中显式指定 OutputDir", "en": "Output dir is required: current mode has no persistence, specify OutputDir in task options explicitly"},
+		ErrClientClosed:      {"zh": "客户端已关闭", "en": "Client is closed"},
+		ErrNotImplemented:    {"zh": "该能力尚未实现（触发式，将随具体场景落地）", "en": "Feature not implemented yet (trigger-based, lands with a concrete scenario)"},
+		ErrStoreUnavailable:  {"zh": "当前为无持久化的库模式，该能力不可用", "en": "Feature unavailable: current mode has no persistent store"},
 	})
 }
 

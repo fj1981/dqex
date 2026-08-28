@@ -75,6 +75,11 @@ const zh = {
     dictionaryDesc: "结构 → Excel",
   },
 
+  // ---- 嵌入模式（#/embed/<view> 整页 iframe 嵌入，docs 6.5） ----
+  embed: {
+    invalidView: "不支持的嵌入视图: {{view}}",
+  },
+
   // ---- 应用布局（顶栏 / 右侧面板 / 任务类型等） ----
   app: {
     title: "数据库工作台",

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rs/xid"
 	"github.com/fj1981/infrakit/pkg/cydb"
+	"github.com/rs/xid"
 )
 
 const defaultSampleLimit = 10

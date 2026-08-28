@@ -2,8 +2,8 @@
 package web
 
 import (
-	"dqex/internal/engine"
-	"dqex/internal/service"
+	"github.com/fj1981/dqex/internal/engine"
+	"github.com/fj1981/dqex/internal/service"
 
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/gin-gonic/gin"

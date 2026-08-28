@@ -6,9 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"dqex/internal/engine"
+	"github.com/fj1981/dqex/internal/engine"
 
-	"github.com/fj1981/infrakit/pkg/cydb"
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cylog"
 )
@@ -30,6 +29,10 @@ func nowMillis() int64 { return time.Now().UnixMilli() }
 // appendSQLAudit 将 SQL 执行记录追加写入审计（只增不删）。失败仅记录日志，不阻塞主流程。
 // 超长字段截断（防单条过大）。
 func (s *Service) appendSQLAudit(entry SQLAuditEntry) {
+	// StoreNone 库模式无持久化存储：跳过落盘（审计语义随宿主 ConnHooks/自身体系承接）
+	if s.persist == nil {
+		return
+	}
 	// 超长字段截断，防止单条审计过大
 	entry.SQL = truncateAuditString(entry.SQL)
 	entry.ErrorMsg = truncateAuditString(entry.ErrorMsg)
@@ -49,16 +52,11 @@ func truncateAuditString(s string) string {
 // UpdateTableCell 更新表浏览视图中的单个单元格（named bind + 标识符引用，防注入）。
 // 仅用于对象树表浏览（表结构/主键明确）场景；返回影响行数。
 func (s *Service) UpdateTableCell(ctx context.Context, connKey, dbName string, p engine.UpdateCellParams) (int64, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return 0, err
 	}
-	var cli *cydb.DBCli
-	if dbName != "" {
-		cli, err = engine.ConnectDB(*conn, dbName)
-	} else {
-		cli, err = engine.Connect(*conn)
-	}
+	cli, err := s.dial(ctx, *conn, dbName)
 	if err != nil {
 		return 0, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
@@ -78,16 +76,11 @@ func (s *Service) UpdateTableCell(ctx context.Context, connKey, dbName string, p
 // GetCellValue 按主键 + 列名定位单行单列，返回该单元格的完整值（大字段懒加载）。
 // 仅用于对象树表浏览场景；列名/主键列用标识符引用，值用命名参数绑定，防注入。
 func (s *Service) GetCellValue(ctx context.Context, connKey, dbName, table, column string, pkColumns []string, pkValues []any) (any, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return nil, err
 	}
-	var cli *cydb.DBCli
-	if dbName != "" {
-		cli, err = engine.ConnectDB(*conn, dbName)
-	} else {
-		cli, err = engine.Connect(*conn)
-	}
+	cli, err := s.dial(ctx, *conn, dbName)
 	if err != nil {
 		return nil, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
@@ -99,16 +92,11 @@ func (s *Service) GetCellValue(ctx context.Context, connKey, dbName, table, colu
 // DeleteTableRows 删除表浏览中的整行（按主键定位，支持批量）。
 // 逐行执行 DELETE（named bind + 标识符引用，防注入）；返回累计影响行数。
 func (s *Service) DeleteTableRows(ctx context.Context, connKey, dbName, table string, pkColumns []string, rows [][]any) (int64, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return 0, err
 	}
-	var cli *cydb.DBCli
-	if dbName != "" {
-		cli, err = engine.ConnectDB(*conn, dbName)
-	} else {
-		cli, err = engine.Connect(*conn)
-	}
+	cli, err := s.dial(ctx, *conn, dbName)
 	if err != nil {
 		return 0, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
@@ -132,16 +120,11 @@ func (s *Service) DeleteTableRows(ctx context.Context, connKey, dbName, table st
 // InsertTableRow 表浏览视图新增一行（INSERT，named bind + 标识符引用，防注入）。
 // columns/values 为用户显式填写的列（自增主键通常不传）；返回影响行数。
 func (s *Service) InsertTableRow(ctx context.Context, connKey, dbName string, p engine.InsertRowParams) (int64, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return 0, err
 	}
-	var cli *cydb.DBCli
-	if dbName != "" {
-		cli, err = engine.ConnectDB(*conn, dbName)
-	} else {
-		cli, err = engine.Connect(*conn)
-	}
+	cli, err := s.dial(ctx, *conn, dbName)
 	if err != nil {
 		return 0, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
@@ -160,16 +143,11 @@ func (s *Service) InsertTableRow(ctx context.Context, connKey, dbName string, p 
 // GenerateSQL 快速生成 SQL 文本（表浏览的行/单元格/过滤条件 → 方言正确的可执行语句）。
 // 复用 engine 的 cydb 构建器（InlineLiterals 内联转义），生成仅产出文本不执行、不写审计。
 func (s *Service) GenerateSQL(ctx context.Context, connKey, dbName string, p engine.GenSQLParams) (string, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return "", err
 	}
-	var cli *cydb.DBCli
-	if dbName != "" {
-		cli, err = engine.ConnectDB(*conn, dbName)
-	} else {
-		cli, err = engine.Connect(*conn)
-	}
+	cli, err := s.dial(ctx, *conn, dbName)
 	if err != nil {
 		return "", cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
@@ -187,16 +165,11 @@ func (s *Service) GenerateSQL(ctx context.Context, connKey, dbName string, p eng
 // 避免每次点开表都产生一条孤立的 SELECT COUNT(*) 审计记录（此前由前端二次 COUNT 造成）。
 // filters 为列过滤条件（AND 叠加），由 engine 层复用 cydb 条件构建器（值参数化绑定防注入）。
 func (s *Service) QueryTablePage(ctx context.Context, connKey, dbName, table string, page, pageSize int, sortSpecs []engine.SortSpec, excludeColumns []string, filters []engine.ColumnFilter) (*engine.TablePageResult, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return nil, err
 	}
-	var cli *cydb.DBCli
-	if dbName != "" {
-		cli, err = engine.ConnectDB(*conn, dbName)
-	} else {
-		cli, err = engine.Connect(*conn)
-	}
+	cli, err := s.dial(ctx, *conn, dbName)
 	if err != nil {
 		return nil, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
@@ -208,16 +181,11 @@ func (s *Service) QueryTablePage(ctx context.Context, connKey, dbName, table str
 // ExportTableExcel 表数据导出 Excel（应用过滤/排序），返回 xlsx 字节流 + 总行数 + 是否截断。
 // 复用 engine.QueryTablePage 拿数据 + excelize 内存生成，不落盘。
 func (s *Service) ExportTableExcel(ctx context.Context, connKey, dbName, table string, sortSpecs []engine.SortSpec, filters []engine.ColumnFilter, maxRows int) ([]byte, int64, bool, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return nil, 0, false, err
 	}
-	var cli *cydb.DBCli
-	if dbName != "" {
-		cli, err = engine.ConnectDB(*conn, dbName)
-	} else {
-		cli, err = engine.Connect(*conn)
-	}
+	cli, err := s.dial(ctx, *conn, dbName)
 	if err != nil {
 		return nil, 0, false, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
@@ -231,16 +199,11 @@ func (s *Service) ExportTableExcel(ctx context.Context, connKey, dbName, table s
 // 写操作的安全确认由调用方（前端）在进入本函数前完成。
 // 均写入「SQL 执行历史」并追加审计日志（用户手写，来源 manual）。
 func (s *Service) RunSQLScript(ctx context.Context, connKey, dbName, sql string, limit, offset int, mode string) ([]*engine.SQLQueryResult, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return nil, err
 	}
-	var cli *cydb.DBCli
-	if dbName != "" {
-		cli, err = engine.ConnectDB(*conn, dbName)
-	} else {
-		cli, err = engine.Connect(*conn)
-	}
+	cli, err := s.dial(ctx, *conn, dbName)
 	if err != nil {
 		return nil, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
@@ -287,8 +250,11 @@ func (s *Service) RunSQLScript(ctx context.Context, connKey, dbName, sql string,
 }
 
 // recordSQL 写入 SQL 执行历史并追加审计日志（来源恒为用户手写 manual）。
+// StoreNone 库模式无持久化存储时跳过历史落盘。
 func (s *Service) recordSQL(item SQLHistoryItem, dbName, mode string) {
-	_ = s.persist.AddSQLHistory(item)
+	if s.persist != nil {
+		_ = s.persist.AddSQLHistory(item)
+	}
 	s.appendSQLAudit(s.newAuditEntry(item.ConnID, dbName, mode, auditSourceManual, item.SQL, item.IsWrite, item.RowCount, item.Elapsed, item.Status, item.ErrorMsg))
 }
 
@@ -358,11 +324,11 @@ func (s *Service) newInsertAuditEntry(connID, dbName string, p engine.InsertRowP
 // 库名为空的 PG 系连接依次尝试锚点候选库（postgres → template1），与对象树枚举逻辑一致，
 // 避免 Kingbase/GaussDB 等兼容库因无 postgres 库误报连接失败。
 func (s *Service) PingConnection(ctx context.Context, connKey string) (int64, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return 0, err
 	}
-	cli, err := engine.ConnectPGWithAnchor(*conn)
+	cli, err := s.dial(ctx, *conn, "")
 	if err != nil {
 		return 0, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}
@@ -384,14 +350,14 @@ type ObjectDDLResult struct {
 // GetObjectDDL 获取指定对象（表/视图/函数/存储过程）的创建语句。
 // dbName 覆盖连接默认库（Oracle 下即 schema）；连接复用短生命周期、调用方无需关心。
 func (s *Service) GetObjectDDL(ctx context.Context, connKey, dbName, objType, name string) (*ObjectDDLResult, error) {
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return nil, err
 	}
 	if dbName != "" {
 		conn.DBName = dbName
 	}
-	cli, err := engine.Connect(*conn)
+	cli, err := s.dial(ctx, *conn, "")
 	if err != nil {
 		return nil, cygin.NewError(ErrConnFailed, cygin.WithErrPrint(), cygin.WithErrDetails(svcCauseText(langFrom(ctx), err)))
 	}

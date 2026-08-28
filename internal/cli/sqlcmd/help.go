@@ -5,7 +5,7 @@ package sqlcmd
 // ApplyHelpLang 重写文本；注册表缺条目时保持定义时中文（zh 基准）。
 
 import (
-	"dqex/internal/llm"
+	"github.com/fj1981/dqex/internal/llm"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"

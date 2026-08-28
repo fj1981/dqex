@@ -11,7 +11,7 @@ import (
 	"os/user"
 	"strings"
 
-	"dqex/internal/engine"
+	"github.com/fj1981/dqex/internal/engine"
 )
 
 // encPrefix 密文前缀：标识加密字段，同时用于识别旧版明文（无此头即明文，直接兼容）。

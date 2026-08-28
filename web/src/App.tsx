@@ -33,6 +33,8 @@ import {
 
 import * as api from "@/api"
 import DbTypeIcon from "@/components/DbTypeIcon"
+import EmbedShell from "@/components/EmbedShell"
+import { isEmbedMode } from "@/lib/embedBus"
 import { Button } from "@/components/ui/button"
 import { confirm, prompt } from "@/components/ui/alert-dialog"
 import { Separator } from "@/components/ui/separator"
@@ -1045,13 +1047,30 @@ function Layout() {
 }
 
 export default function App() {
+  // 嵌入模式（#/embed/<view> 整页 iframe 嵌入）：渲染精简壳，不加载页头/右侧面板/连接抽屉
+  // （docs/library-api-design.md 6.5.2；isEmbedMode 为模块级纯判定，同一页面生命周期内不变）
+  const embedMode = isEmbedMode()
   const loadDBTypes = useAppStore((s) => s.loadDBTypes)
   const loadConnections = useAppStore((s) => s.loadConnections)
 
   useEffect(() => {
+    if (embedMode) return // EmbedShell 内自行初始化
     loadDBTypes()
     loadConnections()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (embedMode) {
+    return (
+      <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <Routes>
+          <Route path="/embed/:view" element={<EmbedShell />} />
+          {/* 无视图名 / 未知路径：同样交给 EmbedShell 渲染提示文案 */}
+          <Route path="/embed" element={<EmbedShell />} />
+          <Route path="*" element={<EmbedShell />} />
+        </Routes>
+      </HashRouter>
+    )
+  }
 
   return (
     <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>

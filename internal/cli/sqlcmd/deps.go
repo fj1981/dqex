@@ -1,7 +1,7 @@
 package sqlcmd
 
 import (
-	"dqex/internal/engine"
+	"github.com/fj1981/dqex/internal/engine"
 
 	"github.com/fj1981/infrakit/pkg/cydb/def"
 )

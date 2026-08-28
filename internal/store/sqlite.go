@@ -9,7 +9,7 @@ import (
 
 	"github.com/rs/xid"
 
-	"dqex/internal/engine"
+	"github.com/fj1981/dqex/internal/engine"
 
 	"github.com/fj1981/infrakit/pkg/cydb"
 	"github.com/fj1981/infrakit/pkg/cydb/def"

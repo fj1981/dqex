@@ -15,7 +15,7 @@ package store
 import (
 	"encoding/json"
 
-	"dqex/internal/engine"
+	"github.com/fj1981/dqex/internal/engine"
 )
 
 // ---- 引擎模型别名（模型统一定义在 engine 包，避免循环依赖） ----

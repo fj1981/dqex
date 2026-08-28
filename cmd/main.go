@@ -6,10 +6,10 @@ import (
 	"os"
 	"strings"
 
-	"dqex/internal/cli"
-	"dqex/internal/engine"
-	"dqex/internal/service"
-	"dqex/internal/web"
+	"github.com/fj1981/dqex/internal/cli"
+	"github.com/fj1981/dqex/internal/engine"
+	"github.com/fj1981/dqex/internal/service"
+	"github.com/fj1981/dqex/internal/web"
 
 	"github.com/fj1981/infrakit/pkg/cylog"
 )

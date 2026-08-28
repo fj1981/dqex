@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xuri/excelize/v2"
 	"github.com/fj1981/infrakit/pkg/cydb"
 	"github.com/fj1981/infrakit/pkg/cydb/def"
 	"github.com/fj1981/infrakit/pkg/cydb/ss"
+	"github.com/xuri/excelize/v2"
 )
 
 // MaxQueryLimit 单次查询返回行数上限（安全护栏，防止拖垮后端）

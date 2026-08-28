@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"dqex/internal/engine"
-	"dqex/internal/llm"
-	"dqex/internal/service"
+	"github.com/fj1981/dqex/internal/engine"
+	"github.com/fj1981/dqex/internal/llm"
+	"github.com/fj1981/dqex/internal/service"
 
 	"github.com/atotto/clipboard"
 	"github.com/cloudwego/eino/components/tool"

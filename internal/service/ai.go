@@ -11,15 +11,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"dqex/internal/engine"
-	"dqex/internal/llm"
+	"github.com/fj1981/dqex/internal/engine"
+	"github.com/fj1981/dqex/internal/llm"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
-	"github.com/rs/xid"
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cylog"
+	"github.com/rs/xid"
 )
 
 // ---- AI 能力状态（Web/CLI 共用，APIKey 永不回显明文） ----
@@ -202,7 +202,7 @@ func (s *Service) AINewSession(ctx context.Context, lang, connKey, dbName, tabID
 	if !s.AIEnabled() {
 		return nil, cyginWrapAI(newSvcErr(0, svcAINotConfigured))
 	}
-	conn, err := s.resolveConn(connKey, nil)
+	conn, err := s.resolveConn(ctx, connKey, nil)
 	if err != nil {
 		return nil, err
 	}

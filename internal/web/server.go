@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	"dqex/internal/service"
-	webui "dqex/web"
+	"github.com/fj1981/dqex/internal/service"
+	webui "github.com/fj1981/dqex/web"
 
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cylog"
@@ -150,18 +150,29 @@ func accessControl(f *accessFilter) gin.HandlerFunc {
 	}
 }
 
-// securityHeaders 安全响应头：
+// securityHeaders 安全响应头（apiPrefix 为 API 挂载前缀，如 "/api" 或 "/dqex/api"）：
 //   - Referrer-Policy: no-referrer 防令牌经 Referer 泄漏（令牌可出现在 ?token= 中）
 //   - X-Content-Type-Options: nosniff 防 MIME 嗅探
-//   - /api 响应 no-store，防浏览器/代理缓存留存敏感数据（SSE 由 handler 自行覆盖）
-func securityHeaders() gin.HandlerFunc {
+//   - API 响应 no-store，防浏览器/代理缓存留存敏感数据（SSE 由 handler 自行覆盖）
+func securityHeaders(apiPrefix string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		h := c.Writer.Header()
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Content-Type-Options", "nosniff")
-		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+		if strings.HasPrefix(c.Request.URL.Path, apiPrefix+"/") {
 			h.Set("Cache-Control", "no-store")
 		}
+		c.Next()
+	}
+}
+
+// frameAncestors CSP frame-ancestors 白名单（6.5.4）：允许列出的宿主 origin 以 iframe
+// 嵌入 dqex 页面。技术约束：hash fragment 不发送到服务端，该头只能按请求粒度设置，
+// 因此配置后对本挂载子树全部响应生效；未配置不设置该头。
+func frameAncestors(ancestors []string) gin.HandlerFunc {
+	csp := "frame-ancestors " + strings.Join(ancestors, " ")
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("Content-Security-Policy", csp)
 		c.Next()
 	}
 }
@@ -335,8 +346,97 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 	if !ensurePortAvailable(host, port, "zh") {
 		return
 	}
+	apiGroup := buildAPIEndpoints(svc, filter)
+
+	opts := []cygin.ServerOption{
+		cygin.WithPort(port),
+		cygin.WithHealthCheck(),
+		cygin.AddApiGroup(apiGroup),
+		// SSE 进度推送 / 文件下载 / 打开目录（需要直接控制响应，走原生 gin 路由）
+		cygin.AddRouteGroup("/api", rawRoutes(svc)),
+		// 前端资源：直接内嵌 web/dist（构建前需先 npm run build）
+		cygin.WithEmbeddedFiles("/", webui.DistFS, "dist"),
+	}
+	// 始终挂载访问控制中间件：空规则 = 仅本机可访问，配置保存后热更新（无需重启）
+	// langCtx 将请求语言注入 ctx，service 同步方法在真实出错点按语言渲染 details
+	middlewares := []gin.HandlerFunc{langCtx(), securityHeaders("/api"), accessControl(filter)}
+	if len(filter.rules) > 0 {
+		cylog.Infof("访问来源白名单已启用: %d 条规则（本机回环始终放行，保存配置后热更新）", len(filter.rules))
+	}
+	token := ""
+	issuedAt := time.Now()
+	if !noAuth {
+		// 每次启动总是重新生成令牌（不读盘复用），重启即刷新，避免长期使用同一令牌
+		var terr error
+		token, terr = genToken()
+		if terr != nil {
+			cylog.Errorf("生成访问令牌失败，拒绝启动: %v", terr)
+			return
+		}
+		middlewares = append(middlewares, tokenAuth(token, issuedAt.Add(tokenTTL), newAuthLimiter()))
+	}
+	opts = append(opts, cygin.WithGlobalMiddlewares(middlewares...))
+
+	server := cygin.NewServer(opts...)
+	// 绑定地址（WithPort 仅设置端口且默认全网卡，此处显式覆盖为 host:port）
+	server.Config.Address = net.JoinHostPort(host, strconv.Itoa(port))
+	// 访问凭证落盘：dqex url 可随时取回当前访问链接（含签发时间供过期判断）
+	if err := svc.Persist().SaveWebAccess(service.WebAccessInfo{Addr: server.Config.Address, Token: token, IssuedAt: issuedAt.UnixMilli()}); err != nil {
+		cylog.Warnf("保存 Web 访问凭证失败（不影响启动）: %v", err)
+	}
+	// 令牌桥接文件：本地开发（vite dev 代理）读取 web-access.json 注入 /api 请求头，
+	// 数据源仍以 SQLite 为准（dqex url 走 SQLite），此文件仅为 vite 的令牌快照
+	writeWebAccessFile(svc.Persist().BaseDir(), server.Config.Address, token, issuedAt.UnixMilli())
+	// 浏览器访问地址：通配地址（0.0.0.0/::）无法直接访问，
+	// 优先用本机局域网 IP（日志与浏览器一致，且局域网设备可直接复制访问），探测失败回退回环
+	browserHost := host
+	if browserHost == "" || browserHost == "0.0.0.0" || browserHost == "::" {
+		if ip := localLANIP(); ip != nil {
+			browserHost = ip.String()
+		} else {
+			browserHost = "127.0.0.1"
+		}
+	}
+	cleanURL := "http://" + net.JoinHostPort(browserHost, strconv.Itoa(port)) + "/"
+	loopback := isLoopback(host)
+	if !loopback && len(allow) == 0 {
+		cylog.Warnf("服务已对外暴露（监听 %s）但未配置白名单：外部来源将被拒绝，仅本机可访问", server.Config.Address)
+		cylog.Warnf("局域网访问请配置 --allow 来源白名单（IP/CIDR/域名，逗号分隔）后重启")
+	} else if !loopback {
+		cylog.Warnf("服务已对外暴露（监听 %s）：白名单内来源可访问，请确保仅面向可信网络", server.Config.Address)
+	}
+	if token != "" {
+		if loopback {
+			// 本机监听：本机免认证，令牌仅供外部访问参考
+			cylog.Infof("dqex Web 服务启动: %s", cleanURL)
+			cylog.Infof("本机访问免认证；外部来源需令牌（Authorization: Bearer <token> 或 ?token=）")
+			cylog.Infof("令牌: %s（有效期至 %s，重启刷新）", token, issuedAt.Add(tokenTTL).Format("2006-01-02 15:04:05"))
+		} else {
+			cylog.Infof("dqex Web 服务启动: %s?token=%s", cleanURL, token)
+			cylog.Infof("令牌有效期至 %s（过期后请重启服务刷新）", issuedAt.Add(tokenTTL).Format("2006-01-02 15:04:05"))
+			cylog.Infof("API 认证: 本机回环（127.0.0.1/localhost）免认证；外部来源需请求头 Authorization: Bearer <token> / X-Auth-Token，或查询参数 ?token=")
+		}
+	} else {
+		cylog.Warnf("dqex Web 服务启动: %s（已完全禁用认证 --no-auth，请勿暴露到不可信网络）", cleanURL)
+	}
+	if !noBrowser {
+		// 延迟至监听就绪后自动打开浏览器（回环监听用干净 URL，外部监听携带 token）
+		browserURL := cleanURL
+		if !loopback && token != "" {
+			browserURL += "?token=" + token
+		}
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			openBrowser(browserURL)
+		}()
+	}
+	_ = server.Run(context.Background())
+}
+
+// buildAPIEndpoints 构建全部 API 路由组（RunWeb 独立部署与 Mount 宿主挂载共用）。
+func buildAPIEndpoints(svc *service.Service, filter *accessFilter) cygin.ApiGroup {
 	eb := cygin.NewEndpointBuilder("/api", "dqex API", []string{"dqex"})
-	apiGroup := eb.Build(
+	return eb.Build(
 		// 连接管理
 		eb.GROUP("/connections", []cygin.APIHandler{
 			eb.POST("", handleCreateConn(svc)),
@@ -446,88 +546,65 @@ func RunWeb(svc *service.Service, host string, port int, allow []string, noAuth,
 			eb.PUT("/workspace", handleSaveWorkspace(svc)),
 		}),
 	)
+}
 
-	opts := []cygin.ServerOption{
-		cygin.WithPort(port),
-		cygin.WithHealthCheck(),
-		cygin.AddApiGroup(apiGroup),
-		// SSE 进度推送 / 文件下载 / 打开目录（需要直接控制响应，走原生 gin 路由）
-		cygin.AddRouteGroup("/api", rawRoutes(svc)),
-		// 前端资源：直接内嵌 web/dist（构建前需先 npm run build）
-		cygin.WithEmbeddedFiles("/", webui.DistFS, "dist"),
+// MountOptions 宿主挂载选项（docs/library-api-design.md 6.5.1 形态 B：同进程同源内嵌）。
+type MountOptions struct {
+	// Prefix 页面 + API 挂载前缀，默认 "/dqex"：API 挂 Prefix+"/api"，前端页面挂 Prefix+"/"。
+	// 传 "" 时 API="/api"、页面="/"（与 RunWeb 独立部署路径一致）。
+	Prefix string
+	// FrameAncestors 允许 iframe 嵌入本服务的宿主 origin 白名单（CSP frame-ancestors，
+	// 对本挂载子树全部响应生效）；生产环境建议显式配置，防止任意站点嵌入。
+	FrameAncestors []string
+	// Fallback 前端静态资源未命中时的回退（如宿主自己的 SPA/404 页面 handler，可为 nil）。
+	// dqex UI 与宿主 SPA 共存时：先经 dqex 静态资源匹配，未命中交回宿主处理。
+	Fallback gin.HandlerFunc
+}
+
+// Mount 将 dqex 的 API 与前端 UI 挂载到宿主 gin engine（同进程形态 B，6.5.1）：
+//   - API 挂在 Prefix+"/api"（含 SSE 进度推送/文件下载等原生路由）
+//   - 前端静态资源挂在 Prefix+"/"（SPA 回退经 NoRoute 链，不与宿主已有路由冲突；
+//     宿主自有 NoRoute 会被保留并链式调用）
+//
+// 鉴权外置：本函数不注册令牌认证与来源白名单——宿主在 engine 层接入自己的登录态
+// （中间件对子树生效即可）；同源部署下 iframe 无 token/CORS/SameSite 问题。
+// StoreNone 库模式下依赖持久化的端点（历史/任务配置/收藏等）返回 ErrStoreUnavailable。
+func Mount(r *gin.Engine, svc *service.Service, opts MountOptions) {
+	prefix := strings.TrimSuffix(opts.Prefix, "/")
+	apiPrefix := prefix + "/api"
+
+	// 挂载子树中间件：安全头 + 请求语言 + 可选 frame-ancestors
+	mws := []gin.HandlerFunc{langCtx(), securityHeaders(apiPrefix)}
+	if len(opts.FrameAncestors) > 0 {
+		mws = append(mws, frameAncestors(opts.FrameAncestors))
 	}
-	// 始终挂载访问控制中间件：空规则 = 仅本机可访问，配置保存后热更新（无需重启）
-	// langCtx 将请求语言注入 ctx，service 同步方法在真实出错点按语言渲染 details
-	middlewares := []gin.HandlerFunc{langCtx(), securityHeaders(), accessControl(filter)}
-	if len(filter.rules) > 0 {
-		cylog.Infof("访问来源白名单已启用: %d 条规则（本机回环始终放行，保存配置后热更新）", len(filter.rules))
-	}
-	token := ""
-	issuedAt := time.Now()
-	if !noAuth {
-		// 每次启动总是重新生成令牌（不读盘复用），重启即刷新，避免长期使用同一令牌
-		var terr error
-		token, terr = genToken()
-		if terr != nil {
-			cylog.Errorf("生成访问令牌失败，拒绝启动: %v", terr)
+	root := r.Group(prefix, mws...)
+
+	// API 路由（与 RunWeb 同一套 handler，前缀参数化）
+	apiGroup := buildAPIEndpoints(svc, newAccessFilter(nil))
+	apiGroup.RegistRouter(prefix, root)
+	// SSE 进度推送 / 文件下载 / 打开目录（需要直接控制响应，走原生 gin 路由）
+	rawRoutes(svc)(root.Group("/api"))
+
+	// 前端静态资源：NoRoute 上做 SPA 回退（gin 不允许通配路由与静态段共存）。
+	// 注意 NoRoute 为设置语义：宿主自有回退请经 MountOptions.Fallback 传入，会被链式保留。
+	efs := cygin.NewEmbeddedFileService(prefix+"/", webui.DistFS, "dist")
+	fallback := opts.Fallback
+	r.NoRoute(func(c *gin.Context) {
+		for _, m := range mws {
+			m(c)
+		}
+		if c.IsAborted() {
 			return
 		}
-		middlewares = append(middlewares, tokenAuth(token, issuedAt.Add(tokenTTL), newAuthLimiter()))
-	}
-	opts = append(opts, cygin.WithGlobalMiddlewares(middlewares...))
-
-	server := cygin.NewServer(opts...)
-	// 绑定地址（WithPort 仅设置端口且默认全网卡，此处显式覆盖为 host:port）
-	server.Config.Address = net.JoinHostPort(host, strconv.Itoa(port))
-	// 访问凭证落盘：dqex url 可随时取回当前访问链接（含签发时间供过期判断）
-	if err := svc.Persist().SaveWebAccess(service.WebAccessInfo{Addr: server.Config.Address, Token: token, IssuedAt: issuedAt.UnixMilli()}); err != nil {
-		cylog.Warnf("保存 Web 访问凭证失败（不影响启动）: %v", err)
-	}
-	// 令牌桥接文件：本地开发（vite dev 代理）读取 web-access.json 注入 /api 请求头，
-	// 数据源仍以 SQLite 为准（dqex url 走 SQLite），此文件仅为 vite 的令牌快照
-	writeWebAccessFile(svc.Persist().BaseDir(), server.Config.Address, token, issuedAt.UnixMilli())
-	// 浏览器访问地址：通配地址（0.0.0.0/::）无法直接访问，
-	// 优先用本机局域网 IP（日志与浏览器一致，且局域网设备可直接复制访问），探测失败回退回环
-	browserHost := host
-	if browserHost == "" || browserHost == "0.0.0.0" || browserHost == "::" {
-		if ip := localLANIP(); ip != nil {
-			browserHost = ip.String()
-		} else {
-			browserHost = "127.0.0.1"
+		if strings.HasPrefix(c.Request.URL.Path, prefix+"/") && efs.Match(c.Request.URL.Path) {
+			efs.Serve(c)
+			return
 		}
-	}
-	cleanURL := "http://" + net.JoinHostPort(browserHost, strconv.Itoa(port)) + "/"
-	loopback := isLoopback(host)
-	if !loopback && len(allow) == 0 {
-		cylog.Warnf("服务已对外暴露（监听 %s）但未配置白名单：外部来源将被拒绝，仅本机可访问", server.Config.Address)
-		cylog.Warnf("局域网访问请配置 --allow 来源白名单（IP/CIDR/域名，逗号分隔）后重启")
-	} else if !loopback {
-		cylog.Warnf("服务已对外暴露（监听 %s）：白名单内来源可访问，请确保仅面向可信网络", server.Config.Address)
-	}
-	if token != "" {
-		if loopback {
-			// 本机监听：本机免认证，令牌仅供外部访问参考
-			cylog.Infof("dqex Web 服务启动: %s", cleanURL)
-			cylog.Infof("本机访问免认证；外部来源需令牌（Authorization: Bearer <token> 或 ?token=）")
-			cylog.Infof("令牌: %s（有效期至 %s，重启刷新）", token, issuedAt.Add(tokenTTL).Format("2006-01-02 15:04:05"))
-		} else {
-			cylog.Infof("dqex Web 服务启动: %s?token=%s", cleanURL, token)
-			cylog.Infof("令牌有效期至 %s（过期后请重启服务刷新）", issuedAt.Add(tokenTTL).Format("2006-01-02 15:04:05"))
-			cylog.Infof("API 认证: 本机回环（127.0.0.1/localhost）免认证；外部来源需请求头 Authorization: Bearer <token> / X-Auth-Token，或查询参数 ?token=")
+		if fallback != nil {
+			fallback(c)
+			return
 		}
-	} else {
-		cylog.Warnf("dqex Web 服务启动: %s（已完全禁用认证 --no-auth，请勿暴露到不可信网络）", cleanURL)
-	}
-	if !noBrowser {
-		// 延迟至监听就绪后自动打开浏览器（回环监听用干净 URL，外部监听携带 token）
-		browserURL := cleanURL
-		if !loopback && token != "" {
-			browserURL += "?token=" + token
-		}
-		go func() {
-			time.Sleep(500 * time.Millisecond)
-			openBrowser(browserURL)
-		}()
-	}
-	_ = server.Run(context.Background())
+		c.Status(http.StatusNotFound)
+	})
 }
