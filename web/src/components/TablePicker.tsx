@@ -536,6 +536,8 @@ export default function TablePicker({
   useEffect(() => {
     if (loading || tree.length === 0) return
     const dbs = new Set<string>()
+    // 单库连接：singleMode 渲染不可点的分组视图（无展开交互），不自动加载将永远停留在加载态
+    if (tree.length === 1 && tree[0]._loaded !== true) dbs.add(tree[0].name)
     for (const id of [...selected, ...selectedObjects]) {
       const db = entryDB(id)
       if (db && tree.some((d) => d.name === db && d._loaded !== true)) dbs.add(db)
@@ -1146,19 +1148,25 @@ export default function TablePicker({
     )
   }
 
-  // 单库模式：直接渲染分组（无库头）
+  // 单库模式：库头仅作名称展示（库唯一无切换交互），分组直接平铺
   const singleGroups = (d: DBTables) => (
-    <div className="ml-2 border-l border-border/60 pl-3">
-      {hasSchemas(d)
-        ? (d.schemas || []).map((s) => schemaSection(d, s))
-        : (
-          <>
-            {groupSection(d.name, "tables", tr("objectTree.group.table"), Table2, (d.tables || []).map((t) => qual(d.name, t)))}
-            {showObjects && OBJECT_GROUPS.map((g) =>
-              groupSection(d.name, g.dir, tKey(g.label), g.Icon, (d.objects?.[g.dir] || []).map((n) => qual(d.name, `${g.dir}/${n}`))),
-            )}
-          </>
-        )}
+    <div>
+      <div className="flex items-center gap-1.5 rounded bg-muted/60 px-2 py-1.5">
+        <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="text-sm font-medium">{d.name}</span>
+      </div>
+      <div className="ml-2 border-l border-border/60 pl-3">
+        {hasSchemas(d)
+          ? (d.schemas || []).map((s) => schemaSection(d, s))
+          : (
+            <>
+              {groupSection(d.name, "tables", tr("objectTree.group.table"), Table2, (d.tables || []).map((t) => qual(d.name, t)))}
+              {showObjects && OBJECT_GROUPS.map((g) =>
+                groupSection(d.name, g.dir, tKey(g.label), g.Icon, (d.objects?.[g.dir] || []).map((n) => qual(d.name, `${g.dir}/${n}`))),
+              )}
+            </>
+          )}
+      </div>
     </div>
   )
 
