@@ -91,6 +91,29 @@ type (
 	ExportOptions = service.ExportOptions
 	// ImportOptions 导入选项
 	ImportOptions = service.ImportOptions
+	// Contributor 业务对象贡献者（代理层扩展点）：宿主注册取数/回写回调，
+	// 导出/导入编排（目录、进度、打包、清单）由 dqex 统一负责
+	Contributor = service.Contributor
+	// ContributorRequest 贡献者导出回调请求
+	ContributorRequest = service.ContributorRequest
+	// ContributorResult 贡献者导出回调结果
+	ContributorResult = service.ContributorResult
+	// ContributorImportRequest 贡献者导入回调请求
+	ContributorImportRequest = service.ContributorImportRequest
+	// DataPreparer 数据前置处理器（代理层扩展点，key=目标库名）：.json 数据包
+	// 导入应用前回调宿主执行业务策略（如流程/表单版本合并），可修改包内容
+	DataPreparer = service.DataPreparer
+	// DataPrepareRequest 数据前置处理请求
+	DataPrepareRequest = service.DataPrepareRequest
+	// DataPackage 数据交换包（dqex 数据格式契约，字段冻结）：
+	// FormatJSON 导出 / .json 导入 / 精确回滚的载体
+	DataPackage = service.DataPackage
+	// DataEntry 数据包条目（type: 0=建表 1=按 PK 行数据 2=成对 SQL）
+	DataEntry = service.DataEntry
+	// QueryHooks SQL 审计钩子（逐语句回调 OnQuery，经 WithQueryHooks 注册）
+	QueryHooks = service.QueryHooks
+	// ExportFormat 导出产物格式
+	ExportFormat = service.ExportFormat
 	// MigrateOptions 迁移选项
 	MigrateOptions = service.MigrateOptions
 	// CompareOptions 对比选项
@@ -116,6 +139,9 @@ const (
 	ResetNone     = service.ResetNone
 	ResetTruncate = service.ResetTruncate
 	ResetDrop     = service.ResetDrop
+	// FormatSQL / FormatJSON 导出产物格式（ExportOptions.Format）
+	FormatSQL  = service.FormatSQL
+	FormatJSON = service.FormatJSON
 )
 
 // ---- 进度类型 ----

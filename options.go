@@ -21,6 +21,9 @@ type options struct {
 	inlineConns []ConnInfo
 	provider    *ConnProvider
 	hooks       *ConnHooks
+	contribs    []Contributor
+	queryHooks  *QueryHooks
+	preparers   map[string]DataPreparer
 
 	// 触发式能力（4.4）：v0.2 门面即接受参数并校验，具体实现随场景触发落地
 	triggered string // 首个被注入的触发式能力名（用于报错提示）
@@ -68,6 +71,43 @@ func WithConnProvider(p ConnProvider) Option {
 // dqex 持有副本，回调方不得复用修改；OnResolved/OnConnect 参数含 Pwd 字段，日志注意遮蔽。
 func WithConnHooks(hooks ConnHooks) Option {
 	return func(o *options) { o.hooks = &hooks }
+}
+
+// WithContributors 注册业务对象贡献者模板（代理层扩展点）。
+// 宿主业务对象（流程/面板/规则/数据表等）的"取数"与"回写"经此回调代理给宿主实现，
+// 导出/导入的编排（任务目录、进度、zip 打包、<Type>/ 目录约定）由 dqex 统一负责。
+// 任务侧仅需在 ExportOptions/ImportOptions.Contributors 填 Type（+ IDs）即可引用。
+//
+// 回调契约：Export/Import 运行在任务执行 goroutine 上，阻塞会暂停进度推送；
+// 取消由回调参数 ctx 控制；回调内不得再回调 Client 方法。
+func WithContributors(ctbs ...Contributor) Option {
+	return func(o *options) { o.contribs = append(o.contribs, ctbs...) }
+}
+
+// WithQueryHooks 注入 SQL 审计钩子（代理层扩展点）：任务（导出/导入/迁移）与
+// RunSQLScript 执行的每条语句都会回调 OnQuery，宿主接合规审计/慢查询采集。
+//
+// 回调契约：同步调用且必须快速返回（重活自行起 goroutine，审计耗时直接计入语句
+// 响应时间）；回调内不得再回调 Client 方法；失败语句同样回调（rowsAffected=-1）；
+// 超长语句会被截断至 4096 字节后回调（截断点回退至 UTF-8 字符边界）。
+func WithQueryHooks(hooks QueryHooks) Option {
+	return func(o *options) { o.queryHooks = &hooks }
+}
+
+// WithDataPreparers 注册数据前置处理器（代理层扩展点，key=目标库名）：
+// .json 数据包（DataPackage）导入应用前回调宿主执行业务策略（如业务对象版本
+// 合并），宿主可直接修改包内容后返回。
+func WithDataPreparers(preparers map[string]DataPreparer) Option {
+	return func(o *options) {
+		if o.preparers == nil {
+			o.preparers = map[string]DataPreparer{}
+		}
+		for db, p := range preparers {
+			if p != nil {
+				o.preparers[db] = p
+			}
+		}
+	}
 }
 
 // ---- 触发式能力（4.4）：v0.2 门面即接受参数并校验，具体实现随 4.4 场景触发落地 ----

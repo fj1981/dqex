@@ -31,11 +31,14 @@ type Service struct {
 	ai          *aiMgr // AI 会话管理（懒加载，见 ai.go）
 
 	// ---- 库模式扩展（docs/library-api-design.md 3.5 / 4.1） ----
-	storeMode    StoreMode             // 持久化模式：StoreNone（库模式默认）/ StoreSQLite（CLI/Web）
-	memMu        sync.RWMutex          // 内存连接注册表锁（Client 并发安全）
-	memConns     map[string]ConnRecord // 内存注册表：WithInlineConns 静态注入 + StoreNone 下 AddConnection
-	connProvider *ConnProvider         // 连接提供者回调（连接完全外部持有）
-	connHooks    *ConnHooks            // 连接生命周期回调（审计/监控，可选）
+	storeMode     StoreMode                      // 持久化模式：StoreNone（库模式默认）/ StoreSQLite（CLI/Web）
+	memMu         sync.RWMutex                   // 内存连接注册表锁（Client 并发安全）
+	memConns      map[string]ConnRecord          // 内存注册表：WithInlineConns 静态注入 + StoreNone 下 AddConnection
+	connProvider  *ConnProvider                  // 连接提供者回调（连接完全外部持有）
+	connHooks     *ConnHooks                     // 连接生命周期回调（审计/监控，可选）
+	contributors  []Contributor                  // 业务对象贡献者模板（WithContributors 注册，代理层）
+	queryHooks    *engine.QueryHooks             // SQL 审计钩子（WithQueryHooks 注册，逐语句回调）
+	dataPreparers map[string]engine.DataPreparer // 数据前置处理器（按目标库名注册，With 库模式选项注入）
 }
 
 // ---- 元数据分级接口缓存 ----
@@ -456,12 +459,19 @@ func normalizeBatchSize(n int) int {
 
 // RunExport 执行导出，outputPath 返回最终产物路径
 func (s *Service) RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (string, error) {
+	ctx = s.hookCtx(ctx)
 	src, err := s.resolveConn(ctx, opts.SourceConn, opts.Source)
 	if err != nil {
 		return "", err
 	}
 	opts.Source = src
 	opts.BatchSize = normalizeBatchSize(opts.BatchSize)
+	// 业务对象贡献者解析：任务条目（Type+IDs）按注册模板补齐回调
+	ctbs, err := s.resolveContributors(opts.Contributors)
+	if err != nil {
+		return "", err
+	}
+	opts.Contributors = ctbs
 	if opts.OutputDir == "" {
 		// 库模式（StoreNone 无 DataDir）没有持久化目录可回填，必须显式指定（3.2 产物落位规则）
 		if s.persist == nil {
@@ -480,15 +490,39 @@ func (s *Service) RunExport(ctx context.Context, opts ExportOptions, cb Progress
 	return result.OutputPath, nil
 }
 
-// RunImport 执行导入
-func (s *Service) RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) error {
+// hookCtx 注入 SQL 审计钩子到任务 context（未注册时原样返回）
+func (s *Service) hookCtx(ctx context.Context) context.Context {
+	return engine.CtxWithQueryHooks(ctx, s.queryHooks)
+}
+
+// RunImport 执行导入：返回结果（含精确回滚产物路径，仅 .json 数据包导入且 Rollback=true）
+func (s *Service) RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*engine.ImportResult, error) {
+	ctx = s.hookCtx(ctx)
 	target, err := s.resolveConn(ctx, opts.TargetConn, opts.Target)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	opts.Target = target
 	opts.BatchSize = normalizeBatchSize(opts.BatchSize)
 	opts.ResetMode = normalizeReset(opts.ResetMode)
+	// 业务对象贡献者解析：任务条目（Type）按注册模板补齐回调
+	ctbs, err := s.resolveContributors(opts.Contributors)
+	if err != nil {
+		return nil, err
+	}
+	opts.Contributors = ctbs
+	// 数据前置处理器（代理层）：全局注册与逐调用注入合并——逐调用同键优先，全局注册补缺，
+	// 避免无条件覆盖丢弃宿主逐调用注入的处理器
+	if len(s.dataPreparers) > 0 {
+		if opts.DataPreparers == nil {
+			opts.DataPreparers = map[string]engine.DataPreparer{}
+		}
+		for db, p := range s.dataPreparers {
+			if _, ok := opts.DataPreparers[db]; !ok {
+				opts.DataPreparers[db] = p
+			}
+		}
+	}
 	if s.persist != nil {
 		opts.TempDir = s.persist.TempDir() // 任务处理临时目录（zip 解压）
 	} else {
@@ -498,12 +532,12 @@ func (s *Service) RunImport(ctx context.Context, opts ImportOptions, cb Progress
 	if opts.CompatCollation {
 		opts.Target.CompatCollation = true
 	}
-	_, err = engine.RunImport(ctx, opts, cb)
-	return err
+	return engine.RunImport(ctx, opts, cb)
 }
 
 // RunMigrate 执行迁移
 func (s *Service) RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) error {
+	ctx = s.hookCtx(ctx)
 	src, err := s.resolveConn(ctx, opts.SourceConn, opts.Source)
 	if err != nil {
 		return err
@@ -857,14 +891,33 @@ func (s *Service) StartImport(opts ImportOptions, taskConfigID string) (string, 
 	s.runner.Start(taskID, "import", opts.Lang, func(ctx context.Context, publish ProgressFunc) error {
 		var last ProgressInfo
 		wrapped := func(p ProgressInfo) { last = p; publish(p) }
-		err := s.RunImport(ctx, opts, wrapped)
+		result, err := s.RunImport(ctx, opts, wrapped)
 		if err != nil {
 			err = renderErrFor(err, opts.Lang) // 按任务语言渲染 engine.MsgError
 		}
 		s.finishRecord(ctx, &record, err, last, func(r *ExecutionRecord) {
 			r.TotalUnits = last.TotalUnits
 			r.TotalRows = last.DoneRows
-			r.Summary = buildSummary(last.TotalUnits, last.DoneRows, 0)
+			summary := buildSummary(last.TotalUnits, last.DoneRows, 0)
+			if result != nil {
+				// 回滚产物路径落入执行历史（Web 端可从历史定位安全网产物），与导出/字典一致
+				if result.RollbackPath != "" {
+					r.OutputPath = result.RollbackPath
+					if st, statErr := os.Stat(result.RollbackPath); statErr == nil {
+						r.FileSize = st.Size()
+						summary = buildSummary(last.TotalUnits, last.DoneRows, r.FileSize)
+					}
+				}
+				// 跳过表/不可回滚语句计数入摘要（明细在任务日志），随任务语言本地化
+				if len(result.SkippedTables) > 0 || len(result.Unrollback) > 0 {
+					if opts.Lang == "en" {
+						summary += fmt.Sprintf(", %d table(s) skipped, %d non-rollbackable stmts", len(result.SkippedTables), len(result.Unrollback))
+					} else {
+						summary += fmt.Sprintf(", 跳过%d表, 不可回滚%d条", len(result.SkippedTables), len(result.Unrollback))
+					}
+				}
+			}
+			r.Summary = summary
 		})
 		return err
 	})

@@ -209,7 +209,7 @@ func (s *Service) RunSQLScript(ctx context.Context, connKey, dbName, sql string,
 	}
 	defer cli.Close()
 
-	results, err := engine.RunSQLScript(ctx, cli, sql, limit, offset, mode)
+	results, err := engine.RunSQLScript(s.hookCtx(ctx), cli, sql, limit, offset, mode, connKey)
 	if err != nil {
 		// 连接/分割级失败：记录历史并审计，返回错误（前端展示）
 		item := SQLHistoryItem{ConnID: connKey, DB: dbName, Mode: mode, SQL: sql, Status: "error", ErrorMsg: err.Error(), CreatedAt: nowMillis()}

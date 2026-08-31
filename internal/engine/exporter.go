@@ -145,8 +145,9 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 	if !opts.SchemaOnly && !opts.DataOnly {
 		units = totalTables * 2
 	}
-	// 对象进度单位：任务开始时一次性加入，避免对象导出阶段动态增加 TotalUnits 导致进度百分比回退
-	if !opts.DataOnly {
+	// 对象进度单位：任务开始时一次性加入，避免对象导出阶段动态增加 TotalUnits 导致进度百分比回退；
+	// FormatJSON 不导出对象（数据包格式无对象语义），不计数，否则进度分母虚大永远走不完
+	if !opts.DataOnly && opts.Format != FormatJSON {
 		for _, p := range plan {
 			cli, err := ConnectDB(*opts.Source, p.db)
 			if err != nil {
@@ -156,10 +157,12 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 			cli.Close()
 		}
 	}
+	// 业务对象贡献者：每个贡献者计 1 个单元（回调内部粒度宿主自定义）
+	units += len(opts.Contributors)
 	t.p.TotalUnits = units
 	t.log(engineTextsFor(t.lang).expStart, len(plan), totalTables, filepath.Base(baseDir))
 
-	// 3. 逐库导出（每库一个 sql 文件）
+	// 3. 逐库导出（FormatSQL：每库一个 sql 文件；FormatJSON：每库一个 json 数据包）
 	var totalRows int64
 	for _, p := range plan {
 		cli, err := ConnectDB(*opts.Source, p.db)
@@ -168,19 +171,33 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 		}
 		// 按外键依赖拓扑排序（被引用表先导出，导入时可顺序建表）；不支持或失败时保持原顺序
 		p.tables = sortTablesByFK(cli, p.tables, t)
-		// 约束控制语句（方言提供：MySQL 为 USE 库 + SET FOREIGN_KEY_CHECKS 开关），写入整个库文件保证可独立导入；
-		// 必须传入库名：方言实现依赖 name 参数定位库，缺失会导致前置语句生成失败而被静默丢弃
-		beginSQL := dialectDDL(cli, dialect.FuncNameGetBeginSql, p.db)
-		endSQL := dialectDDL(cli, dialect.FuncNameGetEndSql, p.db)
-		if beginSQL == "" {
-			// 前置语句缺失时明示告警（如 MySQL 关闭外键检查失败，导入带外键依赖的库会失败）
-			t.log(engineTextsFor(t.lang).expNoFKWarn, p.db)
-		}
-
-		dbFile := filepath.Join(baseDir, sanitizeName(p.db)+sqlFileExt(opts.Gzip))
 		// 一致性快照：启用后全部读取在同一事务内进行，跨表处于同一时间点
 		exportCli, endSnapshot := beginSnapshot(cli, opts.SingleTransaction, t)
-		rows, err := exportDatabase(ctx, exportCli, p.db, p.tables, dbFile, opts, t, beginSQL, endSQL, p.objects)
+
+		var rows int64
+		if opts.Format == FormatJSON {
+			// 数据包格式降级告警：Gzip 与对象导出不适用（json 包无 begin/end 约束语句，
+			// 导入为单事务应用；视图/函数/存储过程无行级语义，需要对象请用 FormatSQL）。
+			// objects 契约 nil=全部导出：两种情况（nil 或白名单非空）均需告警，仅空数组（显式不导出）静默
+			if opts.Gzip {
+				t.log("%s", engineTextsFor(t.lang).expJSONNoGzip)
+			}
+			if p.objects == nil || len(p.objects) > 0 {
+				t.log(engineTextsFor(t.lang).expJSONNoObj, p.db)
+			}
+			rows, err = exportDatabaseJSON(ctx, exportCli, p.db, p.tables, filepath.Join(baseDir, sanitizeName(p.db)+".json"), opts, t)
+		} else {
+			// 约束控制语句（方言提供：MySQL 为 USE 库 + SET FOREIGN_KEY_CHECKS 开关），写入整个库文件保证可独立导入；
+			// 必须传入库名：方言实现依赖 name 参数定位库，缺失会导致前置语句生成失败而被静默丢弃
+			beginSQL := dialectDDL(cli, dialect.FuncNameGetBeginSql, p.db)
+			endSQL := dialectDDL(cli, dialect.FuncNameGetEndSql, p.db)
+			if beginSQL == "" {
+				// 前置语句缺失时明示告警（如 MySQL 关闭外键检查失败，导入带外键依赖的库会失败）
+				t.log(engineTextsFor(t.lang).expNoFKWarn, p.db)
+			}
+			dbFile := filepath.Join(baseDir, sanitizeName(p.db)+sqlFileExt(opts.Gzip))
+			rows, err = exportDatabase(ctx, exportCli, p.db, p.tables, dbFile, opts, t, beginSQL, endSQL, p.objects)
+		}
 		endSnapshot(err == nil)
 		if err != nil {
 			cli.Close()
@@ -190,7 +207,12 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 		cli.Close()
 	}
 
-	// 4. 打包 zip（可选）
+	// 4. 业务对象贡献者（代理层）：宿主回调写入 <Type>/ 目录，与库 SQL 一并打包
+	if err := runContributors(ctx, opts, baseDir, t); err != nil {
+		return nil, err
+	}
+
+	// 5. 打包 zip（可选）
 	result := &ExportResult{OutputDir: baseDir, TotalTables: totalTables, TotalRows: totalRows}
 	if opts.Compress {
 		zipPath := filepath.Join(outputDir, fmt.Sprintf("%s_%s.zip", taskName, ts))

@@ -88,6 +88,13 @@ type LibraryOptions struct {
 	Provider *ConnProvider
 	// Hooks 连接生命周期回调（可选）
 	Hooks *ConnHooks
+	// Contributors 业务对象贡献者模板（代理层）：任务按 Type 引用，回调由此处补齐
+	Contributors []Contributor
+	// QueryHooks SQL 审计钩子：任务/查询执行逐语句回调（OnQuery），宿主接合规审计
+	QueryHooks *engine.QueryHooks
+	// DataPreparers 数据前置处理器（代理层，key=目标库名）：.json 数据包导入前回调宿主
+	// 做版本合并等业务策略，可修改包内容
+	DataPreparers map[string]engine.DataPreparer
 }
 
 // NewLibraryService 创建库模式业务服务：
@@ -99,14 +106,17 @@ func NewLibraryService(ctx context.Context, opts LibraryOptions) (*Service, erro
 		return nil, err
 	}
 	s := &Service{
-		cfg:          cfg,
-		configFile:   strings.TrimSpace(opts.ConfigFile),
-		runner:       newTaskRunner(),
-		ai:           newAIMgr(),
-		storeMode:    StoreNone,
-		memConns:     map[string]ConnRecord{},
-		connProvider: opts.Provider,
-		connHooks:    opts.Hooks,
+		cfg:           cfg,
+		configFile:    strings.TrimSpace(opts.ConfigFile),
+		runner:        newTaskRunner(),
+		ai:            newAIMgr(),
+		storeMode:     StoreNone,
+		memConns:      map[string]ConnRecord{},
+		connProvider:  opts.Provider,
+		connHooks:     opts.Hooks,
+		contributors:  opts.Contributors,
+		queryHooks:    opts.QueryHooks,
+		dataPreparers: opts.DataPreparers,
 	}
 	if strings.TrimSpace(opts.DataDir) != "" {
 		s.storeMode = StoreSQLite

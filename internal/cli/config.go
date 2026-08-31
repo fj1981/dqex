@@ -86,9 +86,10 @@ type exportConfig struct {
 type importConfig struct {
 	Target    *cliConnConfig `yaml:"target"`
 	TargetRef string         `yaml:"target_ref"`
-	Input     string         `yaml:"input"`  // .sql / .sql.gz / .zip
-	Reset     string         `yaml:"reset"`  // ""|truncate|drop
-	Backup    *bool          `yaml:"backup"` // 默认 true
+	Input     string         `yaml:"input"`    // .sql / .sql.gz / .zip / .json 数据包
+	Reset     string         `yaml:"reset"`    // ""|truncate|drop
+	Backup    *bool          `yaml:"backup"`   // 默认 true
+	Rollback  bool           `yaml:"rollback"` // .json 数据包导入后生成精确回滚 SQL 产物
 	BatchSize int            `yaml:"batch_size"`
 }
 
@@ -334,7 +335,7 @@ func importFromLegacy(o *ImportOptions) *importConfig {
 	return &importConfig{
 		Target: connToCli(o.Target), TargetRef: o.TargetConn,
 		Input: o.InputPath, Reset: string(o.ResetMode),
-		Backup: &backup, BatchSize: o.BatchSize,
+		Backup: &backup, Rollback: o.Rollback, BatchSize: o.BatchSize,
 	}
 }
 
@@ -408,9 +409,10 @@ batch_size: 500
 `,
 	"import": `# dqex import 独立配置文件（dqex import --config import.yaml）
 target:
-` + indentBlock(tplConn, "  ") + `input: ./export.zip    # 导入文件（.sql / .sql.gz / .zip）
+` + indentBlock(tplConn, "  ") + `input: ./export.zip    # 导入文件（.sql / .sql.gz / .zip / .json 数据包）
 reset: ""              # "" 直接追加 | truncate 清空表 | drop 删除重建
 backup: true           # 重置前创建备份表（仅 reset 非空时生效）
+rollback: false        # 导入 .json 数据包后生成精确回滚 SQL 产物
 batch_size: 500
 `,
 	"migrate": `# dqex migrate 独立配置文件（dqex migrate --config migrate.yaml）
@@ -610,6 +612,7 @@ func importOptsFromConfig(cfg *importConfig) (ImportOptions, error) {
 	if cfg.Backup != nil {
 		opts.Backup = *cfg.Backup
 	}
+	opts.Rollback = cfg.Rollback
 	opts.BatchSize = cfg.BatchSize
 	return opts, nil
 }

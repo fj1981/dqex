@@ -36,6 +36,7 @@ const (
 	ErrClientClosed      = 2028 // 客户端已关闭（Close 后调用能力方法）
 	ErrNotImplemented    = 2029 // 触发式能力尚未实现（WithStoreConn/WithCacheRedis/WithArtifactStore 等）
 	ErrStoreUnavailable  = 2030 // 当前模式无持久化存储，该能力不可用（SQL 历史/任务配置/收藏等）
+	ErrCtbUnknown        = 2031 // 业务对象贡献者未注册（任务引用的 Type 无导出/导入回调）
 )
 
 func init() {
@@ -70,6 +71,7 @@ func init() {
 		ErrClientClosed:      {"zh": "客户端已关闭", "en": "Client is closed"},
 		ErrNotImplemented:    {"zh": "该能力尚未实现（触发式，将随具体场景落地）", "en": "Feature not implemented yet (trigger-based, lands with a concrete scenario)"},
 		ErrStoreUnavailable:  {"zh": "当前为无持久化的库模式，该能力不可用", "en": "Feature unavailable: current mode has no persistent store"},
+		ErrCtbUnknown:        {"zh": "业务对象贡献者未注册：任务引用的类型没有可用的导出/导入回调", "en": "Contributor not registered: the referenced type has no export/import callback"},
 	})
 }
 

@@ -38,11 +38,14 @@ func New(opts ...Option) (*Client, error) {
 		return nil, err
 	}
 	svc, err := service.NewLibraryService(context.Background(), service.LibraryOptions{
-		DataDir:     o.dataDir,
-		ConfigFile:  o.configFile,
-		InlineConns: o.inlineConns,
-		Provider:    o.provider,
-		Hooks:       o.hooks,
+		DataDir:       o.dataDir,
+		ConfigFile:    o.configFile,
+		InlineConns:   o.inlineConns,
+		Provider:      o.provider,
+		Hooks:         o.hooks,
+		Contributors:  o.contribs,
+		QueryHooks:    o.queryHooks,
+		DataPreparers: o.preparers,
 	})
 	if err != nil {
 		return nil, err

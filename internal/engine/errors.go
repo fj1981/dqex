@@ -164,6 +164,11 @@ var engineErrMap = map[string]map[string]string{
 		errImpDB:       "导入库 %s 失败",
 		errImpDialect:  "不支持的方言: %s",
 		errImpExec:     "执行 SQL 失败(第 %d 块)",
+		errImpRollback: "写入回滚产物失败",
+		// contributor
+		errCtbNoExport: "业务对象[%s]未注册导出回调",
+		errCtbExport:   "业务对象[%s]导出失败",
+		errCtbImport:   "业务对象[%s]导入失败",
 		// migrator
 		errMigNoConn:          "未提供源或目标数据库连接",
 		errMigSrcConn:         "源库连接失败",
@@ -325,6 +330,11 @@ var engineErrMap = map[string]map[string]string{
 		errImpDB:       "failed to import database %s",
 		errImpDialect:  "unsupported dialect: %s",
 		errImpExec:     "failed to execute SQL (block %d)",
+		errImpRollback: "failed to write rollback artifact",
+		// contributor
+		errCtbNoExport: "contributor[%s] has no export callback registered",
+		errCtbExport:   "contributor[%s] export failed",
+		errCtbImport:   "contributor[%s] import failed",
 		// migrator
 		errMigNoConn:          "no source or target database connection provided",
 		errMigSrcConn:         "failed to connect to source database",
@@ -481,6 +491,10 @@ const (
 	errImpDB                = "errImpDB"
 	errImpDialect           = "errImpDialect"
 	errImpExec              = "errImpExec"
+	errImpRollback          = "errImpRollback"
+	errCtbNoExport          = "errCtbNoExport"
+	errCtbExport            = "errCtbExport"
+	errCtbImport            = "errCtbImport"
 	errMigNoConn            = "errMigNoConn"
 	errMigSrcConn           = "errMigSrcConn"
 	errMigEnsureDB          = "errMigEnsureDB"

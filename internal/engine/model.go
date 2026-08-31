@@ -72,7 +72,22 @@ type ExportOptions struct {
 	CompatCollation bool `json:"compatCollation" yaml:"compatCollation"`
 	// Lang 任务日志/产物文案语言（zh/en），默认 zh
 	Lang string `json:"lang,omitempty" yaml:"lang,omitempty"`
+	// Contributors 业务对象贡献者（代理层）：宿主注册回调，编排由 dqex 负责。
+	// 仅需 Type + IDs（配置层可序列化），Export/Import 回调为空时由服务层按 Type
+	// 匹配 Client 注册的模板补齐（未注册报错）。
+	Contributors []Contributor `json:"contributors,omitempty" yaml:"contributors,omitempty"`
+	// Format 产物格式：FormatSQL（默认，SQL 文本）或 FormatJSON（DataPackage 数据包，
+	// 每库一个 <db>.json，支持精确回滚导入）。json 格式适用于业务配置类中小表数据。
+	Format ExportFormat `json:"format,omitempty" yaml:"format,omitempty"`
 }
+
+// ExportFormat 导出产物格式
+type ExportFormat string
+
+const (
+	FormatSQL  ExportFormat = "sql"  // SQL 文本（默认，现行行为）
+	FormatJSON ExportFormat = "json" // DataPackage 数据包（按 PK 组织行数据）
+)
 
 // DictionaryOptions 数据字典导出选项：按选定库表生成单个 .xlsx 数据字典（总览 + 每库字段明细）
 type DictionaryOptions struct {
@@ -110,6 +125,16 @@ type ImportOptions struct {
 	CompatCollation bool `json:"compatCollation" yaml:"compatCollation"`
 	// Lang 任务日志语言（zh/en），默认 zh
 	Lang string `json:"lang,omitempty" yaml:"lang,omitempty"`
+	// Contributors 业务对象贡献者（代理层）：zip 包内含 <Type>/ 目录时回调 Import 读回。
+	// 仅需 Type（+可选 IDs），回调为空时由服务层按 Type 匹配注册模板补齐。
+	Contributors []Contributor `json:"contributors,omitempty" yaml:"contributors,omitempty"`
+	// Rollback 生成精确回滚 SQL 产物（.json 数据导入按旧行快照生成；.sql 导入无行级
+	// 语义仅失败自动回滚，不生成产物）。产物写入输入文件同目录 <名称>.rollback.sql。
+	Rollback bool `json:"rollback" yaml:"rollback"`
+	// DataPreparers 数据前置处理器（代理层，按目标库名注册）：导入 .json 数据包前
+	// 回调宿主做版本合并等业务策略（对应 tl-env PreProcess 语义），可修改包内容。
+	// 运行时注入不入任务配置。
+	DataPreparers map[string]DataPreparer `json:"-" yaml:"-"`
 }
 
 // MigrateOptions 迁移选项

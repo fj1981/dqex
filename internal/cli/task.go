@@ -115,10 +115,15 @@ var taskRunCmd = &cobra.Command{
 			}
 			return err
 		case "import":
-			if err := svc.RunImport(ctx, *task.ImportOpts, cb); err != nil {
+			res, err := svc.RunImport(ctx, *task.ImportOpts, cb)
+			if err != nil {
 				return err
 			}
 			fmt.Println(cliTextsFor(cliLang()).doneImport)
+			if res.RollbackPath != "" {
+				// 精确回滚产物（.json 数据包导入）
+				printf(cliTextsFor(cliLang()).doneRollback+"\n", res.RollbackPath)
+			}
 			return nil
 		case "migrate":
 			if err := svc.RunMigrate(ctx, *task.MigrateOpts, cb); err != nil {

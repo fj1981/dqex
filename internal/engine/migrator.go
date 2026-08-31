@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/fj1981/infrakit/pkg/cydb"
 	"github.com/fj1981/infrakit/pkg/cydb/dialect"
@@ -161,11 +162,14 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 						targetCli.Close()
 						return nil, NewMsgErrf(errMigDDL, err, table)
 					}
+					start := time.Now()
 					if _, err := targetCli.DirectExecute(ddl); err != nil {
+						fireQueryHook(ctx, opts.TargetConn, ddl, start, -1)
 						sourceCli.Close()
 						targetCli.Close()
 						return nil, NewMsgErrf(errMigCreateTable, err, table)
 					}
+					fireQueryHook(ctx, opts.TargetConn, ddl, start, 0)
 					t.log(engineTextsFor(t.lang).migCreate, table)
 				}
 			}
@@ -188,7 +192,7 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 
 		// 5. 对象迁移（仅同类型且非 DataOnly：视图/函数/存储过程；触发器已随建表语句迁移）
 		if !crossType && !opts.DataOnly {
-			migrateDBObjects(ctx, sourceCli, targetCli, job.srcDB, job.srcSchema, job.objects, t)
+			migrateDBObjects(ctx, sourceCli, targetCli, job.srcDB, job.srcSchema, job.objects, t, opts.TargetConn)
 		}
 
 		// 6. 成功后清理备份表
@@ -254,7 +258,7 @@ func buildCreateTableDDL(sourceCli, targetCli *cydb.DBCli, table string, crossTy
 // migrateDBObjects 将源库的视图/函数/存储过程迁移到目标库（仅同类型迁移调用，直接执行源库方言 DDL）。
 // objects 为对象白名单（格式 子目录/对象名）：nil=全部迁移，空数组=不迁移。
 // 按 视图→函数→存储过程 顺序执行；单个对象失败仅记录日志不阻断（对象属辅助能力，不影响已完成的表迁移）
-func migrateDBObjects(ctx context.Context, sourceCli, targetCli *cydb.DBCli, db, schema string, objects []string, t *tracker) {
+func migrateDBObjects(ctx context.Context, sourceCli, targetCli *cydb.DBCli, db, schema string, objects []string, t *tracker, connKey string) {
 	if objects != nil && len(objects) == 0 {
 		return // 显式指定了空列表：不迁移任何对象
 	}
@@ -293,11 +297,15 @@ func migrateDBObjects(ctx context.Context, sourceCli, targetCli *cydb.DBCli, db,
 				continue
 			}
 			// 与导入链路一致：执行规范化终止后的完整 DDL（存储过程/PL-SQL 块体内含分号，按单条语句直接执行）
-			if _, err := targetCli.DirectExecute(terminateSQL(ddl)); err != nil {
+			execSQL := terminateSQL(ddl)
+			start := time.Now()
+			if _, err := targetCli.DirectExecute(execSQL); err != nil {
+				fireQueryHook(ctx, connKey, execSQL, start, -1)
 				t.log(engineTextsFor(t.lang).migObjExecFail, dirName, db, name, err)
 				t.p.DoneUnits++
 				continue
 			}
+			fireQueryHook(ctx, connKey, execSQL, start, 0)
 			t.p.DoneUnits++
 			t.log(engineTextsFor(t.lang).migObjDone, db, dirName, name)
 		}
@@ -331,6 +339,13 @@ func migrateTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, tab
 		if len(batch) == 0 {
 			return nil
 		}
+		// 审计钩子：批量写入未暴露最终 SQL 文本，回调语句为批写模板描述（归属 connKey 供审计聚合）
+		mode := "INSERT"
+		if useReplace {
+			mode = "REPLACE"
+		}
+		stmt := fmt.Sprintf("%s INTO %s (batch %d rows)", mode, table, len(batch))
+		start := time.Now()
 		var err error
 		if useReplace {
 			_, err = targetCli.BatchReplaceContext(ctx, table, batch)
@@ -338,8 +353,10 @@ func migrateTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, tab
 			_, err = targetCli.BatchInsertContext(ctx, table, batch)
 		}
 		if err != nil {
+			fireQueryHook(ctx, opts.TargetConn, stmt, start, -1)
 			return NewMsgErrf(errMigBatchWrite, err)
 		}
+		fireQueryHook(ctx, opts.TargetConn, stmt, start, int64(len(batch)))
 		batch = batch[:0]
 		return nil
 	}

@@ -2,15 +2,18 @@ package engine
 
 import (
 	"archive/zip"
+	"bufio"
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/fj1981/infrakit/pkg/cydb"
 	"github.com/fj1981/infrakit/pkg/cydb/dialect"
@@ -19,15 +22,19 @@ import (
 // ImportResult 导入结果
 type ImportResult struct {
 	TotalDatabases int
-	TotalStmts     int64 // 执行的 SQL 语句数
+	TotalStmts     int64    // 执行的 SQL 语句数
+	RollbackPath   string   // 精确回滚 SQL 产物路径（仅 .json 数据导入且 Rollback=true 时非空；多库 zip 按库分文件，此为首个产物路径，其余经任务日志输出）
+	SkippedTables  []string // 跳过的表（无主键，无法精确导入/回滚）
+	Unrollback     []string // 执行了但无法生成精确回滚的语句（宿主侧告警）
 }
 
 // ImportFileInfo 导入文件预览信息
 type ImportFileInfo struct {
-	Type      string                 `json:"type"` // sql / zip
+	Type      string                 `json:"type"` // sql / json / zip
 	Size      int64                  `json:"size"`
 	Databases []string               `json:"databases"`
-	Descs     map[string]*ExportDesc `json:"descs,omitempty"` // 库名 → 导出描述（如有）
+	Descs     map[string]*ExportDesc `json:"descs,omitempty"`   // 库名 → 导出描述（如有）
+	Entries   int                    `json:"entries,omitempty"` // 条目数（json 数据包格式）
 }
 
 // importFile 待导入的单个 SQL 文件（每个文件即一个数据库）
@@ -104,6 +111,15 @@ func InspectImportFile(path string) (*ImportFileInfo, error) {
 		if desc, err := readDescFile(descPath); err == nil {
 			info.Descs = map[string]*ExportDesc{dbName: desc}
 		}
+	} else if ext == ".json" {
+		// DataPackage 数据包预览：解析库名与条目数（解析失败视为非数据包格式）
+		pkg, err := LoadDataPackageFile(path)
+		if err != nil {
+			return nil, NewMsgErrf(errImpFormat, err)
+		}
+		info.Type = "json"
+		info.Databases = []string{pkg.DB}
+		info.Entries = len(pkg.Entries)
 	} else if ext == ".zip" {
 		info.Type = "zip"
 		r, err := zip.OpenReader(path)
@@ -113,6 +129,7 @@ func InspectImportFile(path string) (*ImportFileInfo, error) {
 		defer r.Close()
 		dbSet := map[string]bool{}
 		descs := map[string]*ExportDesc{}
+		pkgEntries := 0
 		for _, f := range r.File {
 			if f.FileInfo().IsDir() {
 				continue
@@ -124,6 +141,14 @@ func InspectImportFile(path string) (*ImportFileInfo, error) {
 				if db, ok := sqlBaseName(parts[0]); ok {
 					if db != "" {
 						dbSet[db] = true
+					}
+				} else if strings.HasSuffix(strings.ToLower(name), ".json") {
+					// 根目录 .json 数据包（与 RunImport 的 planZipJSONPackages 对齐）
+					if pkg, err := loadDataPackageFromZip(f); err == nil {
+						if pkg.DB != "" {
+							dbSet[pkg.DB] = true
+						}
+						pkgEntries += len(pkg.Entries)
 					}
 				} else if strings.HasSuffix(strings.ToLower(name), ".desc") {
 					// 读取 zip 内的 .desc 文件
@@ -141,6 +166,9 @@ func InspectImportFile(path string) (*ImportFileInfo, error) {
 		}
 		if len(descs) > 0 {
 			info.Descs = descs
+		}
+		if pkgEntries > 0 {
+			info.Entries = pkgEntries
 		}
 		sort.Strings(info.Databases)
 	} else {
@@ -176,7 +204,30 @@ func readDescFromZip(f *zip.File) (*ExportDesc, error) {
 	return &desc, nil
 }
 
-// RunImport 执行导入：支持 .sql 单文件与 .zip 包（每个 库名.sql 即一个库的完整导出）
+// loadDataPackageFromZip 从 zip 文件条目解析 DataPackage 数据包
+// （顶层无 "datas" 字段视为非数据包格式，与 LoadDataPackageFile 判定一致）
+func loadDataPackageFromZip(f *zip.File) (*DataPackage, error) {
+	rc, err := f.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, err
+	}
+	probe := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, err
+	}
+	if _, ok := probe["datas"]; !ok {
+		return nil, NewMsgErr(errImpFormat, "not a DataPackage json")
+	}
+	return LoadDataPackage(data)
+}
+
+// RunImport 执行导入：支持 .sql 单文件、.json 数据包（DataPackage，支持精确回滚）
+// 与 .zip 包（每个 库名.sql / 库名.json 即一个库的导出；含 <Type>/ 目录时回调贡献者）
 func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*ImportResult, error) {
 	if opts.Target == nil {
 		return nil, NewMsgErr(errImpNoTgt)
@@ -188,6 +239,7 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 
 	ext := strings.ToLower(filepath.Ext(opts.InputPath))
 	var files []importFile
+	var pkgs []*DataPackage // .json 数据包（zip 内或单文件输入）
 	var tempDir string
 
 	if dbName, ok := sqlBaseName(filepath.Base(opts.InputPath)); ok {
@@ -195,6 +247,17 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 			return nil, NewMsgErr(errImpNoTgtDB)
 		}
 		files = []importFile{{db: opts.Target.DBName, name: dbName, path: opts.InputPath}}
+	} else if ext == ".json" {
+		pkg, err := LoadDataPackageFile(opts.InputPath)
+		if err != nil {
+			return nil, NewMsgErrf(errImpFormat, err)
+		}
+		nctx, npkg, perr := applyDataPreparer(ctx, opts, pkg)
+		if perr != nil {
+			return nil, perr
+		}
+		ctx, pkg = nctx, npkg
+		pkgs = append(pkgs, pkg)
 	} else if ext == ".zip" {
 		var err error
 		tempDir, err = os.MkdirTemp(opts.TempDir, "dqex_import_*")
@@ -209,16 +272,20 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 		if err != nil {
 			return nil, err
 		}
+		ctx, pkgs, err = planZipJSONPackages(ctx, tempDir, opts, t)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		return nil, NewMsgErr(errImpFormat, filepath.Ext(opts.InputPath))
 	}
 
-	if len(files) == 0 {
+	if len(files) == 0 && len(pkgs) == 0 {
 		return nil, NewMsgErr(errImpNoSQL)
 	}
 
-	// 进度单元：按方言预切分统计 SQL 块总数（块内含建表/数据/对象语句，粒度远细于库级）；
-	// 预切分失败时回退为库级单元
+	// 进度单元：SQL 文件按方言预切分统计块数（块内含建表/数据/对象语句，粒度远细于库级）；
+	// 数据包按条目数计；预切分失败时回退为库级单元
 	blockUnits := true
 	totalBlocks := 0
 	for _, f := range files {
@@ -229,15 +296,20 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 		}
 		totalBlocks += n
 	}
+	if blockUnits {
+		totalBlocks += jsonPackageUnits(pkgs)
+	}
 	if blockUnits && totalBlocks > 0 {
 		t.p.TotalUnits = totalBlocks
 	} else {
 		blockUnits = false
-		t.p.TotalUnits = len(files)
+		t.p.TotalUnits = len(files) + len(pkgs)
 	}
-	t.log(engineTextsFor(t.lang).impStart, len(files))
+	t.log(engineTextsFor(t.lang).impStart, len(files)+len(pkgs))
 
 	var totalStmts int64
+	var skippedTables []string
+	var unrollback []string
 	for _, f := range files {
 		if err := ctx.Err(); err != nil {
 			return nil, NewMsgErr(errCancelled)
@@ -257,7 +329,7 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 		t.p.CurrentTable = f.db
 		t.emit(true)
 
-		stmts, err := importSQLFile(ctx, cli, f.path, t, blockUnits, opts.Target.CompatCollation)
+		stmts, err := importSQLFile(ctx, cli, f.path, t, blockUnits, opts.Target.CompatCollation, opts.TargetConn)
 		if err != nil {
 			cli.Close()
 			return nil, NewMsgErrf(errImpDB, err, f.db)
@@ -271,9 +343,223 @@ func RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*Impor
 		cli.Close()
 	}
 
+	// 数据包导入：单事务应用 + 行级回滚收集（回滚 SQL 按库分组；多库导入分文件写产物）
+	type rollGroup struct {
+		db   string
+		sqls []string
+	}
+	var rollGroups []rollGroup
+	addRollback := func(db string, sqls []string) {
+		for i := range rollGroups {
+			if rollGroups[i].db == db {
+				rollGroups[i].sqls = append(rollGroups[i].sqls, sqls...)
+				return
+			}
+		}
+		rollGroups = append(rollGroups, rollGroup{db: db, sqls: append([]string(nil), sqls...)})
+	}
+	// writeRollbacks 尽力写出回滚产物：单库为 <名称>.rollback.sql（契约命名）；多库按库
+	// 分文件 <名称>.<db>.rollback.sql（回滚语句无库上下文，回放须连接对应库）。
+	// 单个文件写出失败打告警（不中断其余产物）；返回写出的路径清单
+	writeRollbacks := func() []string {
+		var paths []string
+		write := func(dbTag string, sqls []string) {
+			p, werr := writeRollbackArtifact(opts.InputPath, dbTag, sqls)
+			if werr != nil {
+				t.log("%s", NewMsgErrf(errImpRollback, werr).Error())
+				return
+			}
+			paths = append(paths, p)
+		}
+		if len(rollGroups) == 1 {
+			write("", rollGroups[0].sqls)
+			return paths
+		}
+		for _, g := range rollGroups {
+			write(g.db, g.sqls)
+		}
+		return paths
+	}
+	for _, pkg := range pkgs {
+		if err := ctx.Err(); err != nil {
+			return nil, NewMsgErr(errCancelled)
+		}
+		db := pkg.DB
+		if opts.Target.DBName != "" {
+			db = opts.Target.DBName
+		}
+		if db == "" {
+			return nil, NewMsgErr(errImpNoTgtDB)
+		}
+		if err := EnsureDBExists(*opts.Target, db); err != nil {
+			return nil, NewMsgErrf(errImpEnsureDB, err, db)
+		}
+		cli, err := ConnectDB(*opts.Target, db)
+		if err != nil {
+			return nil, err
+		}
+		dbType := cli.DBType()
+		t.p.CurrentTable = db
+		t.emit(true)
+		res, err := ApplyDataPackage(ctx, cli, pkg, opts.TargetConn)
+		cli.Close()
+		if res != nil {
+			// 失败时仍保留已执行部分的回滚/告警（ApplyDataPackage 失败返回非 nil res）
+			addRollback(db, res.RollbackSQL)
+			skippedTables = append(skippedTables, res.SkippedTables...)
+			unrollback = append(unrollback, res.Unrollback...)
+			totalStmts += res.Stmts
+		}
+		if err != nil {
+			// 失败兜底：MySQL 系与 Oracle 的 DDL 隐式提交，事务回滚不撤销已建表；尽力写出
+			// 已执行部分的回滚产物供人工补偿。PG 系事务原子回滚（含 DDL），无残留无需产物。
+			if strings.EqualFold(dbType, "mysql") || strings.EqualFold(dbType, "oracle") {
+				for _, p := range writeRollbacks() {
+					t.log(engineTextsFor(t.lang).impRollbackPartial, p)
+				}
+			}
+			return nil, NewMsgErrf(errImpDB, err, db)
+		}
+		t.p.DoneUnits += len(pkg.Entries)
+		t.p.DoneRows = totalStmts
+		t.log(engineTextsFor(t.lang).impPkgDone, db, len(pkg.Entries), len(res.SkippedTables))
+		if len(res.Unrollback) > 0 {
+			t.log(engineTextsFor(t.lang).impPkgUnrollback, db, len(res.Unrollback))
+		}
+		t.emit(false)
+	}
+
+	// 业务对象贡献者回读（仅 zip 布局：包内 <Type>/ 目录存在时回调宿主 Import）
+	if err := importContributors(ctx, opts, tempDir, t); err != nil {
+		return nil, err
+	}
+
+	// 精确回滚产物：仅 .json 数据包导入可生成（.sql 盲执行无行级语义）
+	result := &ImportResult{TotalDatabases: len(files) + len(pkgs), TotalStmts: totalStmts, SkippedTables: skippedTables, Unrollback: unrollback}
+	if opts.Rollback && len(rollGroups) > 0 {
+		paths := writeRollbacks()
+		if len(paths) == 0 {
+			// 回滚产物是导入的安全网，一份都写不出时硬失败，不允许静默丢失回滚能力
+			return nil, NewMsgErr(errImpRollback)
+		}
+		result.RollbackPath = paths[0]
+		for _, p := range paths[1:] {
+			t.log(engineTextsFor(t.lang).impRollbackMulti, p)
+		}
+	}
+
 	t.finish()
-	t.log(engineTextsFor(t.lang).impDone, len(files), totalStmts)
-	return &ImportResult{TotalDatabases: len(files), TotalStmts: totalStmts}, nil
+	t.log(engineTextsFor(t.lang).impDone, len(files)+len(pkgs), totalStmts)
+	return result, nil
+}
+
+// applyDataPreparer 回调宿主数据前置处理器（按包库名注册；未注册键则原样返回）。
+// 返回回调派生的新 ctx（含宿主注入的值/取消能力，回调返回 nil ctx 时回退原 ctx），
+// 供后续数据包应用等流程延续使用
+func applyDataPreparer(ctx context.Context, opts ImportOptions, pkg *DataPackage) (context.Context, *DataPackage, error) {
+	preparer, ok := opts.DataPreparers[pkg.DB]
+	if !ok || preparer == nil {
+		return ctx, pkg, nil
+	}
+	nctx, npkg, err := preparer(ctx, DataPrepareRequest{Key: opts.TargetConn, DB: pkg.DB, Package: pkg})
+	if err != nil {
+		return ctx, pkg, err
+	}
+	if npkg != nil {
+		pkg = npkg
+	}
+	if nctx == nil {
+		nctx = ctx
+	}
+	return nctx, pkg, nctx.Err()
+}
+
+// planZipJSONPackages 收集 zip 包内根目录的 <库名>.json 数据包（应用前置处理器后返回，
+// 多包时前置处理器派生的 ctx 链式传播）。缺 "datas" 字段的 .json 视为非数据包格式静默
+// 跳过；解析失败（损坏/IO 错误）的数据包打告警后跳过（避免导入"成功"但数据缺失无感知）。
+func planZipJSONPackages(ctx context.Context, tempDir string, opts ImportOptions, t *tracker) (context.Context, []*DataPackage, error) {
+	var pkgs []*DataPackage
+	err := filepath.Walk(tempDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(tempDir, path)
+		if len(strings.Split(filepath.ToSlash(rel), "/")) != 1 || !strings.HasSuffix(strings.ToLower(path), ".json") {
+			return nil
+		}
+		pkg, err := LoadDataPackageFile(path)
+		if err != nil {
+			if me := AsMsgErr(err); me != nil && me.Key == errImpFormat {
+				return nil // 非 DataPackage 格式的 .json（如普通清单），静默跳过
+			}
+			t.log(engineTextsFor(t.lang).impPkgSkip, rel, err)
+			return nil
+		}
+		nctx, npkg, perr := applyDataPreparer(ctx, opts, pkg)
+		if perr != nil {
+			return perr
+		}
+		ctx, pkg = nctx, npkg
+		pkgs = append(pkgs, pkg)
+		return nil
+	})
+	return ctx, pkgs, err
+}
+
+// jsonPackageUnits 统计数据包进度单元数（条目数）
+func jsonPackageUnits(pkgs []*DataPackage) int {
+	n := 0
+	for _, p := range pkgs {
+		n += len(p.Entries)
+	}
+	return n
+}
+
+// LoadDataPackageFile 从 .json 文件加载数据包（顶层无 "datas"/"db" 字段时视为非数据包格式）
+func LoadDataPackageFile(path string) (*DataPackage, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	probe := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, err
+	}
+	if _, ok := probe["datas"]; !ok {
+		return nil, NewMsgErr(errImpFormat, "not a DataPackage json")
+	}
+	return LoadDataPackage(data)
+}
+
+// writeRollbackArtifact 将回滚 SQL 写入输入文件同目录：dbTag 为空时命名 <名称>.rollback.sql
+// （单库契约命名），非空时命名 <名称>.<db>.rollback.sql（多库导入按库分文件，回放须连接
+// 对应库）。产物含旧行全量明文数据，权限收紧 0600。
+func writeRollbackArtifact(inputPath, dbTag string, rollbackSQLs []string) (string, error) {
+	base := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
+	name := base + ".rollback.sql"
+	if dbTag != "" {
+		name = base + "." + sanitizeName(dbTag) + ".rollback.sql"
+	}
+	rollPath := filepath.Join(filepath.Dir(inputPath), name)
+	f, err := os.OpenFile(rollPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return "", err
+	}
+	w := bufio.NewWriterSize(f, 128*1024)
+	dbLine := ""
+	if dbTag != "" {
+		dbLine = "\n-- Database: " + dbTag
+	}
+	fmt.Fprintf(w, "-- dqex rollback\n-- Source: %s%s\n-- Time: %s\n-- 回滚语义：基于导入时点旧值快照，仅适用于紧随导入的撤销（见 docs/library.md）\n\n",
+		filepath.Base(inputPath), dbLine, time.Now().Format("2006-01-02 15:04:05"))
+	for _, sql := range rollbackSQLs {
+		fmt.Fprintln(w, sql)
+	}
+	if err := w.Flush(); err != nil {
+		_ = f.Close()
+		return "", err
+	}
+	return rollPath, f.Close()
 }
 
 // planZipImport 规划 zip 导入任务列表：每个根目录 库名.sql 文件即一个库
@@ -353,8 +639,9 @@ func countSQLBlocks(conn DBConnInfo, path string) (int, error) {
 	return n, err
 }
 
-// importSQLFile 解析并执行单个 SQL 文件，返回语句数；blockUnits 为 true 时每执行一块推进一个进度单元
-func importSQLFile(ctx context.Context, cli *cydb.DBCli, path string, t *tracker, blockUnits bool, compatCollation bool) (int64, error) {
+// importSQLFile 解析并执行单个 SQL 文件，返回语句数；blockUnits 为 true 时每执行一块推进一个进度单元；
+// connKey 用于审计钩子归属
+func importSQLFile(ctx context.Context, cli *cydb.DBCli, path string, t *tracker, blockUnits bool, compatCollation bool, connKey string) (int64, error) {
 	f, err := openSQLFile(path)
 	if err != nil {
 		return 0, err
@@ -374,9 +661,12 @@ func importSQLFile(ctx context.Context, cli *cydb.DBCli, path string, t *tracker
 		if compatCollation && strings.EqualFold(cli.DBType(), "mysql") {
 			content = compatCollationSQL(content)
 		}
+		start := time.Now()
 		if _, err := cli.DirectExecute(content); err != nil {
+			fireQueryHook(ctx, connKey, content, start, -1)
 			return NewMsgErrf(errImpExec, err, stmt.Index)
 		}
+		fireQueryHook(ctx, connKey, content, start, 0)
 		count++
 		t.p.DoneRows = count
 		if blockUnits {

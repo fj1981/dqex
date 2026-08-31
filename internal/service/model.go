@@ -17,6 +17,26 @@ type (
 	ExportOptions = store.ExportOptions
 	// ImportOptions 导入选项
 	ImportOptions = store.ImportOptions
+	// Contributor 业务对象贡献者（代理层扩展点）
+	Contributor = store.Contributor
+	// ContributorRequest 贡献者导出回调请求
+	ContributorRequest = store.ContributorRequest
+	// ContributorResult 贡献者导出回调结果
+	ContributorResult = store.ContributorResult
+	// ContributorImportRequest 贡献者导入回调请求
+	ContributorImportRequest = store.ContributorImportRequest
+	// DataPreparer 数据前置处理器（代理层，按目标库名注册）
+	DataPreparer = store.DataPreparer
+	// DataPrepareRequest 数据前置处理请求
+	DataPrepareRequest = store.DataPrepareRequest
+	// DataPackage 数据交换包（dqex 数据格式契约）
+	DataPackage = store.DataPackage
+	// DataEntry 数据包条目
+	DataEntry = store.DataEntry
+	// QueryHooks SQL 审计钩子（逐语句回调）
+	QueryHooks = store.QueryHooks
+	// ExportFormat 导出产物格式
+	ExportFormat = store.ExportFormat
 	// MigrateOptions 迁移选项
 	MigrateOptions = store.MigrateOptions
 	// CompareOptions 对比选项
@@ -74,6 +94,9 @@ const (
 	ResetNone     = store.ResetNone
 	ResetTruncate = store.ResetTruncate
 	ResetDrop     = store.ResetDrop
+	// FormatSQL / FormatJSON 导出产物格式（ExportOptions.Format）
+	FormatSQL  = store.FormatSQL
+	FormatJSON = store.FormatJSON
 )
 
 // SupportedDBTypes 支持的数据库类型及子类型。

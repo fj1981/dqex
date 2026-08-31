@@ -38,12 +38,37 @@ func (c *Client) RunExport(ctx context.Context, opts ExportOptions, cb ProgressF
 	return localArtifactRef(path), nil
 }
 
-// RunImport 执行导入任务（目标连接可传 connKey 或完整连接信息）。
-func (c *Client) RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) error {
+// ImportResult 导入任务结果
+type ImportResult struct {
+	// TotalDatabases 导入的库数（.sql/.zip/.json 合计）
+	TotalDatabases int
+	// TotalStmts 执行的语句数
+	TotalStmts int64
+	// RollbackRef 精确回滚产物引用（仅 .json 数据包导入且 ImportOptions.Rollback=true 时非空；
+	// .sql 导入为盲执行，无行级语义不生成回滚产物）
+	RollbackRef *ArtifactRef
+	// SkippedTables 跳过的表（无主键，无法精确导入/回滚；宿主侧应告警）
+	SkippedTables []string
+	// Unrollback 执行了但无法生成精确回滚的语句（如目标方言不支持的 ALTER 列变更；
+	// 宿主侧应告警，必要时人工补偿）
+	Unrollback []string
+}
+
+// RunImport 执行导入任务（目标连接可传 connKey 或完整连接信息）：
+// 支持 .sql / .zip / .json（DataPackage 数据包）输入；Rollback=true 时返回精确回滚产物。
+func (c *Client) RunImport(ctx context.Context, opts ImportOptions, cb ProgressFunc) (*ImportResult, error) {
 	if err := c.ensureOpen(); err != nil {
-		return err
+		return nil, err
 	}
-	return c.svc.RunImport(c.ctx(ctx), opts, cb)
+	res, err := c.svc.RunImport(c.ctx(ctx), opts, cb)
+	if err != nil {
+		return nil, err
+	}
+	out := &ImportResult{TotalDatabases: res.TotalDatabases, TotalStmts: res.TotalStmts, SkippedTables: res.SkippedTables, Unrollback: res.Unrollback}
+	if res.RollbackPath != "" {
+		out.RollbackRef = localArtifactRef(res.RollbackPath)
+	}
+	return out, nil
 }
 
 // RunMigrate 执行结构 + 数据迁移任务。

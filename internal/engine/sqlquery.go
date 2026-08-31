@@ -735,7 +735,9 @@ func GetCellValue(ctx context.Context, cli *cydb.DBCli, table, column string, pk
 // 语句分割复用底层库 cydb.SplitSQLStatements（正确处理字符串/引号/三种注释内的分号）。
 // 写操作的安全确认由调用方（Web handler / 前端）在进入本函数前完成；
 // 本函数仍会对每条语句做危险函数拦截（安全底线）。
-func RunSQLScript(ctx context.Context, cli *cydb.DBCli, sql string, limit, offset int, mode string) ([]*SQLQueryResult, error) {
+// RunSQLScript 批量执行多语句脚本：按分号分割，逐条判断读写并执行，返回结果集数组。
+// connKey 用于审计钩子归属（QueryHooks 经 ctx 注册时逐语句回调 OnQuery）。
+func RunSQLScript(ctx context.Context, cli *cydb.DBCli, sql string, limit, offset int, mode string, connKey string) ([]*SQLQueryResult, error) {
 	// 语句分割方言：transform 模式按 MySQL 语法；raw 模式按连接定义的方言
 	splitDialect := cli.DBType()
 	if mode == "transform" {
@@ -748,21 +750,28 @@ func RunSQLScript(ctx context.Context, cli *cydb.DBCli, sql string, limit, offse
 	results := make([]*SQLQueryResult, 0, len(stmts))
 	for i, stmt := range stmts {
 		if ClassifySQL(stmt) {
-			// 写操作：逐条执行（危险函数仍拦截）
+			// 写操作：逐条执行（危险函数仍拦截）；审计钩子耗时统一由局部 start 计算，
+			// 保证成功/失败两条路径 costMs 口径一致
+			start := time.Now()
 			r, err := RunSQLExec(ctx, cli, stmt)
 			if err != nil {
+				fireQueryHook(ctx, connKey, stmt, start, -1)
 				results = append(results, &SQLQueryResult{SQL: stmt, IsWrite: true, Error: err.Error()})
 				appendSkipped(results, stmts[i+1:])
 				return results, nil
 			}
+			fireQueryHook(ctx, connKey, stmt, start, r.AffectedRows)
 			results = append(results, r)
 		} else {
+			start := time.Now()
 			r, err := RunSQLQuery(ctx, cli, stmt, limit, offset, mode)
 			if err != nil {
+				fireQueryHook(ctx, connKey, stmt, start, -1)
 				results = append(results, &SQLQueryResult{SQL: stmt, Error: err.Error()})
 				appendSkipped(results, stmts[i+1:])
 				return results, nil
 			}
+			fireQueryHook(ctx, connKey, stmt, start, int64(r.RowCount))
 			results = append(results, r)
 		}
 	}

@@ -21,3 +21,4 @@ web/node_modules/
 .DS_Store
 dbx
 /promo/
+.gocache/*

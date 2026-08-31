@@ -21,16 +21,24 @@ type engineTexts struct {
 	expSnapshotOn      string // 一致性快照已启用：全部表在同一事务内读取
 	expStructDone      string // %s.%s 结构导出完成
 	expSkipData        string // %s.%s 跳过数据导出（dataMode=skip）
+	expNoPKSkip        string // %s.%s 表无主键，数据包格式跳过数据导出
 	expDataDone        string // %s.%s 数据导出完成 (%d 行)
+	expJSONNoGzip      string // 警告: json 数据包格式不支持 gzip，Gzip 选项已忽略
+	expJSONNoObj       string // 警告: json 数据包格式不包含视图/函数/存储过程，对象导出已忽略: %s
 	expDescFail        string // 写入描述文件失败（已跳过）: %v
 	expSortFail        string // 表依赖排序不可用（将按原顺序导出）: %v
 	expObjFail         string // 导出%s %s.%s 失败（已跳过）: %v
 	expObjDone         string // %s.%s/%s 导出完成
 
 	// importer
-	impStart  string // 开始导入: %d 个库
-	impDBDone string // 库 %s 导入完成 (%d 条语句)
-	impDone   string // 导入完成: %d 个库, %d 条语句
+	impStart           string // 开始导入: %d 个库
+	impDBDone          string // 库 %s 导入完成 (%d 条语句)
+	impDone            string // 导入完成: %d 个库, %d 条语句
+	impPkgSkip         string // 警告: zip 内数据包解析失败已跳过: %s (%v)
+	impPkgDone         string // 数据包导入完成: %s (%d 条目, 跳过无主键表 %d)
+	impPkgUnrollback   string // 警告: %s 中 %d 条语句无法生成精确回滚（详见结果 Unrollback 清单）
+	impRollbackPartial string // 警告: 导入失败，已写出已执行部分的回滚产物（可能不完整）: %s
+	impRollbackMulti   string // 回滚产物(多库分文件): %s
 
 	// reset
 	rstBackup string // 已创建备份表 %s
@@ -111,7 +119,10 @@ var engineTextsMap = map[string]engineTexts{
 		expSnapshotOn:      "一致性快照已启用：全部表在同一事务内读取",
 		expStructDone:      "%s.%s 结构导出完成",
 		expSkipData:        "%s.%s 跳过数据导出（dataMode=skip）",
+		expNoPKSkip:        "%s.%s 表无主键，数据包格式跳过数据导出",
 		expDataDone:        "%s.%s 数据导出完成 (%d 行)",
+		expJSONNoGzip:      "警告: json 数据包格式不支持 gzip，Gzip 选项已忽略",
+		expJSONNoObj:       "警告: json 数据包格式不包含视图/函数/存储过程，对象导出已忽略: %s",
 		expDescFail:        "写入描述文件失败（已跳过）: %v",
 		expSortFail:        "表依赖排序不可用（将按原顺序导出）: %v",
 		expObjFail:         "导出%s %s.%s 失败（已跳过）: %v",
@@ -119,6 +130,11 @@ var engineTextsMap = map[string]engineTexts{
 		impStart:           "开始导入: %d 个库",
 		impDBDone:          "库 %s 导入完成 (%d 条语句)",
 		impDone:            "导入完成: %d 个库, %d 条语句",
+		impPkgSkip:         "警告: zip 内数据包解析失败已跳过: %s (%v)",
+		impPkgDone:         "数据包导入完成: %s (%d 条目, 跳过无主键表 %d)",
+		impPkgUnrollback:   "警告: %s 中 %d 条语句无法生成精确回滚（详见结果 Unrollback 清单）",
+		impRollbackPartial: "警告: 导入失败，已写出已执行部分的回滚产物（可能不完整）: %s",
+		impRollbackMulti:   "回滚产物(多库分文件): %s",
 		rstBackup:          "已创建备份表 %s",
 		rstTrunc:           "已清空表 %s",
 		rstDrop:            "已删除表 %s（等待重建）",
@@ -184,7 +200,10 @@ var engineTextsMap = map[string]engineTexts{
 		expSnapshotOn:      "consistent snapshot enabled: all tables read in one transaction",
 		expStructDone:      "%s.%s structure exported",
 		expSkipData:        "%s.%s data export skipped (dataMode=skip)",
+		expNoPKSkip:        "%s.%s table has no primary key, data skipped in data-package format",
 		expDataDone:        "%s.%s data exported (%d rows)",
+		expJSONNoGzip:      "warning: data-package (json) format does not support gzip, the Gzip option is ignored",
+		expJSONNoObj:       "warning: data-package (json) format excludes views/functions/procedures, object export ignored: %s",
 		expDescFail:        "failed to write description file (skipped): %v",
 		expSortFail:        "table dependency sorting unavailable (exporting in original order): %v",
 		expObjFail:         "exporting %s %s.%s failed (skipped): %v",
@@ -192,6 +211,11 @@ var engineTextsMap = map[string]engineTexts{
 		impStart:           "importing: %d db(s)",
 		impDBDone:          "db %s imported (%d statements)",
 		impDone:            "import done: %d db(s), %d statements",
+		impPkgSkip:         "warning: failed to parse data package in zip, skipped: %s (%v)",
+		impPkgDone:         "data package imported: %s (%d entries, %d no-pk table(s) skipped)",
+		impPkgUnrollback:   "warning: %s contains %d statement(s) without precise rollback (see result Unrollback list)",
+		impRollbackPartial: "warning: import failed, partial rollback artifact written (may be incomplete): %s",
+		impRollbackMulti:   "rollback artifact (multi-db, per-db file): %s",
 		rstBackup:          "backup table created: %s",
 		rstTrunc:           "table cleared: %s",
 		rstDrop:            "table dropped (to be recreated): %s",

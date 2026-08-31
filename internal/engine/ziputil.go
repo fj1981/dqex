@@ -86,12 +86,14 @@ func unzip(zipPath, destDir string) error {
 	return nil
 }
 
-// sanitizeName 清理用于文件/目录名的字符串
+// sanitizeName 清理用于文件/目录名的字符串；空结果与 "."/".." 统一回落为 "_"，
+// 防止目录层级逃逸/混淆（Type 等半可信输入直接拼路径的场景）
 func sanitizeName(name string) string {
 	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
-	}
 	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_", "*", "_", "?", "_", `"`, "_", "<", "_", ">", "_", "|", "_", " ", "_")
-	return replacer.Replace(name)
+	name = replacer.Replace(name)
+	if name == "" || name == "." || name == ".." {
+		return "_"
+	}
+	return name
 }

@@ -16,8 +16,9 @@ var importTarget connFlags
 var importCmd = &cobra.Command{
 	Use:     "import",
 	Aliases: []string{"imp"},
-	Short:   "导入 SQL 文件（.sql / .sql.gz / .zip）到数据库",
-	Long: `导入 SQL 文件（.sql / .sql.gz / .zip）到数据库。
+	Short:   "导入 SQL 文件（.sql / .sql.gz / .zip / .json 数据包）到数据库",
+	Long: `导入 SQL 文件（.sql / .sql.gz / .zip / .json 数据包）到数据库。
+.json 为 DataPackage 数据包（Format=json 导出产物），支持 --rollback 生成精确回滚 SQL。
 
 独立闭环用法：
   dqex import --gen-config > import.yaml   # 生成配置模板
@@ -40,9 +41,10 @@ func init() {
 	f.StringP("target-conn", "t", "", "使用已保存连接（ID 或名称），与 --target-* 同时给出时后者优先")
 	_ = importCmd.RegisterFlagCompletionFunc("task", completeTaskIDs("import"))
 	_ = importCmd.RegisterFlagCompletionFunc("target-conn", completeConnNames)
-	f.StringP("input", "i", "", "导入文件(.sql / .sql.gz / .zip)")
+	f.StringP("input", "i", "", "导入文件(.sql / .sql.gz / .zip / .json 数据包)")
 	f.String("reset", "", "重置模式: truncate|drop（默认不重置）")
 	_ = importCmd.RegisterFlagCompletionFunc("reset", fixedCompletion("truncate", "drop"))
+	f.Bool("rollback", false, "导入 .json 数据包后生成精确回滚 SQL 产物")
 	f.Bool("backup", true, "重置前创建备份表")
 	f.Int("batch-size", 500, "批量大小")
 	registerConnAliases(importCmd, "", "target-", &importTarget)
@@ -116,6 +118,9 @@ func cliImport(cmd *cobra.Command, args []string) error {
 	if f.Changed("backup") {
 		opts.Backup, _ = f.GetBool("backup")
 	}
+	if f.Changed("rollback") {
+		opts.Rollback, _ = f.GetBool("rollback")
+	}
 	if f.Changed("batch-size") {
 		opts.BatchSize, _ = f.GetInt("batch-size")
 	}
@@ -135,9 +140,14 @@ func cliImport(cmd *cobra.Command, args []string) error {
 	}
 	cb, _ := cliProgress()
 	fmt.Println(cliTextsFor(cliLang()).startImport)
-	if err := svc.RunImport(context.Background(), opts, cb); err != nil {
+	res, err := svc.RunImport(context.Background(), opts, cb)
+	if err != nil {
 		return err
 	}
 	fmt.Println(green(cliTextsFor(cliLang()).doneImport))
+	if res != nil && res.RollbackPath != "" {
+		// 精确回滚产物（.json 数据包导入 + rollback）
+		printf(cliTextsFor(cliLang()).doneRollback+"\n", res.RollbackPath)
+	}
 	return nil
 }

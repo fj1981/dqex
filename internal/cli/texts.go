@@ -65,6 +65,7 @@ type cliTexts struct {
 	doneExport   string // 导出完成: %s
 	startImport  string // 开始导入...
 	doneImport   string // 导入完成
+	doneRollback string // 精确回滚产物: %s
 	warnReset    string // 警告: 重置数据且未开启备份，目标表现有数据将无法恢复！
 	startMigrate string // 开始迁移...
 	doneMigrate  string // 迁移完成
@@ -273,6 +274,7 @@ var cliTextsMap = map[string]cliTexts{
 		doneExport:   "导出完成: %s",
 		startImport:  "开始导入...",
 		doneImport:   "导入完成",
+		doneRollback: "精确回滚产物: %s",
 		warnReset:    "警告: 未开启备份的重置操作，目标表数据将无法恢复！",
 		startMigrate: "开始迁移...",
 		doneMigrate:  "迁移完成",
@@ -457,6 +459,7 @@ var cliTextsMap = map[string]cliTexts{
 		doneExport:   "export done: %s",
 		startImport:  "importing...",
 		doneImport:   "import done",
+		doneRollback: "rollback artifact: %s",
 		warnReset:    "warning: reset without backup; data in target tables will be lost!",
 		startMigrate: "migrating...",
 		doneMigrate:  "migrate done",

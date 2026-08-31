@@ -29,6 +29,26 @@ type (
 	ExportOptions = engine.ExportOptions
 	// ImportOptions 导入选项
 	ImportOptions = engine.ImportOptions
+	// Contributor 业务对象贡献者（代理层扩展点）
+	Contributor = engine.Contributor
+	// ContributorRequest 贡献者导出回调请求
+	ContributorRequest = engine.ContributorRequest
+	// ContributorResult 贡献者导出回调结果
+	ContributorResult = engine.ContributorResult
+	// ContributorImportRequest 贡献者导入回调请求
+	ContributorImportRequest = engine.ContributorImportRequest
+	// DataPreparer 数据前置处理器（代理层，按目标库名注册）
+	DataPreparer = engine.DataPreparer
+	// DataPrepareRequest 数据前置处理请求
+	DataPrepareRequest = engine.DataPrepareRequest
+	// DataPackage 数据交换包（dqex 数据格式契约，兼容 tl-env DataHolder）
+	DataPackage = engine.DataPackage
+	// DataEntry 数据包条目
+	DataEntry = engine.DataEntry
+	// QueryHooks SQL 审计钩子（逐语句回调）
+	QueryHooks = engine.QueryHooks
+	// ExportFormat 导出产物格式
+	ExportFormat = engine.ExportFormat
 	// MigrateOptions 迁移选项
 	MigrateOptions = engine.MigrateOptions
 	// CompareOptions 对比选项
@@ -62,6 +82,9 @@ const (
 	ResetNone     = engine.ResetNone
 	ResetTruncate = engine.ResetTruncate
 	ResetDrop     = engine.ResetDrop
+	// FormatSQL / FormatJSON 导出产物格式（ExportOptions.Format）
+	FormatSQL  = engine.FormatSQL
+	FormatJSON = engine.FormatJSON
 )
 
 // SupportedDBTypes 支持的数据库类型及子类型。
