@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.0] - 2026-09-11
+### Added
+- Gitee mirroring: pushing to `main` or tagging `v*` now automatically syncs the code and all tags to the Gitee mirror (https://gitee.com/fjcn/dqex)
+- Release announcements: every published release now automatically posts a version-announcement to the repository Discussions
+
+### Changed
+- README rewritten with a marketing focus, adding a Quick Start section and a comparison table against DBeaver / Navicat / DataGrip
+
 ## [1.7.4] - 2026-09-11
 ### Fixed
 - The "About" dialog now shows the project homepage and contact info in open-source builds

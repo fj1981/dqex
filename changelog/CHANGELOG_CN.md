@@ -1,5 +1,13 @@
 # 更新日志
 
+## [1.8.0] - 2026-09-11
+### 新增
+- Gitee 镜像同步：推送 `main` 或打 `v*` 标签时，自动将代码与全部标签同步至 Gitee 镜像（https://gitee.com/fjcn/dqex）
+- 版本公告：每次发布 Release 后，自动在仓库 Discussions 发布版本公告帖
+
+### 优化
+- README 营销化重写，新增 Quick Start 与对比表（DBeaver / Navicat / DataGrip）
+
 ## [1.7.4] - 2026-09-11
 ### 修复
 - 开源构建下"关于"弹窗未展示项目主页与联系方式，现已正常显示
