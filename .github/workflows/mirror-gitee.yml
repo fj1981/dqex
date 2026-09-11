@@ -1,13 +1,15 @@
 name: Mirror to Gitee
 
-# 每次 push 到 main 或打 v* tag 时，自动把代码与 tags 镜像同步到 Gitee。
+# 每次 push 到 main 时，自动把代码与全部 tags 镜像同步到 Gitee。
+# 说明：仅监听 main 触发。若同时监听 v* tag，tag 触发时 checkout 为 detached HEAD、
+#       本地不存在 main 分支，导致 push main 报 "does not match any"。
+#       项目发布总是先推 main 再打 tag，因此 main 触发即能一并同步 main 与全部 tags。
 # 需在仓库设置为 secret：GITEE_TOKEN（Gitee 私人令牌，projects 权限）。
 # 若 secret 未配置，该 job 会安全跳过（不会失败）。
 
 on:
   push:
     branches: [main]
-    tags: ['v*']
 
 permissions:
   contents: read
