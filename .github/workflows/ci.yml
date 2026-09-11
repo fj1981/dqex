@@ -99,7 +99,7 @@ jobs:
 
             const created = await github.graphql(`
               mutation($repoId: ID!, $cat: ID!, $title: String!, $body: String!) {
-                createDiscussion(input: { repositoryId: $repoId, categoryId: $cat, title: $title, body: $body }) { url }
+                createDiscussion(input: { repositoryId: $repoId, categoryId: $cat, title: $title, body: $body }) { discussion { url } }
               }
             `, { repoId, cat: target.id, title: `Release ${tag}`, body });
-            console.log('Announcement posted: ' + created.createDiscussion.url);
+            console.log('Announcement posted: ' + created.createDiscussion.discussion.url);
