@@ -65,3 +65,41 @@ jobs:
         with:
           files: release/dqex-*.zip
           generate_release_notes: true
+
+      # 由 GITHUB_TOKEN 创建的 Release 不会触发 release:published 事件，
+      # 因此公告改为在发布后同一 job 内直接发送。
+      - name: Post Release announcement to Discussions
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.DISCUSSIONS_PAT }}
+          script: |
+            const { owner, repo } = context.repo;
+            const tag = context.ref.replace('refs/tags/', '');
+
+            const r = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+            const body = [
+              `## ${tag}`, '',
+              r.data.body || '',
+              '',
+              `:arrow_down: **[Download the release](${r.data.html_url})**`
+            ].join('\n');
+
+            const repoRes = await github.request('GET /repos/{owner}/{repo}', { owner, repo });
+            const repoId = repoRes.data.node_id;
+            const catQuery = await github.graphql(`
+              query($repoId: ID!) {
+                node(id: $repoId) { ... on Repository { discussionCategories(first: 50) { edges { node { id name } } } } }
+              }
+            `, { repoId });
+            const cats = catQuery.node.discussionCategories.edges.map(e => e.node);
+            const target = cats.find(c => /announce/i.test(c.name))
+              || cats.find(c => /公告/i.test(c.name))
+              || cats[0];
+            if (!target) throw new Error('No discussion category available.');
+
+            const created = await github.graphql(`
+              mutation($repoId: ID!, $cat: ID!, $title: String!, $body: String!) {
+                createDiscussion(input: { repositoryId: $repoId, categoryId: $cat, title: $title, body: $body }) { url }
+              }
+            `, { repoId, cat: target.id, title: `Release ${tag}`, body });
+            console.log('Announcement posted: ' + created.createDiscussion.url);
