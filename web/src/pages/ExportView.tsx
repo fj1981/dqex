@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
@@ -62,8 +62,19 @@ export default function ExportView() {
   const [runningTaskID, setRunningTaskID] = useState("")
   const [savedTasks, setSavedTasks] = useState<TaskConfig[]>([])
   const [saveOpen, setSaveOpen] = useState(false)
+  // 嵌入模式 conn 注入（EmbedShell 解析 ?conn= 后写入 store，非嵌入模式恒为空）
+  const embedConn = useAppStore((s) => s.embedConn)
 
   const set = (patch: Partial<ExportOptions>) => setOpts((o) => ({ ...o, ...patch }))
+
+  // 宿主注入连接消费（一次性）：预选为源连接。与用户手动切换连接同语义：
+  // 清空已选库/表/对象/条件，避免与缓存任务配置的旧选择错位（参照 MigrateView）
+  const embedApplied = useRef(false)
+  useEffect(() => {
+    if (!embedConn || embedApplied.current) return
+    embedApplied.current = true
+    set({ sourceConn: embedConn, tables: [], objects: [], conditions: [], databases: [] })
+  }, [embedConn]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 新任务（无缓存配置）时，compatCollation 默认采用设置页的全局值；已加载任务配置不覆盖
   useEffect(() => {
@@ -312,7 +323,6 @@ export default function ExportView() {
         <ProgressView
           taskID={runningTaskID}
           taskType="export"
-          onSaveTask={() => setSaveOpen(true)}
           onBack={resetWizard}
         />
       )}

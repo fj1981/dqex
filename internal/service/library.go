@@ -9,10 +9,15 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/fj1981/dqex/internal/engine"
+	"github.com/fj1981/dqex/internal/store"
 	"github.com/fj1981/infrakit/pkg/cydb"
+	cydbdef "github.com/fj1981/infrakit/pkg/cydb/def"
+	"github.com/fj1981/infrakit/pkg/cystore"
 )
 
 // StoreMode 持久化模式（三态，见 4.1）
@@ -76,12 +81,41 @@ type ConnHooks struct {
 	OnDeleted func(key string)
 }
 
+// TaskStartInfo 任务启动信息（TaskHooks.OnTaskStart 参数）。
+// 只携带 dqex 自身语义（任务类型/连接 key/展示标题），不含任何宿主概念，
+// 宿主自行决定是否以及如何镜像（如按 Source 前缀识别归属环境）。
+type TaskStartInfo struct {
+	TaskID   string // dqex 任务 ID
+	TaskType string // export / dictionary / import / migrate / compare
+	Source   string // 主连接 key（已保存连接名；任务参数直接携带连接时为空）
+	Title    string // 任务展示标题（连接 · 目标 概要）
+	User     string // 任务发起人标识（宿主注入 X-DQEX-User 登录名；独立部署为空/local）
+}
+
+// TaskHooks 任务生命周期回调（任务镜像/通知用，宿主可选注册）。
+// 契约：OnTaskStart 在任务登记完成后、执行 goroutine 启动前同步调用（宿主落库
+// 应快速返回，重活自行起 goroutine）；OnTaskProgress 在任务执行 goroutine 中
+// 随进度推送调用（含终态：done/error/cancelled），宿主需自行保证并发安全；
+// 回调内不得再回调 dqex 的 Client 方法。
+type TaskHooks struct {
+	OnTaskStart    func(info TaskStartInfo)
+	OnTaskProgress func(taskID string, p ProgressInfo)
+}
+
 // LibraryOptions 库模式构建参数（门面包使用；CLI/Web 不经此路径）
 type LibraryOptions struct {
 	// DataDir 持久化根目录：非空 = StoreSQLite（快照/历史/连接库落盘）；空 = StoreNone 纯内存
 	DataDir string
+	// StoreConn 外部 SQL 存储连接（StoreExternal）：非空时元数据（连接/任务/历史/审计/
+	// 工作区/AI 会话）经 cydb 落入宿主数据库（独立 database，表自动迁移），
+	// 不写本地 SQLite；DataDir 仅决定目录类资源（tmp/uploads/exports/compares/snapshots）
+	// 的本地位置，为空时回退系统临时目录。优先级高于 DataDir。
+	StoreConn *cydbdef.DBConnection
 	// ConfigFile 显式全局配置路径；空 = 不加载全局配置（不自动发现 ~/.dqex/config.yaml）
 	ConfigFile string
+	// AI AI 辅助 SQL 配置注入（宿主持有，dqex 不落盘）：BaseURL/APIKey/Model 三项
+	// 非空即启用 AI 助手；非 nil 时覆盖 ConfigFile 中的 ai 段，nil 时不影响
+	AI *AIConfig
 	// InlineConns 静态注入的连接（便捷糖：内部转成只读内存注册表）
 	InlineConns []ConnInfo
 	// Provider 连接提供者回调（连接完全外部持有时注入）
@@ -95,6 +129,14 @@ type LibraryOptions struct {
 	// DataPreparers 数据前置处理器（代理层，key=目标库名）：.json 数据包导入前回调宿主
 	// 做版本合并等业务策略，可修改包内容
 	DataPreparers map[string]engine.DataPreparer
+	// TaskHooks 任务生命周期回调（可选）：Web 异步任务启动/进度推送时回调宿主，
+	// 用于任务镜像/通知；nil 时零开销，CLI/Web 独立形态不注入
+	TaskHooks *TaskHooks
+	// ArtifactStore 快照对象存储（可选）：非空时快照（index + 数据）落对象存储
+	// （key 前缀 snapshots/），解决容器化部署本地盘易失；nil 时落本地目录（默认行为）
+	ArtifactStore *cystore.Store
+	// ArtifactBucket 对象存储 bucket（空 = store 默认 bucket）
+	ArtifactBucket string
 }
 
 // NewLibraryService 创建库模式业务服务：
@@ -104,6 +146,11 @@ func NewLibraryService(ctx context.Context, opts LibraryOptions) (*Service, erro
 	cfg, err := LoadAppConfig(ctx, strings.TrimSpace(opts.ConfigFile))
 	if err != nil {
 		return nil, err
+	}
+	if opts.AI != nil {
+		// 宿主注入的 AI 配置优先（覆盖配置文件 ai 段）；数字字段零值填默认
+		cfg.AI = *opts.AI
+		cfg.AI.normalize()
 	}
 	s := &Service{
 		cfg:           cfg,
@@ -118,7 +165,31 @@ func NewLibraryService(ctx context.Context, opts LibraryOptions) (*Service, erro
 		queryHooks:    opts.QueryHooks,
 		dataPreparers: opts.DataPreparers,
 	}
-	if strings.TrimSpace(opts.DataDir) != "" {
+	s.runner.hooks = opts.TaskHooks
+	s.artifactStore = opts.ArtifactStore
+	s.artifactBucket = opts.ArtifactBucket
+	if opts.StoreConn != nil {
+		// StoreExternal：元数据落宿主数据库（cydb 跨方言，表自动迁移），不写本地 SQLite
+		s.storeMode = StoreExternal
+		st, err := store.OpenSQL(opts.StoreConn)
+		if err != nil {
+			return nil, err
+		}
+		baseDir := strings.TrimSpace(opts.DataDir)
+		if baseDir == "" {
+			// 目录类资源（tmp/uploads/exports/compares/snapshots）兜底系统临时目录：
+			// SQL 控制台场景不产生产物，需要导出/快照能力的宿主应显式配置 DataDir
+			baseDir = filepath.Join(os.TempDir(), "dqex-lib")
+		}
+		s.dataDirFlag = baseDir
+		persist, err := NewPersistMgrWithStore(ResolveDirs(baseDir, cfg), st)
+		if err != nil {
+			_ = st.Close()
+			return nil, err
+		}
+		s.persist = persist
+		SetProvidersDataDir(persist.BaseDir())
+	} else if strings.TrimSpace(opts.DataDir) != "" {
 		s.storeMode = StoreSQLite
 		s.dataDirFlag = opts.DataDir
 		persist, err := NewPersistMgrWith(ResolveDirs(opts.DataDir, cfg))
@@ -128,6 +199,10 @@ func NewLibraryService(ctx context.Context, opts LibraryOptions) (*Service, erro
 		s.persist = persist
 		// 厂商配置数据目录（AI providers 本地加载）；StoreNone 不设置（AI 依赖数据目录，库模式未暴露 AI 能力）
 		SetProvidersDataDir(persist.BaseDir())
+	}
+	if s.artifactStore != nil && s.persist != nil {
+		// 快照已上对象存储：目录热更新时跳过 snapshots 本地迁移（对象 key 不受本地目录影响）
+		s.persist.SetSnapshotsExternal(true)
 	}
 	// InlineConns → 内存注册表（任意模式均可注入；StoreSQLite 下作为额外连接源，StoreNone 下为主来源）
 	for i, ci := range opts.InlineConns {

@@ -21,19 +21,34 @@ func exportDatabaseJSON(ctx context.Context, cli *cydb.DBCli, db string, tables 
 	var totalRows int64
 
 	// ============ 建表 DDL（type=0）============
+	ddlByTable := make(map[string]string, len(tables))     // 明细回调用：表 → 已写入的 DDL
+	metaByTable := make(map[string]TableMeta, len(tables)) // 明细回调用：表 → 注释 + 列明细
 	if len(tables) > 0 && !opts.DataOnly {
 		for _, table := range tables {
 			if err := ctx.Err(); err != nil {
 				return totalRows, NewMsgErr(errCancelled)
 			}
 			t.p.CurrentTable = db + "." + table
+			t.p.Phase = "schema"
 			t.emit(true)
 			content, err := cli.GetDDLSql(dialect.FuncNameGetCreateTableSql, table)
 			if err != nil {
 				return totalRows, NewMsgErrf(errExpGenDDL, err)
 			}
+			ddl := ""
 			if content != nil && strings.TrimSpace(content.Content) != "" {
-				pkg.Add(table, DataEntry{Type: DataEntryCreateTable, Table: table, SQL: strings.TrimRight(strings.TrimSpace(content.Content), ";")})
+				ddl = strings.TrimRight(strings.TrimSpace(content.Content), ";")
+				pkg.Add(table, DataEntry{Type: DataEntryCreateTable, Table: table, SQL: ddl})
+			}
+			ddlByTable[table] = ddl
+			// 元数据查询仅在宿主消费明细时执行，避免无回调场景每表多一次 DB 查询
+			if opts.OnDetail != nil {
+				metaByTable[table] = exportTableMeta(cli, table)
+			}
+			// SchemaOnly 模式无数据段：DDL 落定即视为该表导出完成，此处回调
+			if opts.SchemaOnly && opts.OnDetail != nil {
+				opts.OnDetail(ExportDetail{Database: db, Kind: DetailKindTable, Name: table, Ddl: ddl,
+					Comment: metaByTable[table].Comment, Columns: metaByTable[table].Columns})
 			}
 			t.p.DoneUnits++
 			t.log(engineTextsFor(t.lang).expStructDone, db, table)
@@ -47,6 +62,7 @@ func exportDatabaseJSON(ctx context.Context, cli *cydb.DBCli, db string, tables 
 				return totalRows, NewMsgErr(errCancelled)
 			}
 			t.p.CurrentTable = db + "." + table
+			t.p.Phase = "data"
 			t.emit(true)
 
 			// 表级数据模式与 SQL 格式一致：skip 跳过、condition 条件取数
@@ -58,6 +74,10 @@ func exportDatabaseJSON(ctx context.Context, cli *cydb.DBCli, db string, tables 
 			if dataMode == TableDataModeSkip {
 				t.log(engineTextsFor(t.lang).expSkipData, db, table)
 				t.p.DoneUnits++
+				if opts.OnDetail != nil {
+					opts.OnDetail(ExportDetail{Database: db, Kind: DetailKindTable, Name: table, Ddl: ddlByTable[table],
+						Comment: metaByTable[table].Comment, Columns: metaByTable[table].Columns})
+				}
 				continue
 			}
 
@@ -69,11 +89,20 @@ func exportDatabaseJSON(ctx context.Context, cli *cydb.DBCli, db string, tables 
 				// 无主键表（B6 策略）：仅结构可复现，行数据无法精确导入/回滚，跳过并告警
 				t.log(engineTextsFor(t.lang).expNoPKSkip, db, table)
 				t.p.DoneUnits++
+				if opts.OnDetail != nil {
+					opts.OnDetail(ExportDetail{Database: db, Kind: DetailKindTable, Name: table, Ddl: ddlByTable[table],
+						Comment: metaByTable[table].Comment, Columns: metaByTable[table].Columns})
+				}
 				continue
 			}
 
 			dbType, subType := cli.DBType(), cli.DBSubType()
 			selectSQL := conditionQuery(dbType, subType, table, cond)
+			// 明细回调 Query 与 SQL 路径口径一致：仅条件导出时填充归一化 SELECT
+			var detailQuery string
+			if dataMode == TableDataModeCondition && cond != nil {
+				detailQuery = selectSQL
+			}
 			if selectSQL == "" {
 				selectSQL = "SELECT * FROM " + EscapeTable(dbType, subType, table)
 			}
@@ -86,6 +115,10 @@ func exportDatabaseJSON(ctx context.Context, cli *cydb.DBCli, db string, tables 
 			t.p.DoneUnits++
 			t.log(engineTextsFor(t.lang).expDataDone, db, table, rows)
 			t.emit(false)
+			if opts.OnDetail != nil {
+				opts.OnDetail(ExportDetail{Database: db, Kind: DetailKindTable, Name: table, Rows: rows, Query: detailQuery,
+					Ddl: ddlByTable[table], Comment: metaByTable[table].Comment, Columns: metaByTable[table].Columns})
+			}
 		}
 	}
 
@@ -105,7 +138,7 @@ func exportDatabaseJSON(ctx context.Context, cli *cydb.DBCli, db string, tables 
 // 回滚，缺失时数据条目会被整体跳过。
 func collectTableRows(ctx context.Context, cli *cydb.DBCli, table, selectSQL string, pk []string, pkg *DataPackage) (int64, error) {
 	var rows int64
-	err := cli.DirectForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
+	err := cli.DirectForEachQueryContext(ctx, table, selectSQL, func(rd cydb.RowData) error {
 		if err := ctx.Err(); err != nil {
 			return NewMsgErr(errCancelled)
 		}

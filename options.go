@@ -1,11 +1,17 @@
 package dqex
 
 import (
+	"github.com/fj1981/dqex/internal/service"
 	"github.com/fj1981/infrakit/pkg/cydb"
 	"github.com/fj1981/infrakit/pkg/cydb/def"
 	"github.com/fj1981/infrakit/pkg/cydist"
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cystore"
+
+	// cystore provider 自注册：保证独立二进制/任意宿主注入的 *cystore.Store
+	// 所需 provider 均可用（宿主自行 import 注册亦可，此处兜底去依赖宿主）
+	_ "github.com/fj1981/infrakit/pkg/cystore/local"
+	_ "github.com/fj1981/infrakit/pkg/cystore/minio"
 )
 
 // Option 库客户端配置项（options 模式，见 3.1）。
@@ -17,6 +23,7 @@ type options struct {
 	dataDir    string
 	configFile string
 	lang       string
+	ai         *service.AIConfig
 
 	inlineConns []ConnInfo
 	provider    *ConnProvider
@@ -24,17 +31,27 @@ type options struct {
 	contribs    []Contributor
 	queryHooks  *QueryHooks
 	preparers   map[string]DataPreparer
+	taskHooks   *TaskHooks
 
 	// 触发式能力（4.4）：v0.2 门面即接受参数并校验，具体实现随场景触发落地
-	triggered string // 首个被注入的触发式能力名（用于报错提示）
-	storeConn *def.DBConnection
-	cacheAddr string
+	triggered      string // 首个被注入的触发式能力名（用于报错提示）
+	storeConn      *def.DBConnection
+	cacheAddr      string
+	artifactStore  *cystore.Store // 快照对象存储（WithArtifactStore 已落地）
+	artifactBucket string         // 对象存储 bucket（空 = store 默认 bucket）
 }
 
 // WithDataDir 设置持久化根目录（快照/历史/连接库），空 = 纯内存。
 // 非空即 StoreSQLite 便捷糖（内部等价 sqlite 连接，CLI/Web 同款行为）。
 func WithDataDir(dir string) Option {
 	return func(o *options) { o.dataDir = dir }
+}
+
+// IsArtifactLogicalPath 判断 dqex 任务产物路径是否为逻辑路径（exports/、compares/ 前缀）。
+// 逻辑路径产物在库模式（WithArtifactStore 注入）下已由 dqex 直传对象存储，
+// 宿主登记引用即可，无需再从本地文件搬运。
+func IsArtifactLogicalPath(p string) bool {
+	return service.IsArtifactLogicalPath(p)
 }
 
 // WithConfigFile 显式指定全局配置 config.yaml，空 = 不加载全局配置（不自动发现 ~/.dqex/config.yaml）。
@@ -46,6 +63,14 @@ func WithConfigFile(path string) Option {
 // 决定所有 SvcError 消息与引擎 MsgError 的渲染语言（3.3 i18n 内聚）。
 func WithLang(lang string) Option {
 	return func(o *options) { o.lang = lang }
+}
+
+// WithAIConfig 注入 AI 辅助 SQL 配置（OpenAI 兼容协议）。
+// BaseURL / APIKey / Model 三项非空即启用 AI 助手（前端 AI 入口随之显示）；
+// 配置由宿主持有（如宿主 config.yml），dqex 不落盘、不持久化 APIKey。
+// 与 WithConfigFile 同时提供时，本注入优先（覆盖配置文件中的 ai 段）。
+func WithAIConfig(ai AIConfig) Option {
+	return func(o *options) { c := ai; o.ai = &c }
 }
 
 // WithInlineConns 便捷方式：静态注入少量连接（内部转成只读内存注册表）。
@@ -94,6 +119,17 @@ func WithQueryHooks(hooks QueryHooks) Option {
 	return func(o *options) { o.queryHooks = &hooks }
 }
 
+// WithTaskHooks 注入任务生命周期回调（代理层扩展点）：Web 异步任务（导出/字典/
+// 导入/迁移/对比）启动与进度推送（含终态）时回调宿主，用于任务镜像/通知等。
+//
+// 回调契约：OnTaskStart 在任务登记完成后、执行 goroutine 启动前同步调用（宿主
+// 落库应快速返回，重活自行起 goroutine）；OnTaskProgress 在任务执行 goroutine
+// 中随进度推送调用，宿主需自行保证并发安全；回调内不得再回调 Client 方法。
+// 未注入（nil）时零开销，CLI/Web 独立形态不注入、行为不变。
+func WithTaskHooks(h TaskHooks) Option {
+	return func(o *options) { o.taskHooks = &h }
+}
+
 // WithDataPreparers 注册数据前置处理器（代理层扩展点，key=目标库名）：
 // .json 数据包（DataPackage）导入应用前回调宿主执行业务策略（如业务对象版本
 // 合并），宿主可直接修改包内容后返回。
@@ -127,14 +163,17 @@ func (o *options) validateTriggered() error {
 		cygin.WithErrDetailf("triggered capability %q is validated but not implemented yet (see docs/library-api-design.md 4.4)", o.triggered))
 }
 
-// WithStoreConn 注入内部存储连接（cydb 多数据库：sqlite/mysql/postgresql/oracle，见 4.4.1，触发式）。
+// WithStoreConn 注入内部存储连接（已落地，4.4.1）：元数据（连接/任务/历史/审计/
+// 工作区/AI 会话）经 cydb 跨方言落入宿主数据库（sqlite/mysql/postgresql/oracle，
+// 表自动迁移；MySQL 需 EnsureDB=true 预建 database），不写本地 SQLite。
+// 产物类目录资源仍为本地目录（无 DataDir 时回退系统临时目录；产物对象存储化见 WithArtifactStore）。
 func WithStoreConn(conn def.DBConnection) Option {
 	return func(o *options) {
 		if conn.Type == "" {
 			return
 		}
-		o.markTriggered("WithStoreConn")
-		o.storeConn = &conn
+		c := conn
+		o.storeConn = &c
 	}
 }
 
@@ -170,14 +209,21 @@ func WithCacheClient(rc *cydist.RedisClient) Option {
 	}
 }
 
-// WithArtifactStore 注入产物存储（复用 infrakit cystore：本地/MinIO/S3/OBS/OSS，见 4.4.3，触发式）。
+// WithArtifactStore 注入对象存储（复用 infrakit cystore，见 4.4.3）。
+// 现阶段用于快照持久化：snapshots/index.json 与 <id>.json 落对象存储
+// （key 前缀 snapshots/），解决容器化部署本地盘易失导致的快照丢失；
+// exports/compares 仍为本地工作目录（最终交付由宿主自行处理）。
+// 未注入时快照落本地目录（CLI/独立部署默认行为不变）；产物对象化
+// （ArtifactRef 对象存储化）仍为后续触发式规划，届时复用本 store。
+// bucket 为空时使用 store 自带的默认 bucket；所需 provider（minio/local）
+// 已由本包 blank import 注册，独立二进制无需宿主侧注册。
 func WithArtifactStore(store *cystore.Store, bucket string) Option {
 	return func(o *options) {
 		if store == nil {
 			return
 		}
-		o.markTriggered("WithArtifactStore")
-		_ = bucket
+		o.artifactStore = store
+		o.artifactBucket = bucket
 	}
 }
 

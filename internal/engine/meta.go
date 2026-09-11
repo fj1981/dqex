@@ -479,6 +479,11 @@ func GetTableMeta(conn DBConnInfo, tableName string) (TableMeta, error) {
 	if info == nil {
 		return TableMeta{}, NewMsgErr(errMetaTableEmpty, tableName)
 	}
+	return tableInfoToMeta(info), nil
+}
+
+// tableInfoToMeta 将库驱动表信息转换为表元数据（注释 + 列明细）。
+func tableInfoToMeta(info cydb.TableInfo) TableMeta {
 	cols := info.GetColumns()
 	result := make([]TableColumnInfo, 0, len(cols))
 	for _, col := range cols {
@@ -500,7 +505,16 @@ func GetTableMeta(conn DBConnInfo, tableName string) (TableMeta, error) {
 		}
 		result = append(result, c)
 	}
-	return TableMeta{Comment: info.GetComment(), Columns: result}, nil
+	return TableMeta{Comment: info.GetComment(), Columns: result}
+}
+
+// exportTableMeta 导出用表元数据查询：失败不阻断导出，返回零值（明细回调 Comment/Columns 留空）。
+func exportTableMeta(cli *cydb.DBCli, table string) TableMeta {
+	info, err := cli.GetTableInfo(table)
+	if err != nil || info == nil {
+		return TableMeta{}
+	}
+	return tableInfoToMeta(info)
 }
 
 // GetTableColumns 获取指定表的列信息（名称/类型/可空/主键/默认值/注释，复用池化连接）。

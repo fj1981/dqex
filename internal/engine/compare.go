@@ -698,7 +698,7 @@ func loadRowsByPK(ctx context.Context, cli *cydb.DBCli, table string, pk, conten
 	rows := make(map[string]map[string]any)
 	selectSQL := fmt.Sprintf("SELECT * FROM %s", EscapeTable(cli.DBType(), cli.DBSubType(), table))
 	// DirectForEachQuery 跳过 preProcess：GoSQLX 无法解析 PG/Kingbase 双引号限定名（"schema"."table"）
-	err := cli.DirectForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
+	err := cli.DirectForEachQueryContext(ctx, table, selectSQL, func(rd cydb.RowData) error {
 		if err := ctx.Err(); err != nil {
 			return NewMsgErr(errCancelled)
 		}
@@ -815,7 +815,7 @@ func loadRowMultiset(ctx context.Context, cli *cydb.DBCli, table string, common 
 	rows := make(map[string]map[string]any)
 	selectSQL := fmt.Sprintf("SELECT * FROM %s", EscapeTable(cli.DBType(), cli.DBSubType(), table))
 	// DirectForEachQuery 跳过 preProcess：GoSQLX 无法解析 PG/Kingbase 双引号限定名（"schema"."table"）
-	err := cli.DirectForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
+	err := cli.DirectForEachQueryContext(ctx, table, selectSQL, func(rd cydb.RowData) error {
 		if err := ctx.Err(); err != nil {
 			return NewMsgErr(errCancelled)
 		}

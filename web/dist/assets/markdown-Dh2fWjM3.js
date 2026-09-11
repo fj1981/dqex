@@ -1,4 +1,4 @@
-import{r as Ii,c as nn,g as ar}from"./monaco-Cw7YpO7x.js";var ur={exports:{}},an={};/**
+import{r as Ii,c as nn,g as ar}from"./monaco-CNVXFudY.js";var ur={exports:{}},an={};/**
  * @license React
  * react-jsx-runtime.production.min.js
  *

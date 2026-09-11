@@ -58,6 +58,8 @@ type (
 	ConnHooks = service.ConnHooks
 	// ConnSource 连接解析来源（ConnHooks.OnResolved 参数：inline/memory/provider/store）
 	ConnSource = service.ConnSource
+	// AIConfig AI 辅助 SQL 配置（OpenAI 兼容协议，经 WithAIConfig 注入；宿主持有，dqex 不落盘）
+	AIConfig = service.AIConfig
 	// StoreMode 持久化模式（StoreNone/StoreSQLite/StoreExternal）
 	StoreMode = service.StoreMode
 )
@@ -89,6 +91,9 @@ type (
 	TableAlias = service.TableAlias
 	// ExportOptions 导出选项
 	ExportOptions = service.ExportOptions
+	// ExportDetail 导出明细回调条目（ExportOptions.OnDetail 参数）：
+	// 单表/单对象导出完成时同步通知宿主，供清单/审计等旁路采集
+	ExportDetail = engine.ExportDetail
 	// ImportOptions 导入选项
 	ImportOptions = service.ImportOptions
 	// Contributor 业务对象贡献者（代理层扩展点）：宿主注册取数/回写回调，
@@ -112,6 +117,10 @@ type (
 	DataEntry = service.DataEntry
 	// QueryHooks SQL 审计钩子（逐语句回调 OnQuery，经 WithQueryHooks 注册）
 	QueryHooks = service.QueryHooks
+	// TaskStartInfo 任务启动信息（TaskHooks.OnTaskStart 参数）
+	TaskStartInfo = service.TaskStartInfo
+	// TaskHooks 任务生命周期回调（任务镜像/通知，经 WithTaskHooks 注册）
+	TaskHooks = service.TaskHooks
 	// ExportFormat 导出产物格式
 	ExportFormat = service.ExportFormat
 	// MigrateOptions 迁移选项
@@ -142,6 +151,11 @@ const (
 	// FormatSQL / FormatJSON 导出产物格式（ExportOptions.Format）
 	FormatSQL  = service.FormatSQL
 	FormatJSON = service.FormatJSON
+	// DetailKindTable/View/Function/Procedure 导出明细类型（ExportDetail.Kind）
+	DetailKindTable     = engine.DetailKindTable
+	DetailKindView      = engine.DetailKindView
+	DetailKindFunction  = engine.DetailKindFunction
+	DetailKindProcedure = engine.DetailKindProcedure
 )
 
 // ---- 进度类型 ----

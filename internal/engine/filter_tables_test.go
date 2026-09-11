@@ -5,42 +5,57 @@ import (
 	"testing"
 )
 
-// PG 分层枚举后表清单为限定名 "schema.table"，wanted 支持三级/二级/裸名匹配
-func TestFilterTablesPgSchema(t *testing.T) {
-	all := []string{"public.users", "sales.users", "public.orders"}
+// 白名单条目解析与库归属筛选（表计划构建的纯逻辑部分）；
+// 存在性校验依赖 cli.IsTableExist（见 conn.go resolveTablesByWhitelist / locateWhitelistedTable）
+func TestEntriesForDB(t *testing.T) {
 	cases := []struct {
 		name   string
 		wanted []string
-		want   []string
+		db     string
+		want   []string // 期望保留的条目原文序列
 	}{
-		{"nil 全部", nil, all},
-		{"空数组无表", []string{}, []string{}},
-		{"三级精确", []string{"mydb.sales.users"}, []string{"sales.users"}},
-		{"三级库不匹配", []string{"otherdb.sales.users"}, []string{}},
-		{"三级 schema 不匹配", []string{"mydb.public.users"}, []string{"public.users"}},
-		{"二级任意 schema", []string{"mydb.users"}, []string{"public.users", "sales.users"}},
-		{"裸名任意库 schema", []string{"users"}, []string{"public.users", "sales.users"}},
-		{"大小写不敏感", []string{"MYDB.SALES.USERS"}, []string{"sales.users"}},
-		{"四段不支持", []string{"a.b.c.d"}, []string{}},
+		{"nil 无条目", nil, "mydb", []string{}},
+		{"空数组无条目", []string{}, "mydb", []string{}},
+		{"三级保留", []string{"mydb.sales.users"}, "mydb", []string{"mydb.sales.users"}},
+		{"三级库不匹配", []string{"otherdb.sales.users"}, "mydb", []string{}},
+		{"二级保留", []string{"mydb.users"}, "mydb", []string{"mydb.users"}},
+		{"二级库不匹配", []string{"otherdb.users"}, "mydb", []string{}},
+		{"裸名任意库", []string{"users"}, "mydb", []string{"users"}},
+		{"大小写不敏感", []string{"MYDB.SALES.USERS"}, "mydb", []string{"MYDB.SALES.USERS"}},
+		{"四段不支持", []string{"a.b.c.d"}, "mydb", []string{}},
+		{"空串跳过", []string{"", "mydb.users"}, "mydb", []string{"mydb.users"}},
 	}
 	for _, c := range cases {
-		got := filterTables(all, c.wanted, "mydb")
+		entries := entriesForDB(c.wanted, c.db)
+		got := make([]string, 0, len(entries))
+		for _, e := range entries {
+			got = append(got, e.raw)
+		}
 		if !reflect.DeepEqual(got, c.want) {
-			t.Errorf("%s: filterTables(%v, %q) = %v, want %v", c.name, all, c.wanted, got, c.want)
+			t.Errorf("%s: entriesForDB(%v, %q) = %v, want %v", c.name, c.wanted, c.db, got, c.want)
 		}
 	}
 }
 
-// MySQL/Oracle 表清单为裸名，wanted 限定形式按裸名匹配
-func TestFilterTablesBareList(t *testing.T) {
-	all := []string{"users", "orders"}
-	got := filterTables(all, []string{"mydb.users"}, "mydb")
-	if !reflect.DeepEqual(got, []string{"users"}) {
-		t.Fatalf("filterTables bare = %v, want [users]", got)
+// 条目字段解析：裸名/库段/schema 段大小写归一，原文保留
+func TestParseTableWanted(t *testing.T) {
+	e, ok := parseTableWanted("MyDB.Sales.Users")
+	if !ok || e.bare != "users" || e.bareRaw != "Users" || e.schema != "sales" || e.db != "mydb" || e.raw != "MyDB.Sales.Users" {
+		t.Fatalf("parseTableWanted 三级 = %+v, ok=%v", e, ok)
 	}
-	got = filterTables(all, []string{"mydb.orders"}, "otherdb")
-	if len(got) != 0 {
-		t.Fatalf("filterTables db mismatch = %v, want empty", got)
+	e, ok = parseTableWanted("mydb.users")
+	if !ok || e.bare != "users" || e.db != "mydb" || e.schema != "" {
+		t.Fatalf("parseTableWanted 二级 = %+v, ok=%v", e, ok)
+	}
+	e, ok = parseTableWanted("users")
+	if !ok || e.bare != "users" || e.db != "" || e.schema != "" {
+		t.Fatalf("parseTableWanted 裸名 = %+v, ok=%v", e, ok)
+	}
+	if _, ok = parseTableWanted("a.b.c.d"); ok {
+		t.Fatalf("四段应不支持")
+	}
+	if _, ok = parseTableWanted("  "); ok {
+		t.Fatalf("空串应不支持")
 	}
 }
 

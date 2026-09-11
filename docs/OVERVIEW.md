@@ -232,7 +232,7 @@ Agent: 生成 SQL: SELECT * FROM orders WHERE created_at >= ... ORDER BY amount 
 
 ```bash
 # 下载 → 解压 → 运行 (3 步完成)
-wget https://github.com/yourname/dqex/releases/download/v0.6.0/dqex-0.6.0-linux-amd64.zip
+wget 发布产物 dqex-0.6.0-linux-amd64.zip（从项目发布页获取）
 unzip dqex-0.6.0-linux-amd64.zip
 ./dqex  # 启动 Web 服务 (:8181)
 
@@ -729,7 +729,7 @@ AI 集成:
 
 ```bash
 # 1. 下载 (以 Linux amd64 为例)
-wget https://github.com/yourname/dqex/releases/download/v0.6.0/dqex-0.6.0-linux-amd64.zip
+wget 发布产物 dqex-0.6.0-linux-amd64.zip（从项目发布页获取）
 unzip dqex-0.6.0-linux-amd64.zip
 cd dqex-0.6.0-linux-amd64
 

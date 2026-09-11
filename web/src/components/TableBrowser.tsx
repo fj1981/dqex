@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import { useGridColors } from "@/lib/theme"
 import { computeColWidths, computeColumnStat, copyCellValue, copyToClipboard, downloadText, FILTER_OP_LABEL, FILTER_OPS, fmtNum, isNullCell, renderCellText, rowsToCSV, rowToTSV, rowsToTSV } from "@/lib/table"
 import { useClickOutside } from "@/lib/useClickOutside"
+import ColumnFilterPanel from "@/components/ColumnFilterPanel"
 import type { ColumnFilter, FilterOp, GenSQLKind, ObjectDDLType, SortSpec, TableColumn, TableViewLayout } from "@/types"
 
 interface Props {
@@ -152,9 +153,8 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
   // 列管理面板：点击外部关闭（ref 绑在「按钮 + 面板」共同容器上，保证按钮能正常 toggle 收放）
   useClickOutside(columnPanelRef, () => setShowColumnPanel(false), showColumnPanel)
 
-  // 过滤面板：点击外部关闭（ref 绑定到当前打开的面板容器）
-  const filterPanelRef = useRef<HTMLDivElement>(null)
-  useClickOutside(filterPanelRef, () => setFilterCol(null), filterCol !== null)
+  // 过滤面板：Portal + fixed 定位（见 ColumnFilterPanel），anchor 为打开时点击的漏斗按钮
+  const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null)
 
   // 「更多」菜单：收纳低频操作（导出/重置视图等），避免工具栏按钮堆砌占空间
   const [moreMenuOpen, setMoreMenuOpen] = useState(false)
@@ -798,14 +798,16 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
     if (page !== 1) onPageChange(1)
   }
 
-  // 打开某列的过滤面板：初始化草稿为该列当前已应用的条件（无则默认「包含」）
-  const openFilterPanel = (col: string) => {
+  // 打开某列的过滤面板：初始化草稿为该列当前已应用的条件（无则默认「包含」）。
+  // anchor 为点击的漏斗按钮；右键菜单打开时缺省，兜底按 data-col 查列头 th 对位
+  const openFilterPanel = (col: string, anchor?: HTMLElement | null) => {
     const existing = filters.find((f) => f.column === col)
     if (existing) {
       setFilterDraft({ op: existing.op, value: existing.value === null || existing.value === undefined ? "" : String(existing.value) })
     } else {
       setFilterDraft({ op: "contains", value: "" })
     }
+    setFilterAnchor(anchor ?? gridScrollRef.current?.querySelector<HTMLTableCellElement>(`th[data-col="${CSS.escape(col)}"]`) ?? null)
     setFilterCol(col)
   }
 
@@ -1433,6 +1435,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                         <ContextMenu key={i}>
                           <ContextMenuTrigger asChild>
                             <th
+                              data-col={c}
                               className={cn(
                                 "sticky top-0 z-20 select-none bg-muted px-2 py-1.5 font-medium text-muted-foreground",
                                 big ? "cursor-default" : "cursor-pointer hover:bg-muted/60",
@@ -1502,25 +1505,15 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                                   title={filtered ? t("grid.filteredEdit") : t("grid.filterColumn")}
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    openFilterPanel(c)
+                                    openFilterPanel(c, e.currentTarget)
                                   }}
                                 >
                                   <TableIcon icon={Filter} size={12} />
                                 </button>
                               </div>
-                              {/* 过滤面板 */}
+                              {/* 过滤面板：Portal 到 body + fixed 定位（窄列/边缘列不再被滚动容器裁剪） */}
                               {filterCol === c && (
-                                <div
-                                  ref={filterPanelRef}
-                                  className="absolute right-0 top-full z-30 mt-1 w-56 rounded-md border bg-popover p-2 shadow-md"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <div className="mb-1.5 flex items-center justify-between">
-                                    <span className="truncate text-xs font-semibold text-foreground">{c}</span>
-                                    <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setFilterCol(null)}>
-                                      <X className="h-3.5 w-3.5" />
-                                    </button>
-                                  </div>
+                                <ColumnFilterPanel anchor={filterAnchor} column={c} onClose={() => setFilterCol(null)}>
                                   <Select value={filterDraft.op} onValueChange={(v) => setFilterDraft((d) => ({ ...d, op: v as FilterOp }))}>
                                     <SelectTrigger className="h-7 w-full text-xs">
                                       <SelectValue />
@@ -1551,7 +1544,7 @@ export default function TableBrowser({ connId, db, name, objType, subTab, page, 
                                       {t("grid.apply")}
                                     </Button>
                                   </div>
-                                </div>
+                                </ColumnFilterPanel>
                               )}
                             </th>
                           </ContextMenuTrigger>

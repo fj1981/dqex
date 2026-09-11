@@ -30,10 +30,41 @@ const (
 	tableWorkspace = "workspace"
 	tableAISession = "ai_session"
 	tableSQLFav    = "sql_favorites"
+	tableSnapshot  = "snapshot_index"
+	tableMeta      = "meta"
 )
 
-// SQLiteStore 基于 SQLite 的 Store 实现。
-// 通过 cydb.DBCli 打开本地 SQLite，复用其跨方言能力（未来切 MySQL 仅改连接参数）。
+// 用户域存储键规则（与 service 层 user_scope.go 的 scopeConnID 算法一致）：
+//   - local 域（独立部署）：作用域键 = 裸连接 key 原样，user 列 = local；
+//   - 其他用户：作用域键 = user + userScopeSep + connID（user 经 NormalizeUser 不含
+//     分隔符），user 列存原始用户域。
+//
+// 五张隔离表（sql_history/sql_audit/ai_session/workspace/sql_favorites）统一三列同写：
+//   - user：所属用户域（NormalizeUser 后）；
+//   - conn_key：原始连接 key（裸，宿主连接标识），按连接维度跨用户查询/级联删除；
+//   - conn_id（即 scope_key 语义，物理列名保留见 models.go）：作用域存储键，同用户×同
+//     连接唯一定位；workspace 表以它为主键。
+//
+// 读路径三分法：精确用户域定位 → user + conn_key 双条件；仅按用户域（connID 空）→
+// EQ(user)；跨用户按连接（级联删除/AllUsers）→ EQ(conn_key) 等值。
+const (
+	scopeLocalUser = "local"
+	userScopeSep   = "\x1f"
+)
+
+// scopeConnKey 计算作用域存储键（store 写路径统一入口，算法与 service 层 scopeConnID
+// 一致，保证存量数据兼容）：local 域（或空 user/空 connID）= 裸 key 原样；其他用户 =
+// user\x1fconnID。user 须为 persist 层 NormalizeUser 后的值（不含 \x1f）。
+func scopeConnKey(user, connID string) string {
+	if user == "" || user == scopeLocalUser || connID == "" {
+		return connID
+	}
+	return user + userScopeSep + connID
+}
+
+// SQLiteStore 基于 cydb 的 SQL 存储实现（名字沿用自首个 SQLite 后端，现支持
+// cydb 全部方言：sqlite/mysql/postgresql/oracle，由 OpenSQLite/OpenSQL 选择）。
+// 通过 cydb.DBCli 打开连接，复用其跨方言能力（切 MySQL 等仅改连接参数）。
 // 所有写/查询均通过 cydb 高级 CRUD 方法（内部 ss 构建器 + named bind），不手写 SQL。
 type SQLiteStore struct {
 	cli *cydb.DBCli
@@ -54,7 +85,16 @@ func sqliteDSN(dbPath string) string {
 
 // NewSQLiteStore 打开（或创建）指定路径的 SQLite 库并执行自动迁移。
 func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
-	cli, err := cydb.TryConnect(&def.DBConnection{Type: "sqlite", Path: sqliteDSN(dbPath)})
+	s, err := newSQLStore(&def.DBConnection{Type: "sqlite", Path: sqliteDSN(dbPath)})
+	if err != nil {
+		return nil, err
+	}
+	return s.(*SQLiteStore), nil
+}
+
+// newSQLStore 按 cydb 连接配置打开存储并执行自动迁移（跨方言统一入口）。
+func newSQLStore(conn *def.DBConnection) (Store, error) {
+	cli, err := cydb.TryConnect(conn)
 	if err != nil {
 		return nil, engine.NewMsgErrf(engine.ErrStoreOpen, err)
 	}
@@ -69,8 +109,13 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 // Close 关闭底层数据库连接。
 func (s *SQLiteStore) Close() error { return s.cli.Close() }
 
-// Migrate 执行自动迁移（建表/补列）。
-func (s *SQLiteStore) Migrate() error { return migrateModels(s.cli) }
+// Migrate 执行自动迁移（建表/补列），随后执行存量数据幂等回填。
+func (s *SQLiteStore) Migrate() error {
+	if err := migrateModels(s.cli); err != nil {
+		return err
+	}
+	return s.backfillUsersDefault()
+}
 
 // ---- 序列化辅助 ----
 
@@ -478,14 +523,34 @@ func (s *SQLiteStore) LoadWebAccess() (WebAccessInfo, bool) {
 
 // ---- 查询工作区 ----
 
-// SaveWorkspace 保存某连接的工作区（整体覆盖）。
-func (s *SQLiteStore) SaveWorkspace(connID string, state WorkspaceState) error {
+// userConnWhere 构建按用户域过滤的查询条件（params 为对应的命名绑定参数）：
+//   - connID（裸连接 key）非空：user + conn_key 双条件并存——user 列保证按用户隔离，
+//     conn_key 条件精确定位该连接（作用域唯一性由写路径 conn_id=scopeConnKey 保证）；
+//   - connID 为空：仅按 user 列过滤（返回该用户域全部连接的数据）。
+func userConnWhere(user, connID string) (map[string]any, []cydb.Where) {
+	params := map[string]any{"user": user}
+	conds := []cydb.Where{cydb.EQ("user")}
+	if connID != "" {
+		params["conn_key"] = connID
+		conds = append(conds, cydb.EQ("conn_key"))
+	}
+	return params, conds
+}
+
+// SaveWorkspace 保存某用户域下某连接的工作区（整体覆盖）。
+// connID 为裸连接 key；三列同写：conn_id 物理列=作用域键（scopeConnKey，主键）、
+// conn_key=裸 key（跨用户级联删除定位）、user=所属用户域。
+func (s *SQLiteStore) SaveWorkspace(user, connID string, state WorkspaceState) error {
 	tabsJSON, err := marshal(state.Tabs)
 	if err != nil {
 		return err
 	}
+	// Replace 按主键（conn_id）upsert：不存在则插入，存在则整行覆盖——
+	// 本方法语义即"整体覆盖"，所有列都在 data 中显式给出，不会残留旧列值。
 	_, err = s.cli.Replace(tableWorkspace, map[string]any{
-		"conn_id":    connID,
+		"conn_id":    scopeConnKey(user, connID),
+		"user":       user,
+		"conn_key":   connID,
 		"tabs_json":  tabsJSON,
 		"active_id":  state.ActiveID,
 		"updated_at": time.Now().UnixMilli(),
@@ -493,9 +558,13 @@ func (s *SQLiteStore) SaveWorkspace(connID string, state WorkspaceState) error {
 	return err
 }
 
-// LoadWorkspace 读取某连接的工作区；无记录时 ok=false。
-func (s *SQLiteStore) LoadWorkspace(connID string) (WorkspaceState, bool) {
-	m, err := s.cli.First(tableWorkspace, map[string]any{"conn_id": connID}, cydb.WithWhere(cydb.EQ("conn_id")))
+// LoadWorkspace 读取某用户域下某连接的工作区；无记录时 ok=false。
+// connID 为裸连接 key，按 user 列 + conn_key 双条件过滤。
+func (s *SQLiteStore) LoadWorkspace(user, connID string) (WorkspaceState, bool) {
+	m, err := s.cli.First(tableWorkspace,
+		map[string]any{"user": user, "conn_key": connID},
+		cydb.WithWhereAnd(cydb.EQ("user"), cydb.EQ("conn_key")),
+	)
 	if err != nil || m == nil {
 		return WorkspaceState{}, false
 	}
@@ -508,16 +577,31 @@ func (s *SQLiteStore) LoadWorkspace(connID string) (WorkspaceState, bool) {
 	return WorkspaceState{Tabs: tabs, ActiveID: str(m["active_id"])}, true
 }
 
-// DeleteWorkspace 删除某连接的工作区。
-func (s *SQLiteStore) DeleteWorkspace(connID string) error {
-	_, err := s.cli.Delete(tableWorkspace, map[string]any{"conn_id": connID}, cydb.WithWhere(cydb.EQ("conn_id")))
+// DeleteWorkspace 删除某用户域下某连接的工作区（按 user 列 + conn_key 双条件）。
+func (s *SQLiteStore) DeleteWorkspace(user, connID string) error {
+	_, err := s.cli.Delete(tableWorkspace,
+		map[string]any{"user": user, "conn_key": connID},
+		cydb.WithWhereAnd(cydb.EQ("user"), cydb.EQ("conn_key")),
+	)
+	return err
+}
+
+// DeleteWorkspacesByConnAllUsers 跨用户域删除某连接的全部工作区（连接删除级联清理）。
+// connID 为裸连接 key，按 conn_key 列等值一次删除所有用户域的行。
+func (s *SQLiteStore) DeleteWorkspacesByConnAllUsers(connID string) error {
+	_, err := s.cli.Delete(tableWorkspace,
+		map[string]any{"conn_key": connID},
+		cydb.WithWhere(cydb.EQ("conn_key")),
+	)
 	return err
 }
 
 // ---- SQL 执行历史 ----
 
 // AddSQLHistory 追加一条 SQL 执行历史（每连接环形保留最近 N 条）。
-func (s *SQLiteStore) AddSQLHistory(item SQLHistoryItem) error {
+// item.ConnID 为裸连接 key；三列同写：user=所属用户域、conn_key=裸 key、
+// conn_id 物理列=作用域键（scopeConnKey）。
+func (s *SQLiteStore) AddSQLHistory(user string, item SQLHistoryItem) error {
 	if item.ID == "" {
 		item.ID = newID(item.CreatedAt)
 	}
@@ -527,23 +611,25 @@ func (s *SQLiteStore) AddSQLHistory(item SQLHistoryItem) error {
 	}
 	_, err = s.cli.Replace(tableSQLHist, map[string]any{
 		"id":         item.ID,
-		"conn_id":    item.ConnID,
+		"user":       user,
+		"conn_id":    scopeConnKey(user, item.ConnID),
+		"conn_key":   item.ConnID,
 		"created_at": item.CreatedAt,
 		"body_json":  body,
 	})
 	if err != nil {
 		return err
 	}
-	return s.trimSQLHistory(item.ConnID)
+	return s.trimSQLHistory(user, item.ConnID)
 }
 
-// trimSQLHistory 裁剪某连接的 SQL 历史，仅保留最近 maxSQLHistoryPerConn 条。
+// trimSQLHistory 裁剪某用户域下某连接的 SQL 历史，仅保留最近 maxSQLHistoryPerConn 条。
 // 优化：定位"第 maxSQLHistoryPerConn 条"的 created_at 边界，用时间条件一次性删除更旧记录。
-func (s *SQLiteStore) trimSQLHistory(connID string) error {
-	// 查该连接第 maxSQLHistoryPerConn 条（保留边界）的 created_at
+func (s *SQLiteStore) trimSQLHistory(user, connID string) error {
+	// 查该用户域该连接第 maxSQLHistoryPerConn 条（保留边界）的 created_at
 	rows, err := s.cli.List(tableSQLHist,
-		map[string]any{"conn_id": connID},
-		cydb.WithWhere(cydb.EQ("conn_id")),
+		map[string]any{"user": user, "conn_key": connID},
+		cydb.WithWhereAnd(cydb.EQ("user"), cydb.EQ("conn_key")),
 		cydb.WithOrderByDesc("created_at"),
 		cydb.WithLimit(1),
 		cydb.WithOffset(maxSQLHistoryPerConn-1),
@@ -557,17 +643,19 @@ func (s *SQLiteStore) trimSQLHistory(connID string) error {
 	boundary := integer(rows[0]["created_at"])
 	// 删除该连接 created_at 严格小于边界（即第 N 条之后更旧）的记录
 	_, err = s.cli.Delete(tableSQLHist,
-		map[string]any{"conn_id": connID, "created_at": boundary},
-		cydb.WithWhereAnd(cydb.EQ("conn_id"), cydb.LT("created_at")),
+		map[string]any{"user": user, "conn_key": connID, "created_at": boundary},
+		cydb.WithWhereAnd(cydb.EQ("user"), cydb.EQ("conn_key"), cydb.LT("created_at")),
 	)
 	return err
 }
 
-// ListSQLHistory 返回某连接的历史（新→旧）。
-func (s *SQLiteStore) ListSQLHistory(connID string) ([]SQLHistoryItem, error) {
-	rows, err := s.cli.List(tableSQLHist,
-		map[string]any{"conn_id": connID},
-		cydb.WithWhere(cydb.EQ("conn_id")),
+// ListSQLHistory 返回某用户域下某连接的历史（新→旧）。
+// user 为所属用户域；connID 为裸连接 key，为空时返回该用户域全部连接的历史
+// （仅按 user 列过滤，跨用户隔离由 user 列保证）。
+func (s *SQLiteStore) ListSQLHistory(user, connID string) ([]SQLHistoryItem, error) {
+	params, conds := userConnWhere(user, connID)
+	rows, err := s.cli.List(tableSQLHist, params,
+		cydb.WithWhereAnd(conds...),
 		cydb.WithOrderByDesc("created_at"),
 		cydb.WithLimit(maxSQLHistoryPerConn),
 	)
@@ -578,18 +666,18 @@ func (s *SQLiteStore) ListSQLHistory(connID string) ([]SQLHistoryItem, error) {
 	for _, m := range rows {
 		var item SQLHistoryItem
 		if err := unmarshal(str(m["body_json"]), &item); err == nil {
+			// 裸连接 key 以 conn_key 列为准（存量 body_json 内可能为 scoped 旧值）
+			item.ConnID = str(m["conn_key"])
 			ret = append(ret, item)
 		}
 	}
 	return ret, nil
 }
 
-// ClearSQLHistory 清空某连接的历史。
-func (s *SQLiteStore) ClearSQLHistory(connID string) error {
-	rows, err := s.cli.List(tableSQLHist,
-		map[string]any{"conn_id": connID},
-		cydb.WithWhere(cydb.EQ("conn_id")),
-	)
+// ClearSQLHistory 清空某用户域下某连接的历史；connID 为空时清空该用户域全部连接的历史。
+func (s *SQLiteStore) ClearSQLHistory(user, connID string) error {
+	params, conds := userConnWhere(user, connID)
+	rows, err := s.cli.List(tableSQLHist, params, cydb.WithWhereAnd(conds...))
 	if err != nil {
 		return err
 	}
@@ -601,12 +689,10 @@ func (s *SQLiteStore) ClearSQLHistory(connID string) error {
 	return nil
 }
 
-// ---- SQL 收藏（全局共享，不受历史环形上限影响；conn_id/db 仅作来源标记，用于跨连接回填提示） ----
+// ---- SQL 收藏（按用户域隔离；conn_id/db 仅作来源标记，用于跨连接回填提示） ----
 
-// AddFavorite 新增一条收藏。
-
-// AddFavorite 新增一条收藏。
-func (s *SQLiteStore) AddFavorite(f *SQLFavorite) error {
+// AddFavorite 新增一条收藏（user 为所属用户域；f.ConnID 为裸连接 key，三列同写）。
+func (s *SQLiteStore) AddFavorite(user string, f *SQLFavorite) error {
 	if f.ID == "" {
 		f.ID = newID(f.CreatedAt)
 	}
@@ -616,7 +702,9 @@ func (s *SQLiteStore) AddFavorite(f *SQLFavorite) error {
 	}
 	_, err = s.cli.Replace(tableSQLFav, map[string]any{
 		"id":         f.ID,
-		"conn_id":    f.ConnID,
+		"user":       user,
+		"conn_id":    scopeConnKey(user, f.ConnID),
+		"conn_key":   f.ConnID,
 		"title":      f.Title,
 		"created_at": f.CreatedAt,
 		"body_json":  body,
@@ -624,10 +712,12 @@ func (s *SQLiteStore) AddFavorite(f *SQLFavorite) error {
 	return err
 }
 
-// ListFavorites 返回全部收藏（全局共享，不按连接隔离；新→旧）。
-func (s *SQLiteStore) ListFavorites() ([]*SQLFavorite, error) {
+// ListFavorites 返回该用户域的全部收藏（新→旧）。
+// user 列经迁移回填后恒非空，仅按 user 列过滤（跨用户隔离由 user 列保证）。
+func (s *SQLiteStore) ListFavorites(user string) ([]*SQLFavorite, error) {
 	rows, err := s.cli.List(tableSQLFav,
-		map[string]any{},
+		map[string]any{"user": user},
+		cydb.WithWhere(cydb.EQ("user")),
 		cydb.WithOrderByDesc("created_at"),
 	)
 	if err != nil {
@@ -637,26 +727,28 @@ func (s *SQLiteStore) ListFavorites() ([]*SQLFavorite, error) {
 	for _, m := range rows {
 		var f SQLFavorite
 		if err := unmarshal(str(m["body_json"]), &f); err == nil {
+			// 裸连接 key 以 conn_key 列为准（存量行 conn_id/body_json 可能为 scoped 旧值）
+			f.ConnID = str(m["conn_key"])
 			ret = append(ret, &f)
 		}
 	}
 	return ret, nil
 }
 
-// DeleteFavorite 删除收藏（按全局唯一 id 定位；无 conn_id 隔离，跨连接可见）。
-func (s *SQLiteStore) DeleteFavorite(id string) error {
+// DeleteFavorite 删除收藏（按 id 定位，仅限本用户域）。
+func (s *SQLiteStore) DeleteFavorite(user, id string) error {
 	_, err := s.cli.Delete(tableSQLFav,
-		map[string]any{"id": id},
-		cydb.WithWhere(cydb.EQ("id")),
+		map[string]any{"id": id, "user": user},
+		cydb.WithWhereAnd(cydb.EQ("id"), cydb.EQ("user")),
 	)
 	return err
 }
 
-// RenameFavorite 重命名收藏（按全局唯一 id 定位）。
-func (s *SQLiteStore) RenameFavorite(id, title string) error {
+// RenameFavorite 重命名收藏（按 id 定位，仅限本用户域）。
+func (s *SQLiteStore) RenameFavorite(user, id, title string) error {
 	rows, err := s.cli.List(tableSQLFav,
-		map[string]any{"id": id},
-		cydb.WithWhere(cydb.EQ("id")),
+		map[string]any{"id": id, "user": user},
+		cydb.WithWhereAnd(cydb.EQ("id"), cydb.EQ("user")),
 	)
 	if err != nil {
 		return err
@@ -674,20 +766,71 @@ func (s *SQLiteStore) RenameFavorite(id, title string) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.cli.Replace(tableSQLFav, map[string]any{
-		"id":         f.ID,
-		"conn_id":    f.ConnID,
-		"title":      f.Title,
-		"created_at": f.CreatedAt,
-		"body_json":  body,
-	})
+	// 仅 UPDATE title 与 body_json 两列，不回写连接相关列（conn_id/conn_key）：
+	// body_json 内可能为 scoped 旧值或空，整行 Replace 会把存量行的连接列写坏。
+	// id 为主键列经 FilterColumns 自动从 SET 中剔除，仅作 WHERE 定位参数；
+	// user 列 SET 为同值回写（归属不变），主要供 WHERE 定位参数使用。
+	_, err = s.cli.Update(tableSQLFav, map[string]any{
+		"id":        id,
+		"user":      user,
+		"title":     title,
+		"body_json": body,
+	}, cydb.WithWhereAnd(cydb.EQ("id"), cydb.EQ("user")))
 	return err
+}
+
+// backfillUsersDefault 幂等回填五张隔离表的存量数据（Go 逐行修复，方言安全）。
+// 存量行仅 conn_id 列有值（scoped 存储键或裸 key），conn_key 为本次改造新增列（空），
+// 以 conn_key 为空判定未回填，按同一规则归一：
+//   - conn_id 含分隔符 \x1f（scoped 形态）：user=前缀（用户域）、conn_key=后缀（裸 key），
+//     conn_id 原值保留（即作用域键语义）；
+//   - conn_id 不含分隔符（裸 key 形态，含历史 local 行与 favorites 裸 key 行）：
+//     conn_key=conn_id，user 为空时归属 local 域。
+//
+// conn_id（作用域键）恒保持原值不动（workspace 表主键，避免改键），回填仅补 user/conn_key；
+// 回填后 conn_key 恒非空，重复执行幂等。
+func (s *SQLiteStore) backfillUsersDefault() error {
+	for _, table := range []string{tableSQLHist, tableSQLAudit, tableAISession, tableWorkspace, tableSQLFav} {
+		rows, err := s.cli.List(table, nil)
+		if err != nil {
+			return err
+		}
+		for _, m := range rows {
+			if str(m["conn_key"]) != "" {
+				continue // 已回填（幂等）
+			}
+			stored := str(m["conn_id"])
+			if stored == "" {
+				continue // 无连接键可归一
+			}
+			user, raw := str(m["user"]), stored
+			if idx := strings.Index(stored, userScopeSep); idx >= 0 {
+				user = stored[:idx] // scoped 形态：前缀即用户域
+				raw = stored[idx+len(userScopeSep):]
+			} else if user == "" {
+				user = scopeLocalUser // 裸 key 形态：归属 local 域
+			}
+			// workspace 表主键为 conn_id（作用域键），其余表主键为 id；主键列经
+			// FilterColumns 自动从 SET 中剔除，仅作 WHERE 定位参数
+			pkCol, pkVal := "id", str(m["id"])
+			if table == tableWorkspace {
+				pkCol, pkVal = "conn_id", stored
+			}
+			data := map[string]any{"user": user, "conn_key": raw, pkCol: pkVal}
+			if _, err := s.cli.Update(table, data, cydb.WithWhere(cydb.EQ(pkCol))); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // ---- SQL 审计（只增不删） ----
 
 // AppendSQLAudit 追加一条 SQL 审计日志（只追加，不提供删除）。
-func (s *SQLiteStore) AppendSQLAudit(entry SQLAuditEntry) error {
+// entry.ConnID 为裸连接 key；三列同写：user=所属用户域、conn_key=裸 key、
+// conn_id 物理列=作用域键（scopeConnKey）。
+func (s *SQLiteStore) AppendSQLAudit(user string, entry SQLAuditEntry) error {
 	if entry.ID == "" {
 		entry.ID = newID(entry.CreatedAt)
 	}
@@ -697,15 +840,17 @@ func (s *SQLiteStore) AppendSQLAudit(entry SQLAuditEntry) error {
 	}
 	_, err = s.cli.Replace(tableSQLAudit, map[string]any{
 		"id":         entry.ID,
-		"conn_id":    entry.ConnID,
+		"user":       user,
+		"conn_id":    scopeConnKey(user, entry.ConnID),
+		"conn_key":   entry.ConnID,
 		"created_at": entry.CreatedAt,
 		"body_json":  body,
 	})
 	return err
 }
 
-// ListSQLAudit 读取审计日志（倒序，分页）。connID 为空返回全部连接。
-func (s *SQLiteStore) ListSQLAudit(connID string, limit, offset int) ([]SQLAuditEntry, error) {
+// normAuditLimit 规范审计查询分页参数：limit<=0 默认 100，上限 500；offset 非负。
+func normAuditLimit(limit, offset int) (int, int) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -715,41 +860,47 @@ func (s *SQLiteStore) ListSQLAudit(connID string, limit, offset int) ([]SQLAudit
 	if offset < 0 {
 		offset = 0
 	}
+	return limit, offset
+}
 
-	var rows []map[string]any
-	var err error
-	if connID != "" {
-		rows, err = s.cli.List(tableSQLAudit,
-			map[string]any{"conn_id": connID},
-			cydb.WithWhere(cydb.EQ("conn_id")),
-			cydb.WithOrderByDesc("created_at"),
-			cydb.WithLimit(limit),
-			cydb.WithOffset(offset),
-		)
-	} else {
-		rows, err = s.cli.List(tableSQLAudit, nil,
-			cydb.WithOrderByDesc("created_at"),
-			cydb.WithLimit(limit),
-			cydb.WithOffset(offset),
-		)
-	}
-	if err != nil {
-		return nil, err
-	}
+// auditEntryList 行集合 → 审计条目列表（裸连接 key 以 conn_key 列为准）。
+func auditEntryList(rows []map[string]any) []SQLAuditEntry {
 	ret := make([]SQLAuditEntry, 0, len(rows))
 	for _, m := range rows {
 		var entry SQLAuditEntry
 		if err := unmarshal(str(m["body_json"]), &entry); err == nil {
+			// 裸连接 key 以 conn_key 列为准（存量 body_json 内可能为 scoped 旧值）
+			entry.ConnID = str(m["conn_key"])
 			ret = append(ret, entry)
 		}
 	}
-	return ret, nil
+	return ret
+}
+
+// ListSQLAudit 读取审计日志（倒序，分页）。user 为所属用户域；connID 为裸连接 key
+// （非空时按 user 列 + conn_key 双条件过滤），为空时仅按 user 列过滤（返回该用户域
+// 全部连接，跨用户隔离由 user 列保证）。
+func (s *SQLiteStore) ListSQLAudit(user, connID string, limit, offset int) ([]SQLAuditEntry, error) {
+	limit, offset = normAuditLimit(limit, offset)
+	params, conds := userConnWhere(user, connID)
+	rows, err := s.cli.List(tableSQLAudit, params,
+		cydb.WithWhereAnd(conds...),
+		cydb.WithOrderByDesc("created_at"),
+		cydb.WithLimit(limit),
+		cydb.WithOffset(offset),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return auditEntryList(rows), nil
 }
 
 // ---- AI 会话（对话历史，按连接持久化） ----
 
 // aiSessionToRow 领域模型 → 行模型（消息与 usage 分别 JSON 序列化）。
-func aiSessionToRow(rec AISessionRecord) (aiSessionRow, error) {
+// rec.ConnID 为裸连接 key；三列同写：user=所属用户域、conn_key=裸 key、
+// conn_id 物理列=作用域键（scopeConnKey）。
+func aiSessionToRow(user string, rec AISessionRecord) (aiSessionRow, error) {
 	msgs, err := marshal(rec.Messages)
 	if err != nil {
 		return aiSessionRow{}, err
@@ -760,9 +911,13 @@ func aiSessionToRow(rec AISessionRecord) (aiSessionRow, error) {
 	}
 	return aiSessionRow{
 		ID:           rec.ID,
-		ConnID:       rec.ConnID,
+		User:         user,
+		ScopeKey:     scopeConnKey(user, rec.ConnID),
+		ConnKey:      rec.ConnID,
 		TabID:        rec.TabID,
 		DB:           rec.DB,
+		Dialect:      rec.Dialect,
+		Lang:         rec.Lang,
 		MessagesJSON: msgs,
 		UsageJSON:    usage,
 		CreatedAt:    rec.CreatedAt,
@@ -770,13 +925,15 @@ func aiSessionToRow(rec AISessionRecord) (aiSessionRow, error) {
 	}, nil
 }
 
-// rowToAISession 行模型 → 领域模型。
+// rowToAISession 行模型 → 领域模型（rec.ConnID 还原为裸连接 key）。
 func rowToAISession(r aiSessionRow) AISessionRecord {
 	rec := AISessionRecord{
 		ID:        r.ID,
-		ConnID:    r.ConnID,
+		ConnID:    r.ConnKey,
 		TabID:     r.TabID,
 		DB:        r.DB,
+		Dialect:   r.Dialect,
+		Lang:      r.Lang,
 		CreatedAt: r.CreatedAt,
 		UpdatedAt: r.UpdatedAt,
 	}
@@ -796,16 +953,21 @@ func rowToAISession(r aiSessionRow) AISessionRecord {
 }
 
 // SaveAISession 保存/更新一个 AI 会话（整组消息覆盖写）。
-func (s *SQLiteStore) SaveAISession(rec AISessionRecord) error {
-	row, err := aiSessionToRow(rec)
+// rec.ConnID 为裸连接 key；user 为所属用户域（三列同写）。
+func (s *SQLiteStore) SaveAISession(user string, rec AISessionRecord) error {
+	row, err := aiSessionToRow(user, rec)
 	if err != nil {
 		return err
 	}
 	_, err = s.cli.Replace(tableAISession, map[string]any{
 		"id":            row.ID,
-		"conn_id":       row.ConnID,
+		"user":          row.User,
+		"conn_id":       row.ScopeKey,
+		"conn_key":      row.ConnKey,
 		"tab_id":        row.TabID,
 		"db":            row.DB,
+		"dialect":       row.Dialect,
+		"lang":          row.Lang,
 		"messages_json": row.MessagesJSON,
 		"usage_json":    row.UsageJSON,
 		"created_at":    row.CreatedAt,
@@ -814,31 +976,48 @@ func (s *SQLiteStore) SaveAISession(rec AISessionRecord) error {
 	return err
 }
 
-// LoadAISession 读取指定会话；无记录时 ok=false。
-func (s *SQLiteStore) LoadAISession(sessionID string) (AISessionRecord, bool) {
+// LoadAISession 读取指定会话（user 为所属用户域，按 user 列做归属校验，
+// 不属于该用户域视为不存在）；无记录时 ok=false。rec.ConnID 还原为裸连接 key。
+func (s *SQLiteStore) LoadAISession(user, sessionID string) (AISessionRecord, bool) {
 	m, err := s.cli.First(tableAISession, map[string]any{"id": sessionID}, cydb.WithWhere(cydb.EQ("id")))
 	if err != nil || m == nil {
 		return AISessionRecord{}, false
 	}
-	return rowToAISession(aiSessionRow{
+	r := aiSessionRow{
 		ID:           str(m["id"]),
-		ConnID:       str(m["conn_id"]),
+		User:         str(m["user"]),
+		ScopeKey:     str(m["conn_id"]),
+		ConnKey:      str(m["conn_key"]),
 		TabID:        str(m["tab_id"]),
 		DB:           str(m["db"]),
+		Dialect:      str(m["dialect"]),
+		Lang:         str(m["lang"]),
 		MessagesJSON: str(m["messages_json"]),
 		UsageJSON:    str(m["usage_json"]),
 		CreatedAt:    integer(m["created_at"]),
 		UpdatedAt:    integer(m["updated_at"]),
-	}), true
+	}
+	if r.User != user {
+		return AISessionRecord{}, false // 归属校验：跨用户域不可见
+	}
+	return rowToAISession(r), true
 }
 
-// ListAISessions 列出某连接（可选指定 tab）的会话（新→旧，仅元信息不含消息）。
-// tabID 为空 = 返回该连接全部会话；非空 = 仅返回该 tab 的会话（按 tab 隔离）。
-func (s *SQLiteStore) ListAISessions(connID, tabID string) ([]AISessionRecord, error) {
+// AISessionExists 判断会话 ID 是否已落盘（跨用户域存在性判定，不含归属校验）。
+// 供透明重建复用原 ID 前区分「彻底不存在」与「存在但归属其他用户域」。
+func (s *SQLiteStore) AISessionExists(sessionID string) bool {
+	m, err := s.cli.First(tableAISession, map[string]any{"id": sessionID}, cydb.WithWhere(cydb.EQ("id")))
+	return err == nil && m != nil
+}
+
+// ListAISessions 列出某用户域下某连接（可选指定 tab）的会话（新→旧，仅元信息不含消息）。
+// connID 为裸连接 key；tabID 为空 = 返回该连接全部会话，非空 = 仅返回该 tab
+// 的会话（按 tab 隔离）。查询条件恒含 user 列 + conn_key（跨用户隔离由 user 列保证）。
+func (s *SQLiteStore) ListAISessions(user, connID, tabID string) ([]AISessionRecord, error) {
 	if tabID != "" {
 		rows, err := s.cli.List(tableAISession,
-			map[string]any{"conn_id": connID, "tab_id": tabID},
-			cydb.WithWhereAnd(cydb.EQ("conn_id"), cydb.EQ("tab_id")),
+			map[string]any{"user": user, "conn_key": connID, "tab_id": tabID},
+			cydb.WithWhereAnd(cydb.EQ("user"), cydb.EQ("conn_key"), cydb.EQ("tab_id")),
 			cydb.WithOrderByDesc("updated_at"),
 		)
 		if err != nil {
@@ -847,8 +1026,8 @@ func (s *SQLiteStore) ListAISessions(connID, tabID string) ([]AISessionRecord, e
 		return sessionMetaList(rows), nil
 	}
 	rows, err := s.cli.List(tableAISession,
-		map[string]any{"conn_id": connID},
-		cydb.WithWhere(cydb.EQ("conn_id")),
+		map[string]any{"user": user, "conn_key": connID},
+		cydb.WithWhereAnd(cydb.EQ("user"), cydb.EQ("conn_key")),
 		cydb.WithOrderByDesc("updated_at"),
 	)
 	if err != nil {
@@ -857,13 +1036,13 @@ func (s *SQLiteStore) ListAISessions(connID, tabID string) ([]AISessionRecord, e
 	return sessionMetaList(rows), nil
 }
 
-// sessionMetaList 行集合 → 会话元信息列表（不含消息体）。
+// sessionMetaList 行集合 → 会话元信息列表（不含消息体；裸连接 key 以 conn_key 列为准）。
 func sessionMetaList(rows []map[string]any) []AISessionRecord {
 	ret := make([]AISessionRecord, 0, len(rows))
 	for _, m := range rows {
 		ret = append(ret, AISessionRecord{
 			ID:        str(m["id"]),
-			ConnID:    str(m["conn_id"]),
+			ConnID:    str(m["conn_key"]),
 			TabID:     str(m["tab_id"]),
 			DB:        str(m["db"]),
 			CreatedAt: integer(m["created_at"]),
@@ -873,24 +1052,42 @@ func sessionMetaList(rows []map[string]any) []AISessionRecord {
 	return ret
 }
 
-// DeleteAISession 删除指定会话。
-func (s *SQLiteStore) DeleteAISession(sessionID string) error {
-	_, err := s.cli.Delete(tableAISession, map[string]any{"id": sessionID}, cydb.WithWhere(cydb.EQ("id")))
-	return err
-}
-
-// DeleteAISessionByTab 删除某连接下指定 tab 的会话（tab 关闭时调用）。
-func (s *SQLiteStore) DeleteAISessionByTab(connID, tabID string) error {
+// DeleteAISession 删除指定会话（user 为所属用户域，按 user 列 + 主键双条件删除，
+// 跨用户域删不到他人会话）。
+func (s *SQLiteStore) DeleteAISession(user, sessionID string) error {
 	_, err := s.cli.Delete(tableAISession,
-		map[string]any{"conn_id": connID, "tab_id": tabID},
-		cydb.WithWhereAnd(cydb.EQ("conn_id"), cydb.EQ("tab_id")),
+		map[string]any{"id": sessionID, "user": user},
+		cydb.WithWhereAnd(cydb.EQ("id"), cydb.EQ("user")),
 	)
 	return err
 }
 
-// DeleteAISessionsByConn 删除某连接的全部会话。
-func (s *SQLiteStore) DeleteAISessionsByConn(connID string) error {
-	_, err := s.cli.Delete(tableAISession, map[string]any{"conn_id": connID}, cydb.WithWhere(cydb.EQ("conn_id")))
+// DeleteAISessionByTab 删除某用户域下某连接指定 tab 的会话（tab 关闭时调用）。
+// connID 为裸连接 key，按 user 列 + conn_key 双条件删除。
+func (s *SQLiteStore) DeleteAISessionByTab(user, connID, tabID string) error {
+	_, err := s.cli.Delete(tableAISession,
+		map[string]any{"user": user, "conn_key": connID, "tab_id": tabID},
+		cydb.WithWhereAnd(cydb.EQ("user"), cydb.EQ("conn_key"), cydb.EQ("tab_id")),
+	)
+	return err
+}
+
+// DeleteAISessionsByConn 删除某用户域下某连接的全部会话（按 user 列 + conn_key 双条件）。
+func (s *SQLiteStore) DeleteAISessionsByConn(user, connID string) error {
+	_, err := s.cli.Delete(tableAISession,
+		map[string]any{"user": user, "conn_key": connID},
+		cydb.WithWhereAnd(cydb.EQ("user"), cydb.EQ("conn_key")),
+	)
+	return err
+}
+
+// DeleteAISessionsByConnAllUsers 跨用户域删除某连接的全部会话（连接删除级联清理）。
+// connID 为裸连接 key，按 conn_key 列等值一次删除所有用户域的会话。
+func (s *SQLiteStore) DeleteAISessionsByConnAllUsers(connID string) error {
+	_, err := s.cli.Delete(tableAISession,
+		map[string]any{"conn_key": connID},
+		cydb.WithWhere(cydb.EQ("conn_key")),
+	)
 	return err
 }
 
@@ -904,21 +1101,22 @@ func (s *SQLiteStore) PurgeExcessAISessions(maxPerConn int, keepDays int) (int64
 	}
 	cutoff := time.Now().AddDate(0, 0, -keepDays).UnixMilli()
 
-	// 全量加载会话（数据量小），按连接分组统计
+	// 全量加载会话（数据量小），按「用户域×连接」分组统计（conn_key 为裸 key，
+	// 需与 user 组合定位，保持每用户每连接的配额语义）
 	rows, err := s.cli.List(tableAISession, nil)
 	if err != nil {
 		return 0, err
 	}
 	type rec struct {
 		id        string
-		connID    string
+		connKey   string // 用户域×连接组合键（user + sep + conn_key）
 		updatedAt int64
 	}
 	recs := make([]rec, 0, len(rows))
 	for _, m := range rows {
 		recs = append(recs, rec{
 			id:        str(m["id"]),
-			connID:    str(m["conn_id"]),
+			connKey:   str(m["user"]) + userScopeSep + str(m["conn_key"]),
 			updatedAt: integer(m["updated_at"]),
 		})
 	}
@@ -926,12 +1124,12 @@ func (s *SQLiteStore) PurgeExcessAISessions(maxPerConn int, keepDays int) (int64
 	// 按连接分组计数
 	counts := map[string]int{}
 	for _, r := range recs {
-		counts[r.connID]++
+		counts[r.connKey]++
 	}
 
 	var n int64
 	// 找出超额连接，收集其「超期」会话，按最旧优先删除
-	for connID, cnt := range counts {
+	for connKey, cnt := range counts {
 		if cnt <= maxPerConn {
 			continue
 		}
@@ -939,7 +1137,7 @@ func (s *SQLiteStore) PurgeExcessAISessions(maxPerConn int, keepDays int) (int64
 		// 该连接下超期的会话（updated_at < cutoff），按最旧排序
 		var stale []rec
 		for _, r := range recs {
-			if r.connID == connID && r.updatedAt < cutoff {
+			if r.connKey == connKey && r.updatedAt < cutoff {
 				stale = append(stale, r)
 			}
 		}
@@ -957,6 +1155,115 @@ func (s *SQLiteStore) PurgeExcessAISessions(maxPerConn int, keepDays int) (int64
 		}
 	}
 	return n, nil
+}
+
+// ---- 快照索引（仅索引元数据；快照内容仍为 OSS 对象/本地文件） ----
+
+// snapshotToRow 领域模型 → 行模型（body_json 存完整 SnapshotInfo）。
+func snapshotToRow(info SnapshotInfo) (snapshotRow, error) {
+	body, err := marshal(info)
+	if err != nil {
+		return snapshotRow{}, err
+	}
+	return snapshotRow{ID: info.ID, ConnID: info.ConnID, ConnLabel: info.ConnLabel, CreatedAt: info.CreatedAt, BodyJSON: body}, nil
+}
+
+func rowToSnapshot(r snapshotRow) (SnapshotInfo, error) {
+	var info SnapshotInfo
+	if err := unmarshal(r.BodyJSON, &info); err != nil {
+		return SnapshotInfo{}, err
+	}
+	// 真实列兜底：body_json 缺失/损坏时至少保留可查询字段（正常路径 JSON 内已含同值）
+	if info.ID == "" {
+		info.ID = r.ID
+	}
+	if info.ConnID == "" {
+		info.ConnID = r.ConnID
+	}
+	if info.ConnLabel == "" {
+		info.ConnLabel = r.ConnLabel
+	}
+	if info.CreatedAt == 0 {
+		info.CreatedAt = r.CreatedAt
+	}
+	return info, nil
+}
+
+// UpsertSnapshot 写入/更新快照索引行（按 info.ID 主键幂等）。
+func (s *SQLiteStore) UpsertSnapshot(info SnapshotInfo) error {
+	if info.ID == "" {
+		return fmt.Errorf("快照索引行缺少 ID")
+	}
+	row, err := snapshotToRow(info)
+	if err != nil {
+		return err
+	}
+	_, err = s.cli.Replace(tableSnapshot, map[string]any{
+		"id":         row.ID,
+		"conn_id":    row.ConnID,
+		"conn_label": row.ConnLabel,
+		"created_at": row.CreatedAt,
+		"body_json":  row.BodyJSON,
+	})
+	return err
+}
+
+// ListSnapshots 列出快照索引（created_at 倒序）；connID 非空时按 conn_id 等值过滤。
+func (s *SQLiteStore) ListSnapshots(connID string) ([]SnapshotInfo, error) {
+	opts := []def.QueryOption{cydb.WithOrderByDesc("created_at")}
+	if connID != "" {
+		opts = append(opts, cydb.WithWhere(cydb.EQ("conn_id")))
+	}
+	args := map[string]any{}
+	if connID != "" {
+		args["conn_id"] = connID
+	}
+	rows, err := s.cli.List(tableSnapshot, args, opts...)
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]SnapshotInfo, 0, len(rows))
+	for _, m := range rows {
+		r := snapshotRow{
+			ID:        str(m["id"]),
+			ConnID:    str(m["conn_id"]),
+			ConnLabel: str(m["conn_label"]),
+			CreatedAt: integer(m["created_at"]),
+			BodyJSON:  str(m["body_json"]),
+		}
+		if info, err := rowToSnapshot(r); err == nil {
+			infos = append(infos, info)
+		} else {
+			cylog.Warnf("快照索引行 %s 解析失败，已跳过: %v", r.ID, err)
+		}
+	}
+	return infos, nil
+}
+
+// DeleteSnapshot 删除快照索引行（按主键 ID）。
+func (s *SQLiteStore) DeleteSnapshot(id string) error {
+	_, err := s.cli.Delete(tableSnapshot, map[string]any{"id": id}, cydb.WithWhere(cydb.EQ("id")))
+	return err
+}
+
+// ---- 通用 KV 元信息 ----
+
+// GetMeta 读取 KV 元信息；无记录时 ok=false。
+func (s *SQLiteStore) GetMeta(key string) (string, bool, error) {
+	m, err := s.cli.First(tableMeta, map[string]any{"meta_key": key}, cydb.WithWhere(cydb.EQ("meta_key")))
+	if err != nil {
+		return "", false, err
+	}
+	if m == nil {
+		return "", false, nil
+	}
+	return str(m["meta_value"]), true, nil
+}
+
+// SetMeta 写入/更新 KV 元信息（按 key 幂等）。
+func (s *SQLiteStore) SetMeta(key, value string) error {
+	_, err := s.cli.Replace(tableMeta, map[string]any{"meta_key": key, "meta_value": value})
+	return err
 }
 
 // ---- 类型转换辅助 ----

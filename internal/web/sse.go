@@ -1,15 +1,18 @@
 package web
 
 import (
+	"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 
 	"github.com/fj1981/dqex/internal/service"
 
-	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/gin-gonic/gin"
+	"github.com/fj1981/infrakit/pkg/cygin"
 )
 
 // rawRoutes 原生 gin 路由：SSE 进度推送、取消任务、下载、打开目录
@@ -128,6 +131,24 @@ func downloadExport(c *gin.Context, svc *service.Service) {
 			cygin.WithStatus(http.StatusNotFound), cygin.WithErrDetailf(t.errNoArtifactDownload, rec.ID)))
 		return
 	}
+	// 逻辑路径产物（对象存储模式/统一逻辑路径）：经存取器流式返回；
+	// 真实本地路径（目录产物、用户自定义输出）：直接 FileAttachment
+	if service.IsArtifactLogicalPath(rec.OutputPath) {
+		rc, size, err := svc.OpenArtifact(rec.OutputPath)
+		if err != nil {
+			cygin.ResponseError(c, cygin.WrapError(err, service.ErrTaskNotFound, cygin.WithStatus(http.StatusNotFound)))
+			return
+		}
+		defer rc.Close()
+		filename := filepath.Base(rec.OutputPath)
+		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+		if size >= 0 {
+			c.Header("Content-Length", strconv.FormatInt(size, 10))
+		}
+		c.Status(http.StatusOK)
+		_, _ = io.Copy(c.Writer, rc)
+		return
+	}
 	c.FileAttachment(rec.OutputPath, filepath.Base(rec.OutputPath))
 }
 
@@ -143,7 +164,14 @@ func openExportDir(c *gin.Context, svc *service.Service) {
 		cygin.ResponseError(c, cygin.NewError(service.ErrNoArtifact, cygin.WithErrPrint(), cygin.WithErrDetailf(t.errNoArtifactPath, rec.ID)))
 		return
 	}
-	dir := filepath.Dir(rec.OutputPath)
+	// 逻辑路径按受管目录展开（对象存储模式无本地终态文件，打开目录无意义直接报错）
+	localPath, perr := svc.LocalArtifactPath(rec.OutputPath)
+	if perr != nil {
+		cygin.ResponseError(c, cygin.NewError(service.ErrOpenDirFailed, cygin.WithErrPrint(),
+			cygin.WithErrDetailf("artifact is stored in object storage, no local directory")))
+		return
+	}
+	dir := filepath.Dir(localPath)
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":

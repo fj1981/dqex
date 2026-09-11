@@ -35,6 +35,27 @@ type TableCondition struct {
 	Columns   []string      `json:"columns,omitempty" yaml:"columns,omitempty"`   // Deprecated: 旧版导出列，仅读取兼容
 }
 
+// ExportDetail 导出明细回调条目：单表/单对象导出完成时同步通知宿主，
+// 供清单/审计等旁路采集使用（宿主根据回调数据与自身上下文自行处理）。
+type ExportDetail struct {
+	Database string            // 库名（引擎枚举的库名；Oracle 为 schema(user)）
+	Kind     string            // 明细类型：DetailKindTable/View/Function/Procedure
+	Name     string            // 引擎实际表/对象名（PG 系表名可能为 "schema.table" 限定形式）
+	Rows     int64             // 导出行数（仅 table；对象恒为 0）
+	Query    string            // 条件取数归一化后的完整 SELECT（仅 table 条件导出时非空）
+	Ddl      string            // 建表/对象 DDL（DataOnly 或获取失败时为空）
+	Comment  string            // 表注释（仅 table；元数据不可得时为空）
+	Columns  []TableColumnInfo // 列明细（仅 table，名称/类型/可空/主键/默认值/注释等；DataOnly 或元数据不可得时为空）
+}
+
+// 导出明细类型（ExportDetail.Kind 取值）
+const (
+	DetailKindTable     = "table"
+	DetailKindView      = "view"
+	DetailKindFunction  = "function"
+	DetailKindProcedure = "procedure"
+)
+
 // DBSelection 单库导出选择：库 → 该库下的表/对象白名单（与 ExportOptions.Databases/Tables/Objects 二选一，非空时优先）。
 // 表/对象条目保留完整限定名（"库.schema.表" / "库.schema._dir/名"），库归属由前缀确定，杜绝扁平字段间库名残留/错配
 // Tables 为 nil 表示库内全部表（整库导出），空数组表示不导出表
@@ -72,6 +93,9 @@ type ExportOptions struct {
 	CompatCollation bool `json:"compatCollation" yaml:"compatCollation"`
 	// Lang 任务日志/产物文案语言（zh/en），默认 zh
 	Lang string `json:"lang,omitempty" yaml:"lang,omitempty"`
+	// User 任务发起人标识（宿主注入，如 X-DQEX-User 登录名）：随 OnTaskStart 透传宿主。
+	// 运行时注入不入任务配置。
+	User string `json:"-" yaml:"-"`
 	// Contributors 业务对象贡献者（代理层）：宿主注册回调，编排由 dqex 负责。
 	// 仅需 Type + IDs（配置层可序列化），Export/Import 回调为空时由服务层按 Type
 	// 匹配 Client 注册的模板补齐（未注册报错）。
@@ -79,6 +103,11 @@ type ExportOptions struct {
 	// Format 产物格式：FormatSQL（默认，SQL 文本）或 FormatJSON（DataPackage 数据包，
 	// 每库一个 <db>.json，支持精确回滚导入）。json 格式适用于业务配置类中小表数据。
 	Format ExportFormat `json:"format,omitempty" yaml:"format,omitempty"`
+	// OnDetail 导出明细回调（可选）：每张表/每个对象导出完成时同步调用，fire-and-forget——
+	// 无返回值，回调行为（panic/耗时）由宿主自负，不影响导出主流程。
+	// 导出循环为单 goroutine 顺序调用，宿主侧无需加锁；每表恰好回调一次
+	// （skip/无数据表 Rows=0），对象在 DDL 写入成功后回调。
+	OnDetail func(ExportDetail) `json:"-" yaml:"-"`
 }
 
 // ExportFormat 导出产物格式
@@ -100,6 +129,8 @@ type DictionaryOptions struct {
 	Selections []DBSelection `json:"selections,omitempty" yaml:"selections,omitempty"` // 结构化库→表选择（优先于 Databases/Tables）
 	Compress   bool          `json:"compress" yaml:"compress"`                         // 是否打包 zip，默认 true
 	Lang       string        `json:"lang,omitempty" yaml:"lang,omitempty"`             // 产物文案语言（zh/en），默认 zh
+	// User 任务发起人标识（宿主注入）：随 OnTaskStart 透传宿主。运行时注入不入任务配置
+	User string `json:"-" yaml:"-"`
 }
 
 // ResetMode 重置数据模式
@@ -125,6 +156,8 @@ type ImportOptions struct {
 	CompatCollation bool `json:"compatCollation" yaml:"compatCollation"`
 	// Lang 任务日志语言（zh/en），默认 zh
 	Lang string `json:"lang,omitempty" yaml:"lang,omitempty"`
+	// User 任务发起人标识（宿主注入）：随 OnTaskStart 透传宿主。运行时注入不入任务配置
+	User string `json:"-" yaml:"-"`
 	// Contributors 业务对象贡献者（代理层）：zip 包内含 <Type>/ 目录时回调 Import 读回。
 	// 仅需 Type（+可选 IDs），回调为空时由服务层按 Type 匹配注册模板补齐。
 	Contributors []Contributor `json:"contributors,omitempty" yaml:"contributors,omitempty"`
@@ -160,6 +193,8 @@ type MigrateOptions struct {
 	CompatCollation bool `json:"compatCollation" yaml:"compatCollation"`
 	// Lang 任务日志/产物文案语言（zh/en），默认 zh
 	Lang string `json:"lang,omitempty" yaml:"lang,omitempty"`
+	// User 任务发起人标识（宿主注入）：随 OnTaskStart 透传宿主。运行时注入不入任务配置
+	User string `json:"-" yaml:"-"`
 }
 
 // Progress 任务进度信息
@@ -168,11 +203,13 @@ type Progress struct {
 	TaskID       string   `json:"taskID"`
 	TotalUnits   int      `json:"totalUnits"` // 工作单元总数（表 + 视图/函数/存储过程等对象）
 	CurrentTable string   `json:"currentTable"`
+	Phase        string   `json:"phase,omitempty"` // 当前表所处阶段：schema=结构（DDL）/ data=数据（行导出）；空=未细分（对象/收尾等）
 	DoneUnits    int      `json:"doneUnits"`
 	TotalRows    int64    `json:"totalRows"`
 	DoneRows     int64    `json:"doneRows"`
 	Percent      float64  `json:"percent"`
 	Message      string   `json:"message"`
+	MsgSeq       int      `json:"msgSeq"`               // 事件序号：每次 log() 追加新事件时递增；节流快照不变。宿主据此区分"新事件"与"快照刷新"，无需比对消息文本
 	OutputPath   string   `json:"outputPath,omitempty"` // 导出完成后的文件路径
 	DurationMs   int64    `json:"durationMs,omitempty"` // 任务总耗时（仅终态回放时由执行历史填充，实时推送时前端自行计时）
 	Logs         []string `json:"logs"`
@@ -210,6 +247,8 @@ type CompareOptions struct {
 	ForceData     bool              `json:"forceData,omitempty" yaml:"forceData,omitempty"`
 	// Lang 任务日志语言（zh/en），默认 zh
 	Lang string `json:"lang,omitempty" yaml:"lang,omitempty"`
+	// User 任务发起人标识（宿主注入）：随 OnTaskStart 透传宿主。运行时注入不入任务配置
+	User string `json:"-" yaml:"-"`
 }
 
 // CompareDBPair 对比的库对（源库 ↔ 目标库）
@@ -401,6 +440,8 @@ type SnapshotCompareOptions struct {
 	Tables     []string          `json:"tables,omitempty"`    // 限定对比的表，nil=全部（"库.表" 或裸名）
 	// Lang 任务日志语言（zh/en），默认 zh
 	Lang string `json:"lang,omitempty"`
+	// User 任务发起人标识（宿主注入）：随 OnTaskStart 透传宿主。运行时注入不入任务配置
+	User string `json:"-"`
 }
 
 // ExportDesc 导出描述文件（.desc）内容，与 .sql 文件同名，JSON 格式

@@ -33,6 +33,21 @@ import type {
   VersionInfo,
 } from "@/types"
 
+// ---- API 前缀：支持库模式挂载到宿主子路径（如 /dqex，docs/library-api-design.md）。
+// 独立部署时页面位于根路径，API 在 /api；挂载部署时页面位于 /<prefix>/，
+// API 同挂于 /<prefix>/api，从页面路径首段推导前缀（hash 路由不影响 pathname）。
+const API_PREFIX = (() => {
+  const first = window.location.pathname.split("/").filter(Boolean)[0]
+  // 根路径或首段像静态文件（如 /index.html）时视为独立部署，无前缀
+  if (!first || /\.[a-zA-Z]+$/.test(first)) return ""
+  return `/${first}`
+})()
+
+/** 拼接 API 前缀：所有 /api/... 请求（含裸 fetch / EventSource）统一经此处理 */
+export function apiUrl(url: string): string {
+  return `${API_PREFIX}${url}`
+}
+
 // ---- 访问令牌（Web 服务默认启用 token 认证） ----
 // 优先取 URL ?token=（启动日志给出的带令牌链接）并存入 sessionStorage，
 // 随后从地址栏移除令牌，避免经浏览器历史 / Referer 泄漏；
@@ -74,10 +89,11 @@ function notifyAuthError(msg: string) {
   toast.error(msg, { duration: 8000 })
 }
 
-// ---- fetch 封装（cygin 统一响应 {code,msg,data}，code==0 成功） ----
+// ---- fetch 封装（cygin 统一响应 {code,msg,data}；code==0 成功，宿主可能全局
+// SetSuccessCode(200)（如 tl-env），故 200 同样视为成功） ----
 
 export async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(withLang(url), {
+  const res = await fetch(withLang(apiUrl(url)), {
     ...init,
     headers: {
       "Accept-Language": i18n.language,
@@ -106,7 +122,7 @@ export async function request<T>(url: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new Error(i18n.t("api.requestFailedHttp", { status: res.status }))
   }
-  if (body.code !== 0) {
+  if (body.code !== 0 && body.code !== 200) {
     // 优先展示 details 里的具体错误（如数据库错误），msg 作为兜底
     const detail = (body.details ?? []).filter(Boolean).join("；")
     throw new Error(detail || body.msg || i18n.t("api.requestFailedCode", { code: body.code }))
@@ -320,7 +336,7 @@ export function aiChatStream(
   }, TIMEOUT_MS)
   void (async () => {
     try {
-      const res = await fetch(withLang("/api/ai/chat/stream"), {
+      const res = await fetch(withLang(apiUrl("/api/ai/chat/stream")), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -390,7 +406,7 @@ export function aiChatStream(
 // ---- 导出文件操作 ----
 
 export const downloadUrl = (taskID: string) =>
-  `/api/export/download/${encodeURIComponent(taskID)}${authToken ? `?token=${encodeURIComponent(authToken)}` : ""}`
+  apiUrl(`/api/export/download/${encodeURIComponent(taskID)}${authToken ? `?token=${encodeURIComponent(authToken)}` : ""}`)
 
 export const openExportDir = (taskID: string) =>
   post<{ ok: boolean }>(`/api/export/open-dir/${encodeURIComponent(taskID)}`, {})
@@ -408,7 +424,7 @@ export interface ProgressHandler {
 
 export function subscribeProgress(taskID: string, handler: ProgressHandler): () => void {
   // EventSource 无法自定义请求头，令牌与语言均通过查询参数携带
-  const es = new EventSource(withLang(`/api/progress/${encodeURIComponent(taskID)}${authToken ? `?token=${encodeURIComponent(authToken)}` : ""}`))
+  const es = new EventSource(withLang(apiUrl(`/api/progress/${encodeURIComponent(taskID)}`)) + (authToken ? `&token=${encodeURIComponent(authToken)}` : ""))
   es.addEventListener("progress", (e) => {
     try {
       handler.onProgress(JSON.parse(e.data))
@@ -449,8 +465,9 @@ export async function createSnapshot(params: CreateSnapshotParams): Promise<{ id
   return post<{ id: string; name: string }>("/api/snapshots", params)
 }
 
-export async function listSnapshots(): Promise<SnapshotInfo[]> {
-  return request<SnapshotInfo[]>("/api/snapshots")
+export async function listSnapshots(connId?: string): Promise<SnapshotInfo[]> {
+  // connId：按创建时连接（环境）过滤；空 = 全部
+  return request<SnapshotInfo[]>(`/api/snapshots${connId ? `?connId=${encodeURIComponent(connId)}` : ""}`)
 }
 
 export async function getSnapshot(id: string): Promise<SnapshotDetail> {

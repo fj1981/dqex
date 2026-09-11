@@ -29,6 +29,8 @@ type engineTexts struct {
 	expSortFail        string // 表依赖排序不可用（将按原顺序导出）: %v
 	expObjFail         string // 导出%s %s.%s 失败（已跳过）: %v
 	expObjDone         string // %s.%s/%s 导出完成
+	tblMissing         string // 配置的表 %s 在库 %s 不存在（已跳过）
+	objMissing         string // 配置的对象 %s 在库 %s 不存在（已跳过）
 
 	// importer
 	impStart           string // 开始导入: %d 个库
@@ -127,6 +129,8 @@ var engineTextsMap = map[string]engineTexts{
 		expSortFail:        "表依赖排序不可用（将按原顺序导出）: %v",
 		expObjFail:         "导出%s %s.%s 失败（已跳过）: %v",
 		expObjDone:         "%s.%s/%s 导出完成",
+		tblMissing:         "配置的表 %s 在库 %s 不存在（已跳过）",
+		objMissing:         "配置的对象 %s 在库 %s 不存在（已跳过）",
 		impStart:           "开始导入: %d 个库",
 		impDBDone:          "库 %s 导入完成 (%d 条语句)",
 		impDone:            "导入完成: %d 个库, %d 条语句",
@@ -208,6 +212,8 @@ var engineTextsMap = map[string]engineTexts{
 		expSortFail:        "table dependency sorting unavailable (exporting in original order): %v",
 		expObjFail:         "exporting %s %s.%s failed (skipped): %v",
 		expObjDone:         "%s.%s/%s exported",
+		tblMissing:         "configured table %s not found in db %s (skipped)",
+		objMissing:         "configured object %s not found in db %s (skipped)",
 		impStart:           "importing: %d db(s)",
 		impDBDone:          "db %s imported (%d statements)",
 		impDone:            "import done: %d db(s), %d statements",

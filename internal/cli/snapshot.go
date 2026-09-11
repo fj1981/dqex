@@ -150,7 +150,7 @@ func cliSnapshotList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	infos := svc.ListSnapshots()
+	infos := svc.ListSnapshots("") // CLI 列出全部（不受连接过滤影响）
 	if len(infos) == 0 {
 		fmt.Println(cliTextsFor(cliLang()).snapNone)
 		return nil

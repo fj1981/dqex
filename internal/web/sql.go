@@ -5,8 +5,8 @@ import (
 	"github.com/fj1981/dqex/internal/engine"
 	"github.com/fj1981/dqex/internal/service"
 
-	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/gin-gonic/gin"
+	"github.com/fj1981/infrakit/pkg/cygin"
 )
 
 // SQLRunReq SQL 执行请求（统一查询与写操作，支持多语句批量执行）
@@ -163,13 +163,13 @@ type SQLHistoryReq struct {
 
 func handleSQLHistory(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req SQLHistoryReq) ([]service.SQLHistoryItem, error) {
-		return svc.SQLHistory(req.ConnID), nil
+		return svc.SQLHistory(dqexUser(c), req.ConnID), nil
 	})
 }
 
 func handleClearSQLHistory(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req SQLHistoryReq) (any, error) {
-		svc.ClearSQLHistory(req.ConnID)
+		svc.ClearSQLHistory(dqexUser(c), req.ConnID)
 		return gin.H{"ok": true}, nil
 	})
 }
@@ -196,7 +196,7 @@ type FavoriteRenameReq struct {
 
 func handleListFavorites(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req FavoriteReq) ([]*service.SQLFavorite, error) {
-		return svc.ListFavorites(), nil
+		return svc.ListFavorites(dqexUser(c)), nil
 	})
 }
 
@@ -209,7 +209,7 @@ func handleAddFavorite(svc *service.Service) gin.HandlerFunc {
 			Mode:   req.Mode,
 			SQL:    req.SQL,
 		}
-		if err := svc.AddFavorite(f); err != nil {
+		if err := svc.AddFavorite(dqexUser(c), f); err != nil {
 			return nil, renderErr(c, err)
 		}
 		return gin.H{"ok": true, "id": f.ID}, nil
@@ -222,7 +222,7 @@ func handleDeleteFavorite(svc *service.Service) gin.HandlerFunc {
 		if id == "" {
 			return nil, cygin.NewError(cygin.ErrParamsInvalid)
 		}
-		if err := svc.DeleteFavorite(id); err != nil {
+		if err := svc.DeleteFavorite(dqexUser(c), id); err != nil {
 			return nil, renderErr(c, err)
 		}
 		return gin.H{"ok": true}, nil
@@ -231,7 +231,7 @@ func handleDeleteFavorite(svc *service.Service) gin.HandlerFunc {
 
 func handleRenameFavorite(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req FavoriteRenameReq) (any, error) {
-		if err := svc.RenameFavorite(req.ID, req.Title); err != nil {
+		if err := svc.RenameFavorite(dqexUser(c), req.ID, req.Title); err != nil {
 			return nil, renderErr(c, err)
 		}
 		return gin.H{"ok": true}, nil
@@ -247,7 +247,7 @@ type SQLAuditReq struct {
 
 func handleSQLAudit(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req SQLAuditReq) ([]service.SQLAuditEntry, error) {
-		return svc.SQLAudit(req.ConnID, req.Limit, req.Offset)
+		return svc.SQLAudit(dqexUser(c), req.ConnID, req.Limit, req.Offset)
 	})
 }
 
@@ -314,7 +314,7 @@ type WorkspaceGetReq struct {
 // handleGetWorkspace 读取某连接的查询工作区。
 func handleGetWorkspace(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req WorkspaceGetReq) (service.WorkspaceState, error) {
-		state, _ := svc.LoadWorkspace(req.ConnID)
+		state, _ := svc.LoadWorkspace(dqexUser(c), req.ConnID)
 		if state.Tabs == nil {
 			state.Tabs = []service.WorkspaceTab{}
 		}
@@ -334,7 +334,7 @@ type WorkspaceSaveReq struct {
 func handleSaveWorkspace(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req WorkspaceSaveReq) (map[string]any, error) {
 		state := service.WorkspaceState{Tabs: req.Tabs, ActiveID: req.ActiveID, TabSettings: req.TabSettings}
-		if err := svc.SaveWorkspace(req.ConnID, state); err != nil {
+		if err := svc.SaveWorkspace(dqexUser(c), req.ConnID, state); err != nil {
 			return nil, renderErr(c, err)
 		}
 		return map[string]any{"ok": true}, nil

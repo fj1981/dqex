@@ -90,16 +90,15 @@ func RunMigrate(ctx context.Context, opts MigrateOptions, cb ProgressFunc) (*Mig
 		// 数据写入前挂起目标库约束检查（自引用/跨表外键的行序无法保证，见 suspendTargetChecks 注释）
 		suspendTargetChecks(targetCli, t)
 
-		// 1. 确定迁移表清单
+		// 1. 确定迁移表清单：白名单非空时按名单直查校验（不枚举全库），缺失条目告警跳过
 		crossType := !strings.EqualFold(sourceCli.DBType(), targetCli.DBType())
 		// 视图走对象迁移通道 _views，不当作表迁移（视图无数据且无法按表建表）
-		all, err := listSchemaTables(sourceCli, job.srcDB, &job.srcSchema)
+		tables, err := planTables(sourceCli, job.srcDB, job.srcSchema, job.tables, t)
 		if err != nil {
 			sourceCli.Close()
 			targetCli.Close()
 			return nil, NewMsgErrf(errMigListTables, err)
 		}
-		tables := filterTables(all, job.tables, job.srcDB)
 		if len(tables) == 0 {
 			sourceCli.Close()
 			targetCli.Close()
@@ -267,6 +266,12 @@ func migrateDBObjects(ctx context.Context, sourceCli, targetCli *cydb.DBCli, db,
 		allowed[strings.TrimSpace(o)] = true
 	}
 	objs := listDBObjects(sourceCli, db, schema)
+	// 对象存在性校验：白名单条目在源库内未命中 → 逐条告警（与导出的对象校验标准一致）
+	if objects != nil {
+		for _, w := range missingWhitelistObjects(objects, allowed, objs, db) {
+			t.log(engineTextsFor(t.lang).objMissing, w, db)
+		}
+	}
 	for _, kind := range objectExportOrder {
 		names := objs[kind]
 		dirName := objectKindDirs[kind]
@@ -363,7 +368,7 @@ func migrateTableData(ctx context.Context, sourceCli, targetCli *cydb.DBCli, tab
 
 	// DirectForEachQuery 跳过 preProcess：GoSQLX 无法解析 PG/Kingbase 双引号限定名（"schema"."table"），
 	// selectSQL 为可执行完整 SQL，直接交由数据库解析执行
-	err := sourceCli.DirectForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
+	err := sourceCli.DirectForEachQueryContext(ctx, table, selectSQL, func(rd cydb.RowData) error {
 		if err := ctx.Err(); err != nil {
 			return NewMsgErr(errCancelled)
 		}

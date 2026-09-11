@@ -20,9 +20,9 @@
 package dqexweb
 
 import (
+	"github.com/gin-gonic/gin"
 	"github.com/fj1981/dqex"
 	"github.com/fj1981/dqex/internal/web"
-	"github.com/gin-gonic/gin"
 )
 
 // MountOptions 挂载选项（Prefix 默认 "/dqex"；FrameAncestors CSP 白名单；

@@ -25,6 +25,7 @@ func newTracker(cb ProgressFunc, lang string) *tracker {
 // log 追加日志并立即推送
 func (t *tracker) log(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
+	t.p.MsgSeq++ // 新事件序号：宿主据 MsgSeq 变化判断是新事件（Message 是粘性字段，节流快照会重复携带）
 	t.p.Message = msg
 	t.p.Logs = append(t.p.Logs, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), msg))
 	// 只保留最近 500 条日志，避免内存膨胀

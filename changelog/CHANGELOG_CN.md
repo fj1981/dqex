@@ -1,5 +1,84 @@
 # 更新日志
 
+## [1.7.4] - 2026-09-11
+### 修复
+- 开源构建下"关于"弹窗未展示项目主页与联系方式，现已正常显示
+- 基础依赖库升级，补齐流式查询取消能力
+
+### 优化
+- 双仓同步脚本排除构建产物目录，并支持跨仓库依赖路径自动映射
+
+## [1.7.3] - 2026-09-09
+### 新增
+- `ExportOptions.OnDetail` 导出明细回调：每张表/每个对象导出完成时同步通知宿主（`ExportDetail{Database, Kind, Name, Rows, Query, Ddl, Comment, Columns}`，含表注释与列明细），供宿主生成导出清单/审计等旁路采集，替代事后解析 `.desc` 与 SQL 标记注释（后者对 gzip/zip 产物不可用，且依赖注释文案格式）
+- 根包新增 `ExportDetail` 类型与 `DetailKindTable/View/Function/Procedure` 常量；`writeTableDDL` 返回写入的 DDL 文本
+- 对象白名单裸名条目（`库._functions/名`）可命中 PG 的 schema 限定枚举名（兜底剥 schema，与表过滤"命中任意 schema 同名"语义一致），宿主以裸名配置对象白名单即可跨 schema 生效
+- FormatJSON 数据包导出同样回调表明细（skip/无主键表 Rows=0，Ddl 为已写入建表语句）
+
+## [1.7.2] - 2026-09-08
+### 修复
+- StartExport/StartDictionary 产物归置完成后回灌一次进度事件：runner 终态兜底推送的 done 携带逻辑路径（此前为 tmp 工作区路径，对象存储模式下本地已删，宿主 hook 上传下载列表必然失败）
+- downloadUrl 经 apiUrl() 拼接挂载前缀，修复嵌入模式下下载请求命中宿主 SPA 兜底返回 index.html（浏览器把产物存成 .html）
+
+## [1.7.1] - 2026-09-08
+### 新增
+- 导出 `IsArtifactLogicalPath`：供宿主识别直传产物逻辑路径（区别于本地路径，走对象存储流式下载）
+
+## [1.7.0] - 2026-09-08
+### 新增
+- 统一产物存取器（artifact.go）：逻辑路径 `<prefix>/<name>`，对象存储模式一步上传不落本地终态，独立模式写 DataDir 受管目录；历史/下载/清理不再感知存储介质
+- 对比报告（compares）全部读写接入统一存取器，OutputPath 统一逻辑路径
+- 导出包/字典单文件产物：对象存储模式组装到 tmp 工作区，唯一一次流式上传后清理；目录产物（Compress=false 桌面场景）保留本地语义
+- 下载接口按路径形态分流：逻辑路径流式返回，本地路径保留 FileAttachment；删除历史按形态分流清理
+- 快照内容专用上传/下载/删除 helper 收编进存取器，行为不变
+
+## [1.6.0] - 2026-09-08
+### 新增
+- 快照索引落库：由单 JSON 文件（O(n) 读改写、对象存储非原子易丢索引）迁入 snapshot_index 表（conn_id/created_at 建索引 + body_json 条目），快照内容仍为 OSS/本地 `{id}.json` 按需加载；StoreNone 降级保留 JSON 路径
+- 存量索引首次访问自动迁移：纯增量按 ID 幂等 upsert，单条失败可安全重试，legacy 文件只读保留供回滚旧版本
+- GET /api/snapshots 新增可选 connId 过滤（虚拟连接 `env:<id>` 按环境隔离），前端连接过滤下推服务端
+
+### 修复
+- meta 通用 KV 表列名规避数据库保留字（meta_key/meta_value）
+
+## [1.5.1] - 2026-09-07
+### 修复
+- go.sum 同步 pk-infrakit-g v0.2.0 校验值
+
+## [1.5.0] - 2026-09-04
+### 优化
+- 全引擎流式查询改用 DirectForEachQueryContext（exporter/migrator/snapshot/compare/exporter_json 共 6 处）：取消时立即关闭底层连接，数据库主动终止 SELECT，导出/迁移取消延迟从"等 SQL 跑完"降到毫秒级（依赖 pk-infrakit-g v0.1.8 → v0.2.0）
+
+## [1.4.1] - 2026-09-04
+### 修复
+- AI 回复剥离推理模型 `<think>` 思考内容（MiniMax M 系列适配）：非流式 stripThinkAll + 流式状态机（处理标签被增量拆分），Chat/ChatStream 与 Web 主链路 Agent.Stream 均接入，打字机输出与持久化历史不再混入思考块
+
+## [1.4.0] - 2026-09-04
+### 新增
+- 多租户数据隔离：用户作用域机制，嵌入宿主场景按用户隔离 SQL 历史、收藏、审计、工作区与 AI 会话；独立部署兼容默认 local 域
+- 外部 SQL 存储 WithStoreConn 全链路落地：跨方言持久化元数据到宿主数据库
+- AI 助手配置 `WithAIConfig` 注入（base_url/api_key/model 由宿主持有，不落盘），PG 系 schema.table 表名规范支持
+- EmbedShell 嵌入组件：URL 参数注入连接与主题配置，任务型视图快速启动
+- `WithTaskHooks` 任务钩子：异步任务启动/进度回调透传宿主（含发起人标识），宿主可镜像任务列表
+- `Client.CancelTask`：宿主取消镜像任务时转发引擎真正中断执行
+- 快照对象存储落地（WithArtifactStore）：快照 index + 数据落 `snapshots/` 前缀，容器重建不丢；目录热更新跳过 snapshots 本地迁移
+- 进度事件增强：`Progress.Phase` 阶段标记（schema=结构 DDL / data=行导出）与 `Progress.MsgSeq` 事件序号，宿主据序号变化区分"新事件"与"快照刷新"
+
+### 优化
+- Start* 预解析归一连接，避免校验后执行前连接变更导致任务失败
+- 快照索引读-改-写区分「对象不存在」与瞬时故障，防止瞬时故障下空列表覆盖既有索引；快照索引并发加锁
+- 嵌入模式隐藏「打开文件夹」与重复的保存任务按钮，conn 预注入扩展至 export/dictionary/snapshot 视图，新增 lang 参数跟随宿主语言
+
+### 修复
+- SQL 库名前缀裁剪问题；sanitizeName 先判空后净化，保留默认名语义
+
+## [1.3.0] - 2026-08-31
+### 新增
+- 库模式（Go 库）正式发布：`dqexweb.Mount` 支持宿主以 `MountOptions{Prefix, FrameAncestors, Fallback}` 挂载 Web/API 子树，供宿主应用（如 tl-env）整页嵌入（`?embed=1#/embed/<view>`）
+- `Client` 新增执行/导出/导入引擎与扩展点：`RunSQLScript` / `RunExport` / `RunImport`、`WithConnProvider` / `WithConnHooks` / `WithQueryHooks`（写操作审计）/ `WithContributors`（业务对象取数/回写回调）/ `WithDataPreparers`
+- `RenderRowsSQL`：行数据（map 切片）→ 方言正确 SQL 文本的纯函数，复用 cydb dialect 转义（与导入/回滚链路同源），供宿主导出写盘薄壳复用，替代宿主手写方言补丁
+- DataPackage 数据格式契约（JSON 结构与 tl-env DataHolder 兼容，契约冻结）：`ApplyDataPackage` 精确回滚导入、事务+幂等 upsert、无主键表跳过并告警
+
 ## [1.2.1] - 2026-08-27
 ### 优化
 - 迁移写入前自动挂起目标库外键校验（连接级开关），含自引用外键的库迁移不再因行序报错

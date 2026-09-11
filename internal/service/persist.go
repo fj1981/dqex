@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,12 +11,21 @@ import (
 	"github.com/fj1981/infrakit/pkg/cylog"
 )
 
+// ErrStoreDisabled 表示当前为 StoreNone 库模式（未配置数据目录），持久化能力不可用。
+var ErrStoreDisabled = errors.New("store disabled: library mode without data dir")
+
+// ErrAISessionMissing 指定 AI 会话不存在或不属于该用户域。
+// 注：errors.go 中的 ErrAISessionNotFound 为 Web 层错误码（int 常量），
+// 此处为持久层哨兵错误，命名避开冲突。
+var ErrAISessionMissing = errors.New("ai session not found")
+
 // PersistMgr 统一持久化管理：连接配置 + 任务配置 + 执行历史 + SQL 历史 + SQL 审计 + Web 凭证，
 // 全部存储于 SQLite（dqex.db），目录类资源（上传/临时/导出/对比/快照）仍为文件系统目录。
 type PersistMgr struct {
 	baseDir                                               string
 	tmpDir, uploadDir, exportDir, compareDir, snapshotDir string
 	store                                                 store.Store
+	snapshotsExternal                                     bool // 快照已上对象存储（WithArtifactStore）：目录热更新时跳过 snapshots 本地迁移
 }
 
 // 数据根目录（默认 ~/.dqex，--data-dir 可覆盖）下的子目录规划：
@@ -56,37 +66,94 @@ func NewPersistMgrWith(dirs ResolvedDirs) (*PersistMgr, error) {
 	}, nil
 }
 
+// NewPersistMgrWithStore 按解析后的五类目录创建持久化管理器，注入外部 SQL 存储
+// （StoreExternal 库模式：宿主经 WithStoreConn 注入 MySQL 等连接，元数据不落本地文件）。
+// 目录类资源（tmp/uploads/exports/compares/snapshots）仍为本地目录。
+func NewPersistMgrWithStore(dirs ResolvedDirs, st store.Store) (*PersistMgr, error) {
+	for _, d := range []string{dirs.Data, dirs.Tmp, dirs.Uploads, dirs.Exports, dirs.Compares, dirs.Snapshots} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return nil, err
+		}
+	}
+	return &PersistMgr{
+		baseDir: dirs.Data, tmpDir: dirs.Tmp, uploadDir: dirs.Uploads,
+		exportDir: dirs.Exports, compareDir: dirs.Compares, snapshotDir: dirs.Snapshots,
+		store: st,
+	}, nil
+}
+
 // Close 关闭底层存储（进程退出前调用，确保 SQLite 连接释放）。
 func (p *PersistMgr) Close() error {
-	if p.store != nil {
+	if p != nil && p.store != nil {
 		return p.store.Close()
 	}
 	return nil
 }
 
 // BaseDir 返回存储根目录（配置存储）
-func (p *PersistMgr) BaseDir() string { return p.baseDir }
+func (p *PersistMgr) BaseDir() string {
+	if p == nil {
+		return ""
+	}
+	return p.baseDir
+}
 
 // UploadDir 返回 Web 上传文件临时目录
-func (p *PersistMgr) UploadDir() string { return p.uploadDir }
+func (p *PersistMgr) UploadDir() string {
+	if p == nil {
+		return ""
+	}
+	return p.uploadDir
+}
 
 // TempDir 返回任务处理临时目录（zip 解压等，任务结束自动清理）
-func (p *PersistMgr) TempDir() string { return p.tmpDir }
+func (p *PersistMgr) TempDir() string {
+	if p == nil {
+		return ""
+	}
+	return p.tmpDir
+}
 
 // ExportDir 返回导出产物目录（导出 zip/目录）
-func (p *PersistMgr) ExportDir() string { return p.exportDir }
+func (p *PersistMgr) ExportDir() string {
+	if p == nil {
+		return ""
+	}
+	return p.exportDir
+}
 
 // CompareDir 返回对比报告目录（compare-<ID>.json）
-func (p *PersistMgr) CompareDir() string { return p.compareDir }
+func (p *PersistMgr) CompareDir() string {
+	if p == nil {
+		return ""
+	}
+	return p.compareDir
+}
 
 // SnapshotDir 返回快照目录
-func (p *PersistMgr) SnapshotDir() string { return p.snapshotDir }
+func (p *PersistMgr) SnapshotDir() string {
+	if p == nil {
+		return ""
+	}
+	return p.snapshotDir
+}
+
+// SetSnapshotsExternal 标记快照持久化已切换对象存储（WithArtifactStore）：
+// UpdateDirs 热更新时跳过 snapshots 目录迁移（对象 key 不受本地目录变更影响）。
+func (p *PersistMgr) SetSnapshotsExternal(v bool) {
+	if p != nil {
+		p.snapshotsExternal = v
+	}
+}
 
 // UpdateDirs 运行时热更新子目录（不修改 baseDir，因 SQLite 已打开）。
 // 产物类目录（exports/compares/snapshots）变更时自动迁移原数据到新目录，并同步
 // 重写执行历史中的产物路径（OutputPath 保持全路径），保证历史下载始终可用；
 // tmp/uploads 为临时目录（任务结束自动清理），不做迁移。
 func (p *PersistMgr) UpdateDirs(dirs ResolvedDirs) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
 	for _, d := range []string{dirs.Tmp, dirs.Uploads, dirs.Exports, dirs.Compares, dirs.Snapshots} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return err
@@ -98,6 +165,9 @@ func (p *PersistMgr) UpdateDirs(dirs ResolvedDirs) error {
 		{"compares", p.compareDir, dirs.Compares},
 		{"snapshots", p.snapshotDir, dirs.Snapshots},
 	} {
+		if pair.name == "snapshots" && p.snapshotsExternal {
+			continue // 快照在对象存储，本地目录迁移无意义
+		}
 		if filepath.Clean(pair.oldDir) == filepath.Clean(pair.newDir) {
 			continue
 		}
@@ -161,6 +231,9 @@ func (p *PersistMgr) rewriteHistoryOutputPaths(oldDir, newDir string) {
 // 安全边界：仅清理 exports/compares 受管目录内的产物，用户自定义输出路径
 // （export -o / compare --output）不动；文件不存在时静默跳过。
 func (p *PersistMgr) RemoveArtifact(outputPath string) {
+	if p == nil {
+		return
+	}
 	path := strings.TrimSpace(outputPath)
 	if path == "" {
 		return
@@ -186,21 +259,33 @@ func (p *PersistMgr) RemoveArtifact(outputPath string) {
 
 // SaveConn 保存连接配置：rec.ID 非空则按主键更新，否则生成新 xid
 func (p *PersistMgr) SaveConn(rec ConnRecord) (ConnRecord, error) {
+	if p == nil {
+		return ConnRecord{}, ErrStoreDisabled
+	}
 	return p.store.SaveConn(rec)
 }
 
 // LoadConns 加载全部连接配置（按 ID 索引）
 func (p *PersistMgr) LoadConns() map[string]ConnRecord {
+	if p == nil {
+		return map[string]ConnRecord{}
+	}
 	return p.store.LoadConns()
 }
 
 // GetConn 按主键 ID 查找连接；兼容按名称或短名查找（旧任务配置引用）
 func (p *PersistMgr) GetConn(key string) (ConnRecord, bool) {
+	if p == nil {
+		return ConnRecord{}, false
+	}
 	return p.store.GetConn(key)
 }
 
 // DeleteConn 删除连接配置（按主键 ID，兼容名称或短名）
 func (p *PersistMgr) DeleteConn(key string) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
 	return p.store.DeleteConn(key)
 }
 
@@ -208,31 +293,49 @@ func (p *PersistMgr) DeleteConn(key string) error {
 
 // SaveTask 保存任务配置（按 ID 更新或新增）
 func (p *PersistMgr) SaveTask(task TaskConfig) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
 	return p.store.SaveTask(task)
 }
 
 // LoadTasks 加载全部任务配置
 func (p *PersistMgr) LoadTasks() []TaskConfig {
+	if p == nil {
+		return []TaskConfig{}
+	}
 	return p.store.LoadTasks()
 }
 
 // GetTask 获取指定任务配置
 func (p *PersistMgr) GetTask(id string) (TaskConfig, bool) {
+	if p == nil {
+		return TaskConfig{}, false
+	}
 	return p.store.GetTask(id)
 }
 
 // DeleteTask 删除任务配置
 func (p *PersistMgr) DeleteTask(taskID string) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
 	return p.store.DeleteTask(taskID)
 }
 
 // MarkLastUsed 标记指定类型为最近使用（同类型其他任务取消标记）
 func (p *PersistMgr) MarkLastUsed(taskID, taskType string) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
 	return p.store.MarkLastUsed(taskID, taskType)
 }
 
 // GetLastUsed 获取指定类型最近使用的任务配置
 func (p *PersistMgr) GetLastUsed(taskType string) *TaskConfig {
+	if p == nil {
+		return nil
+	}
 	return p.store.GetLastUsed(taskType)
 }
 
@@ -240,11 +343,17 @@ func (p *PersistMgr) GetLastUsed(taskType string) *TaskConfig {
 
 // SaveWebAccess 保存 Web 访问凭证（0600 落盘）
 func (p *PersistMgr) SaveWebAccess(info WebAccessInfo) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
 	return p.store.SaveWebAccess(info)
 }
 
 // LoadWebAccess 读取 Web 访问凭证；文件不存在或无有效内容时 ok=false
 func (p *PersistMgr) LoadWebAccess() (WebAccessInfo, bool) {
+	if p == nil {
+		return WebAccessInfo{}, false
+	}
 	return p.store.LoadWebAccess()
 }
 
@@ -252,34 +361,55 @@ func (p *PersistMgr) LoadWebAccess() (WebAccessInfo, bool) {
 
 // SaveHistory 保存执行历史（按 ID 更新或新增，超出上限裁剪最旧记录）
 func (p *PersistMgr) SaveHistory(record ExecutionRecord) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
 	return p.store.SaveHistory(record)
 }
 
 // LoadHistory 加载执行历史（taskType 为空=全部，taskConfigID 为空=不过滤）
 func (p *PersistMgr) LoadHistory(taskType, taskConfigID string) []ExecutionRecord {
+	if p == nil {
+		return []ExecutionRecord{}
+	}
 	return p.store.LoadHistory(taskType, taskConfigID)
 }
 
 // GetHistory 获取指定执行记录
 func (p *PersistMgr) GetHistory(id string) (ExecutionRecord, error) {
+	if p == nil {
+		return ExecutionRecord{}, ErrStoreDisabled
+	}
 	return p.store.GetHistory(id)
 }
 
 // DeleteHistory 删除指定执行记录
 func (p *PersistMgr) DeleteHistory(id string) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
 	return p.store.DeleteHistory(id)
 }
 
 // ---- SQL 执行历史 ----
 
-// AddSQLHistory 追加一条 SQL 执行历史（每连接环形保留最近 N 条）
-func (p *PersistMgr) AddSQLHistory(item SQLHistoryItem) error {
-	return p.store.AddSQLHistory(item)
+// AddSQLHistory 追加一条 SQL 执行历史（每连接环形保留最近 N 条）。
+// item.ConnID 为裸连接 key（原始宿主连接标识）；user 为所属用户域（store 层统一
+// 计算作用域键并三列同写：user/conn_key/conn_id）。
+func (p *PersistMgr) AddSQLHistory(user string, item SQLHistoryItem) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.AddSQLHistory(NormalizeUser(user), item)
 }
 
-// ListSQLHistory 返回某连接的历史（新→旧）
-func (p *PersistMgr) ListSQLHistory(connID string) []SQLHistoryItem {
-	items, err := p.store.ListSQLHistory(connID)
+// ListSQLHistory 返回某用户域下某连接的历史（新→旧）。connID 为裸连接 key，
+// 为空时返回该用户域全部连接。
+func (p *PersistMgr) ListSQLHistory(user, connID string) []SQLHistoryItem {
+	if p == nil {
+		return []SQLHistoryItem{}
+	}
+	items, err := p.store.ListSQLHistory(NormalizeUser(user), connID)
 	if err != nil {
 		cylog.Warnf("加载 SQL 执行历史失败: %v", err)
 		return []SQLHistoryItem{}
@@ -287,21 +417,30 @@ func (p *PersistMgr) ListSQLHistory(connID string) []SQLHistoryItem {
 	return items
 }
 
-// ClearSQLHistory 清空某连接的历史
-func (p *PersistMgr) ClearSQLHistory(connID string) error {
-	return p.store.ClearSQLHistory(connID)
+// ClearSQLHistory 清空某用户域下某连接的历史
+func (p *PersistMgr) ClearSQLHistory(user, connID string) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.ClearSQLHistory(NormalizeUser(user), connID)
 }
 
-// ---- SQL 收藏（全局共享，conn_id/db 仅作来源标记） ----
+// ---- SQL 收藏（按用户域隔离，conn_id/db 仅作来源标记） ----
 
-// AddFavorite 新增一条收藏
-func (p *PersistMgr) AddFavorite(f *SQLFavorite) error {
-	return p.store.AddFavorite(f)
+// AddFavorite 新增一条收藏（user 为所属用户域）
+func (p *PersistMgr) AddFavorite(user string, f *SQLFavorite) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.AddFavorite(NormalizeUser(user), f)
 }
 
-// ListFavorites 返回全部收藏（全局共享，不按连接隔离；新→旧）
-func (p *PersistMgr) ListFavorites() []*SQLFavorite {
-	items, err := p.store.ListFavorites()
+// ListFavorites 返回该用户域的全部收藏（新→旧）
+func (p *PersistMgr) ListFavorites(user string) []*SQLFavorite {
+	if p == nil {
+		return []*SQLFavorite{}
+	}
+	items, err := p.store.ListFavorites(user)
 	if err != nil {
 		cylog.Warnf("加载 SQL 收藏失败: %v", err)
 		return []*SQLFavorite{}
@@ -309,83 +448,208 @@ func (p *PersistMgr) ListFavorites() []*SQLFavorite {
 	return items
 }
 
-// DeleteFavorite 删除收藏（按全局唯一 id 定位）
-func (p *PersistMgr) DeleteFavorite(id string) error {
-	return p.store.DeleteFavorite(id)
+// DeleteFavorite 删除收藏（按 id 定位，仅限本用户域）
+func (p *PersistMgr) DeleteFavorite(user, id string) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.DeleteFavorite(NormalizeUser(user), id)
 }
 
-// RenameFavorite 重命名收藏（按全局唯一 id 定位）
-func (p *PersistMgr) RenameFavorite(id, title string) error {
-	return p.store.RenameFavorite(id, title)
+// RenameFavorite 重命名收藏（按 id 定位，仅限本用户域）
+func (p *PersistMgr) RenameFavorite(user, id, title string) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.RenameFavorite(NormalizeUser(user), id, title)
 }
 
 // ---- SQL 审计（只增不删） ----
 
-// AppendSQLAudit 追加一条 SQL 审计日志（只追加，不提供删除）
-func (p *PersistMgr) AppendSQLAudit(entry SQLAuditEntry) error {
-	return p.store.AppendSQLAudit(entry)
+// AppendSQLAudit 追加一条 SQL 审计日志（只追加，不提供删除）。
+// entry.ConnID 为裸连接 key（原始宿主连接标识）；user 为所属用户域（store 层统一
+// 计算作用域键并三列同写）。
+func (p *PersistMgr) AppendSQLAudit(user string, entry SQLAuditEntry) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.AppendSQLAudit(NormalizeUser(user), entry)
 }
 
-// ListSQLAudit 读取审计日志（倒序，分页）。connID 为空返回全部连接。
-func (p *PersistMgr) ListSQLAudit(connID string, limit, offset int) ([]SQLAuditEntry, error) {
-	return p.store.ListSQLAudit(connID, limit, offset)
+// ListSQLAudit 读取审计日志（倒序，分页）。connID 为裸连接 key，为空时返回该用户域
+// 全部连接：store 层仅按 user 列过滤，跨用户隔离由 user 列保证（独立部署 local 域同理）。
+func (p *PersistMgr) ListSQLAudit(user, connID string, limit, offset int) ([]SQLAuditEntry, error) {
+	if p == nil {
+		return []SQLAuditEntry{}, nil
+	}
+	return p.store.ListSQLAudit(NormalizeUser(user), connID, limit, offset)
 }
 
 // ---- 查询工作区 ----
 
-// SaveWorkspace 保存某连接的工作区（整体覆盖）。
-func (p *PersistMgr) SaveWorkspace(connID string, state WorkspaceState) error {
-	return p.store.SaveWorkspace(connID, state)
+// SaveWorkspace 保存某用户域下某连接的工作区（整体覆盖）。connID 为裸连接 key。
+func (p *PersistMgr) SaveWorkspace(user, connID string, state WorkspaceState) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.SaveWorkspace(NormalizeUser(user), connID, state)
 }
 
-// LoadWorkspace 读取某连接的工作区；无记录时 ok=false。
-func (p *PersistMgr) LoadWorkspace(connID string) (WorkspaceState, bool) {
-	return p.store.LoadWorkspace(connID)
+// LoadWorkspace 读取某用户域下某连接的工作区；无记录时 ok=false。connID 为裸连接 key。
+func (p *PersistMgr) LoadWorkspace(user, connID string) (WorkspaceState, bool) {
+	if p == nil {
+		return WorkspaceState{}, false
+	}
+	return p.store.LoadWorkspace(NormalizeUser(user), connID)
 }
 
-// DeleteWorkspace 删除某连接的工作区。
-func (p *PersistMgr) DeleteWorkspace(connID string) error {
-	return p.store.DeleteWorkspace(connID)
+// DeleteWorkspace 删除某用户域下某连接的工作区。connID 为裸连接 key。
+func (p *PersistMgr) DeleteWorkspace(user, connID string) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.DeleteWorkspace(NormalizeUser(user), connID)
+}
+
+// DeleteAllUsersWorkspacesByConn 跨用户域删除某连接的全部工作区（连接删除级联清理）。
+// connID 为裸连接 key，store 层按 conn_key 列等值一次删除所有用户域的行。
+func (p *PersistMgr) DeleteAllUsersWorkspacesByConn(connID string) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.DeleteWorkspacesByConnAllUsers(connID)
 }
 
 // ---- AI 会话（对话历史，按连接持久化） ----
 
-// SaveAISession 保存/更新一个 AI 会话（整组消息覆盖写）。
-func (p *PersistMgr) SaveAISession(rec AISessionRecord) error {
-	return p.store.SaveAISession(rec)
+// SaveAISession 保存/更新一个 AI 会话（整组消息覆盖写；rec.ConnID 为裸连接 key，
+// user 为所属用户域，store 层统一计算作用域键并三列同写）。
+func (p *PersistMgr) SaveAISession(user string, rec AISessionRecord) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.SaveAISession(NormalizeUser(user), rec)
 }
 
-// LoadAISession 读取指定会话；无记录时 ok=false。
-func (p *PersistMgr) LoadAISession(sessionID string) (AISessionRecord, bool) {
-	return p.store.LoadAISession(sessionID)
+// LoadAISession 读取指定会话（store 层按 user 列做归属校验，不属于该用户域时 ok=false）。
+// rec.ConnID 已还原为裸连接 key，无需再做作用域还原。
+func (p *PersistMgr) LoadAISession(user, sessionID string) (AISessionRecord, bool) {
+	if p == nil {
+		return AISessionRecord{}, false
+	}
+	return p.store.LoadAISession(NormalizeUser(user), sessionID)
 }
 
-// ListAISessions 列出某连接（可选指定 tab）的会话（新→旧，仅元信息不含消息）。
-func (p *PersistMgr) ListAISessions(connID, tabID string) []AISessionRecord {
-	items, err := p.store.ListAISessions(connID, tabID)
+// AISessionExists 判断会话 ID 是否已落盘（跨用户域存在性判定，不含归属校验）。
+// 供透明重建复用原 ID 前区分「彻底不存在」与「存在但归属其他用户域」。
+func (p *PersistMgr) AISessionExists(sessionID string) bool {
+	if p == nil {
+		return false
+	}
+	return p.store.AISessionExists(sessionID)
+}
+
+// ListAISessions 列出某用户域下某连接（可选指定 tab）的会话（新→旧，仅元信息不含消息）。
+// connID 为裸连接 key，跨用户隔离由 store 层 user 列保证。
+func (p *PersistMgr) ListAISessions(user, connID, tabID string) []AISessionRecord {
+	if p == nil {
+		return []AISessionRecord{}
+	}
+	items, err := p.store.ListAISessions(NormalizeUser(user), connID, tabID)
 	if err != nil {
 		cylog.Warnf("加载 AI 会话列表失败: %v", err)
 		return []AISessionRecord{}
 	}
+	// rec.ConnID 已为裸连接 key（store 层自 conn_key 列还原）
 	return items
 }
 
-// DeleteAISession 删除指定会话。
-func (p *PersistMgr) DeleteAISession(sessionID string) error {
-	return p.store.DeleteAISession(sessionID)
+// DeleteAISession 删除指定会话（校验属于该用户域）。
+func (p *PersistMgr) DeleteAISession(user, sessionID string) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	user = NormalizeUser(user)
+	if _, ok := p.store.LoadAISession(user, sessionID); !ok {
+		return ErrAISessionMissing // 归属不符/无记录：返回会话不存在而非存储不可用
+	}
+	return p.store.DeleteAISession(user, sessionID)
 }
 
-// DeleteAISessionByTab 删除某连接下指定 tab 的会话（tab 关闭时调用）。
-func (p *PersistMgr) DeleteAISessionByTab(connID, tabID string) error {
-	return p.store.DeleteAISessionByTab(connID, tabID)
+// DeleteAISessionByTab 删除某用户域下某连接指定 tab 的会话（tab 关闭时调用）。
+func (p *PersistMgr) DeleteAISessionByTab(user, connID, tabID string) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.DeleteAISessionByTab(NormalizeUser(user), connID, tabID)
 }
 
-// DeleteAISessionsByConn 删除某连接的全部会话。
-func (p *PersistMgr) DeleteAISessionsByConn(connID string) error {
-	return p.store.DeleteAISessionsByConn(connID)
+// DeleteAISessionsByConn 删除某用户域下某连接的全部会话。
+func (p *PersistMgr) DeleteAISessionsByConn(user, connID string) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.DeleteAISessionsByConn(NormalizeUser(user), connID)
+}
+
+// DeleteAllUsersAISessionsByConn 跨用户域删除某连接的全部 AI 会话（连接删除级联清理）。
+// connID 为裸连接 key，store 层按 conn_key 列等值一次删除所有用户域的会话。
+func (p *PersistMgr) DeleteAllUsersAISessionsByConn(connID string) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.DeleteAISessionsByConnAllUsers(connID)
 }
 
 // PurgeExcessAISessions 清理超额会话（会话数 > maxPerConn 且超过 keepDays 天未活动），返回删除条数。
 func (p *PersistMgr) PurgeExcessAISessions(maxPerConn, keepDays int) (int64, error) {
+	if p == nil {
+		return 0, ErrStoreDisabled
+	}
 	return p.store.PurgeExcessAISessions(maxPerConn, keepDays)
+}
+
+// ---- 快照索引（仅索引元数据；快照内容仍为 OSS 对象/本地文件） ----
+
+// UpsertSnapshot 写入/更新快照索引行（按 info.ID 幂等）
+func (p *PersistMgr) UpsertSnapshot(info SnapshotInfo) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.UpsertSnapshot(info)
+}
+
+// ListSnapshots 列出快照索引（created_at 倒序）。connID 非空时按 conn_id 过滤。
+// 存储不可用（StoreNone）时返回 ErrStoreDisabled，由调用方回退 JSON 索引路径。
+func (p *PersistMgr) ListSnapshots(connID string) ([]SnapshotInfo, error) {
+	if p == nil {
+		return nil, ErrStoreDisabled
+	}
+	return p.store.ListSnapshots(connID)
+}
+
+// DeleteSnapshot 删除快照索引行（按 ID）
+func (p *PersistMgr) DeleteSnapshot(id string) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.DeleteSnapshot(id)
+}
+
+// ---- 通用 KV 元信息 ----
+
+// GetMeta 读取 KV 元信息；无记录时 ok=false
+func (p *PersistMgr) GetMeta(key string) (string, bool, error) {
+	if p == nil {
+		return "", false, ErrStoreDisabled
+	}
+	return p.store.GetMeta(key)
+}
+
+// SetMeta 写入/更新 KV 元信息（按 key 幂等）
+func (p *PersistMgr) SetMeta(key, value string) error {
+	if p == nil {
+		return ErrStoreDisabled
+	}
+	return p.store.SetMeta(key, value)
 }

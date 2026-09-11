@@ -30,6 +30,11 @@ interface AppState {
   lastTasks: Record<string, TaskConfig>
   setLastTask: (task: TaskConfig) => void
   clearLastTask: (type: string) => void
+
+  // 嵌入模式 conn 注入（EmbedShell 解析 ?conn= 后写入）：任务型视图（如 migrate）
+  // 初始化时消费一次，预选宿主指定的连接；非嵌入模式恒为空串
+  embedConn: string
+  setEmbedConn: (v: string) => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -91,6 +96,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => {
       const next = { ...s.lastTasks }
       delete next[type]
-      return { lastTasks: next }
+      return next
     }),
+
+  embedConn: "",
+  setEmbedConn: (v) => set({ embedConn: v }),
 }))

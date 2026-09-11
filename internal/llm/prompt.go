@@ -21,6 +21,8 @@ type promptTexts struct {
 	// agent 模式约束（agentRules 静态段 + agentScopeRule 动态段，%q=目标库）
 	agentRules     string
 	agentScopeRule string
+	// agentPgSchemaRule PG 系专用 schema 限定名规则（pgSchema=true 时追加）
+	agentPgSchemaRule string
 
 	// 已知表名录段（knownTablesHeader %s=目标库；knownTablesMore %d=总表数）
 	knownTablesHeader string
@@ -72,7 +74,11 @@ var promptTextsMap = map[string]promptTexts{
 			"需要工具时直接发起工具调用，不要输出解释文本；可一次并行调用多个 get_schema 批量获取多张表结构。\n" +
 			"禁止输出思考过程、推理过程或任何 <think>/<thinking>/<reasoning> 标签包裹的内容，直接给出结果。\n" +
 			"生成的 SQL 放在 ```sql 代码块中。危险语句（DROP/TRUNCATE/无 WHERE 的 DELETE 等）一律拒绝。\n",
-		agentScopeRule:    "\n你的工作范围默认限定在数据库 %q 内，优先只使用该库的表。\n",
+		agentScopeRule: "\n你的工作范围默认限定在数据库 %q 内，优先只使用该库的表。\n",
+		agentPgSchemaRule: "\n【PostgreSQL 专用规则：表名必须 schema.table 限定】\n" +
+			"- 生成 SQL 时表引用一律写成 schema.table 形式（如 public.users）；禁止使用 数据库名.表名 的 MySQL 风格（PG 表引用中不允许出现数据库名）。\n" +
+			"- 已知表名录与 list_tables 返回的表名均为 schema.table 限定名，生成 SQL 时直接照抄，不要再改写。\n" +
+			"- 省略 schema 前缀时仅按 search_path（通常 public）解析；跨 schema 查询必须显式写 schema 前缀。\n",
 		knownTablesHeader: "\n\n已知元数据（表结构需用 get_schema 查询）：\n- %s: ",
 		knownTablesMore:   "\n…共 %d 张表（其余请用 list_tables/get_schema 查询）",
 		actionExplain:     "请解释以下 SQL 的用途、逻辑与潜在风险，用中文简要分条说明，不要改写 SQL：\n",
@@ -90,8 +96,8 @@ var promptTextsMap = map[string]promptTexts{
 			"请把优化后的完整 SQL 放在 ```sql ... ``` 代码块中输出（代码块内只放 SQL 本身），再简要说明优化点；如无法优化请说明原因：\n",
 		actionGenerate:          "请根据以下需求处理：如果需要生成 SQL，必须把 SQL 放在 ```sql ... ``` 代码块中输出（代码块内只放 SQL 本身），代码块外不要输出任何其他内容；如果是关于表结构、字段、关联关系、索引等信息的咨询，直接回答即可，不要生成 SQL。需求：\n",
 		toolListDBsDesc:         "列出当前连接可访问的所有数据库（Oracle 为 schema 列表）。仅当确认需要跨库查询时才调用，默认应优先使用当前库。",
-		toolListTablesDesc:      "列出指定数据库中的全部表名。",
-		toolGetSchemaDesc:       "获取指定表的结构摘要（表注释 + 字段名/类型/可空/注释）。",
+		toolListTablesDesc:      "列出指定数据库中的全部表名。PostgreSQL 系返回 schema.table 限定名（如 public.users）。",
+		toolGetSchemaDesc:       "获取指定表的结构摘要（表注释 + 字段名/类型/可空/注释）。PostgreSQL 系的表名参数传 schema.table 限定名（如 public.users）。",
 		toolDBNotFound:          "数据库 %q 不存在。可用数据库：%s",
 		toolDBNotFoundSchema:    "数据库 %q 不存在。可用数据库：%s。请用正确的库名重试 get_schema。",
 		toolTableNotFound:       "表 %q 在库 %q 中不存在。该库可用表（前 50 个）：%s。请用正确的表名重试。",
@@ -125,7 +131,11 @@ Constraints:
 			"Call tools directly when needed without explanatory text; you may call multiple get_schema tools in parallel to fetch several table structures at once.\n" +
 			"Never output your thinking process, reasoning, or any <think>/<thinking>/<reasoning> tags; give the result directly.\n" +
 			"Put generated SQL inside a ```sql code block. Always refuse dangerous statements (DROP/TRUNCATE/DELETE without WHERE, etc.).\n",
-		agentScopeRule:    "\nYour working scope defaults to database %q; prefer using only tables in that database.\n",
+		agentScopeRule: "\nYour working scope defaults to database %q; prefer using only tables in that database.\n",
+		agentPgSchemaRule: "\n[PostgreSQL rule: tables must be qualified as schema.table]\n" +
+			"- Always write table references as schema.table (e.g. public.users); never use MySQL-style database.table qualification (the database name must not appear in table references).\n" +
+			"- Table names in the known metadata and from list_tables are already schema.table qualified — copy them into SQL as-is.\n" +
+			"- Omitting the schema prefix resolves via search_path (usually public); always use an explicit schema prefix for cross-schema queries.\n",
 		knownTablesHeader: "\n\nKnown metadata (query table structures with get_schema when needed):\n- %s: ",
 		knownTablesMore:   "\n…%d tables in total (use list_tables/get_schema for the rest)",
 		actionExplain:     "Explain the purpose, logic, and potential risks of the following SQL in brief English bullet points; do not rewrite the SQL:\n",
@@ -143,8 +153,8 @@ Constraints:
 			"Output the optimized complete SQL inside a ```sql ... ``` code block (only SQL inside), then briefly explain the optimizations; if it cannot be optimized, explain why:\n",
 		actionGenerate:          "Process the following request: if SQL needs to be generated, put it inside a ```sql ... ``` code block (only SQL inside) and output nothing else outside the block; if it is a question about table structure, columns, relationships, indexes, or other metadata, answer directly without generating SQL. Request:\n",
 		toolListDBsDesc:         "List all databases accessible on the current connection (schemas for Oracle). Only call this when you are sure a cross-database query is needed; by default prefer the current database.",
-		toolListTablesDesc:      "List all table names in the specified database.",
-		toolGetSchemaDesc:       "Get a structural summary of the specified table (table comment + column names/types/nullability/comments).",
+		toolListTablesDesc:      "List all table names in the specified database. PostgreSQL-like databases return schema.table qualified names (e.g. public.users).",
+		toolGetSchemaDesc:       "Get a structural summary of the specified table (table comment + column names/types/nullability/comments). For PostgreSQL-like databases pass the table as schema.table (e.g. public.users).",
 		toolDBNotFound:          "Database %q does not exist. Available databases: %s",
 		toolDBNotFoundSchema:    "Database %q does not exist. Available databases: %s. Please retry get_schema with the correct database name.",
 		toolTableNotFound:       "Table %q does not exist in database %q. Available tables in this database (first 50): %s. Please retry with the correct table name.",
@@ -384,8 +394,18 @@ const knownTablesMaxList = 30
 // AgentRules 返回 agent 模式的工具使用规则段（含目标库工作范围，按语言）。
 // 该段始终追加在 system prompt 末尾，保证 agent 工具调用规则不被自定义 prompt 覆盖。
 func AgentRules(lang, target string) string {
+	return AgentRulesFor(lang, target, false)
+}
+
+// AgentRulesFor 同 AgentRules；pgSchema=true（PG 系连接）时追加 schema 限定名规则：
+// 表引用必须 schema.table，禁止 database.table 的 MySQL 风格。
+func AgentRulesFor(lang, target string, pgSchema bool) string {
 	txt := textsFor(lang)
-	return txt.agentRules + fmt.Sprintf(txt.agentScopeRule, target)
+	s := txt.agentRules + fmt.Sprintf(txt.agentScopeRule, target)
+	if pgSchema {
+		s += txt.agentPgSchemaRule
+	}
+	return s
 }
 
 // KnownTables 渲染「已知表名录」段（目标库 + 表名列表，按语言）。

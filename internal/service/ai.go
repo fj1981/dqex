@@ -17,9 +17,9 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
+	"github.com/rs/xid"
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cylog"
-	"github.com/rs/xid"
 )
 
 // ---- AI 能力状态（Web/CLI 共用，APIKey 永不回显明文） ----
@@ -94,6 +94,7 @@ func maskSecret(s string) string {
 type AISession struct {
 	ID       string
 	Lang     string // 会话语言（创建时 UI 语言，决定 prompt/回复语言；历史会话不回溯）
+	User     string // 所属用户域（创建时从 ctx 注入；落盘 scope 与恢复校验用）
 	ConnKey  string
 	TabID    string // 所属 query tab（按 tab 隔离对话；空 = 不隔离，兼容旧调用）
 	DBName   string
@@ -149,8 +150,35 @@ func newAIMgr() *aiMgr {
 	}
 }
 
+// isPGLike 判断是否 PG 系连接（AI 层 schema 限定名适用口径，与 engine.GetTableTree 的
+// postgresql 分支一致：仅 type=postgresql 的连接存在库→schema→表三层）。
+func isPGLike(dbType string) bool {
+	return strings.EqualFold(strings.TrimSpace(dbType), "postgresql")
+}
+
+// qualifiedTableNames 返回库节点的模型可见表名列表：有 schema 层（PG 系）时输出
+// schema.table 限定名（按 schema 分组顺序去重），否则原样返回裸表名（MySQL/Oracle）。
+func qualifiedTableNames(db engine.DBTables) []string {
+	if len(db.Schemas) == 0 {
+		return db.Tables
+	}
+	out := make([]string, 0, len(db.Tables))
+	seen := make(map[string]bool, len(db.Tables))
+	for _, sc := range db.Schemas {
+		for _, t := range sc.Tables {
+			q := sc.Name + "." + t
+			if !seen[q] {
+				seen[q] = true
+				out = append(out, q)
+			}
+		}
+	}
+	return out
+}
+
 // aiPickTarget 拉库→表树并选定目标库，返回该库全部表名（未截断，供名录注入）。
 // 连接未配置库时遍历所有库（engine 已排除系统库）；dbName 为空回退连接配置的库。
+// PG 系返回 schema.table 限定名（见 qualifiedTableNames）。
 func (s *Service) aiPickTarget(ctx context.Context, conn *DBConnInfo, dbName string) (string, []string, error) {
 	if dbName == "" {
 		dbName = conn.DBName
@@ -183,7 +211,7 @@ func (s *Service) aiPickTarget(ctx context.Context, conn *DBConnInfo, dbName str
 	var tableNames []string
 	for _, db := range tree {
 		if db.Name == target {
-			tableNames = db.Tables
+			tableNames = qualifiedTableNames(db)
 			break
 		}
 	}
@@ -214,11 +242,13 @@ func (s *Service) AINewSession(ctx context.Context, lang, connKey, dbName, tabID
 	aiCfg.normalize()
 
 	// 拉取目标库表名录（不注入字段结构，模型经只读工具按需查，避免「答非所问」整段倾倒 schema）
+	// PG 系返回 schema.table 限定名，配合提示词的 schema 限定规则生成正确表引用
 	target, tableNames, err := s.aiPickTarget(ctx, conn, dbName)
 	if err != nil {
 		return nil, err
 	}
-	sys := s.agentSystemPrompt(lang, dialect, target, tableNames)
+	pgSchema := isPGLike(conn.Type)
+	sys := s.agentSystemPrompt(lang, dialect, target, tableNames, pgSchema)
 
 	sid := sessionID
 	if sid == "" {
@@ -227,6 +257,7 @@ func (s *Service) AINewSession(ctx context.Context, lang, connKey, dbName, tabID
 	ses := &AISession{
 		ID:       sid,
 		Lang:     llm.NormLang(lang),
+		User:     userFromCtx(ctx), // 所属用户域：落盘 scope 与内存会话归属校验依据
 		ConnKey:  connKey,
 		TabID:    tabID,
 		DBName:   dbName,
@@ -295,7 +326,7 @@ func (s *Service) persistSession(ses *AISession) {
 	}
 	rec := AISessionRecord{
 		ID:        ses.ID,
-		ConnID:    ses.ConnKey,
+		ConnID:    ses.ConnKey, // 裸连接 key（store 层统一计算作用域键并三列同写）
 		TabID:     ses.TabID,
 		DB:        ses.DBName,
 		Dialect:   ses.Dialect,
@@ -305,7 +336,7 @@ func (s *Service) persistSession(ses *AISession) {
 		CreatedAt: ses.Created.UnixMilli(),
 		UpdatedAt: ses.LastAt.UnixMilli(),
 	}
-	if err := s.persist.SaveAISession(rec); err != nil {
+	if err := s.persist.SaveAISession(ses.User, rec); err != nil {
 		cylog.Warnf("[ai] 会话落盘失败 session=%s err=%v", ses.ID, err)
 	}
 }
@@ -347,7 +378,7 @@ func (s *Service) restoreSession(ctx context.Context, sessionID, connKey, dbName
 	if s.persist == nil || sessionID == "" {
 		return nil
 	}
-	rec, ok := s.persist.LoadAISession(sessionID)
+	rec, ok := s.persist.LoadAISession(userFromCtx(ctx), sessionID)
 	if !ok {
 		return nil
 	}
@@ -356,6 +387,8 @@ func (s *Service) restoreSession(ctx context.Context, sessionID, connKey, dbName
 		return nil
 	}
 	history := anyToMessages(rec.Messages)
+	// 会话 User 取当前请求用户（rec 归属已经 LoadAISession 按当前用户校验通过），
+	// 保证内存会话的 User 与当前请求一致，而非沿用落盘时的用户域
 	ses, err := s.AINewSession(ctx, rec.Lang, connKey, dbName, tabID, history, sessionID)
 	if err != nil {
 		s.aiDebugf("[ai] 从库恢复会话失败 session=%s err=%v", sessionID, err)
@@ -401,18 +434,67 @@ func (s *Service) AIChatStreamWithFallback(ctx context.Context, lang, sessionID,
 			s.aiDebugf("[ai] 会话失效透明重建 session=%s conn=%s db=%s tab=%s historyMsgs=%d", sessionID, connID, db, tabID, len(history))
 			// 优先从库恢复（进程重启/会话被回收后，仍能延续多轮上下文）；
 			// 库中无记录时退回前端回传的 history 回放重建。
+			rebuildID := sessionID
 			if s.restoreSession(ctx, sessionID, connID, db, tabID) == nil {
-				if _, nerr := s.AINewSession(ctx, lang, connID, db, tabID, history, sessionID); nerr != nil {
-					s.aiDebugf("[ai] 透明重建失败 session=%s err=%v", sessionID, nerr)
+				// 复用原 ID 前判定归属三态：仅「存在但归属其他用户」改用新 ID 重建，
+				// 避免 AINewSession 的 upsert 覆盖他人会话；「彻底不存在」（内存无 +
+				// 落盘无，含 StoreNone/会话被清理场景）沿用原 ID 透明重建——upsert
+				// 不会覆盖任何人，前端无需感知新 ID（SSE done 不回传 sessionID）。
+				if s.aiSessionOwnership(userFromCtx(ctx), sessionID) == aiSessionOwnedOther {
+					s.aiDebugf("[ai] 会话归属其他用户，改用新 ID 重建 session=%s", sessionID)
+					rebuildID = ""
+				}
+				if nses, nerr := s.AINewSession(ctx, lang, connID, db, tabID, history, rebuildID); nerr != nil {
+					s.aiDebugf("[ai] 透明重建失败 session=%s err=%v", rebuildID, nerr)
+				} else if rebuildID == "" {
+					rebuildID = nses.ID // 新 ID 重建成功：以新 ID 继续本轮对话
 				}
 			}
-			// 用原 sessionID 重跑（历史已回放，task 为当前问题）
-			r2, e2 := s.aiChat(ctx, sessionID, action, task, msgID, onDelta, onTool)
+			// 用重建后的会话 ID 重跑（历史已回放，task 为当前问题）
+			r2, e2 := s.aiChat(ctx, rebuildID, action, task, msgID, onDelta, onTool)
 			return r2.usage, r2.schemaVerified, e2
 		}
 		return r.usage, r.schemaVerified, err
 	}
 	return r.usage, r.schemaVerified, nil
+}
+
+// aiSessionOwner 会话归属三态（透明重建复用原 sessionID 前判定）。
+type aiSessionOwner int
+
+const (
+	aiSessionAbsent     aiSessionOwner = iota // 彻底不存在（内存无 + 落盘无）
+	aiSessionOwnedSelf                        // 归属当前用户（内存或落盘命中且归属一致）
+	aiSessionOwnedOther                       // 存在但归属其他用户（内存或落盘）
+)
+
+// aiSessionOwnership 判定指定会话的归属三态：内存会话命中即按其 User 归属判定；
+// 内存无时查落盘——store 层 LoadAISession 按当前用户域做归属校验（命中 = 归属
+// 当前用户），再经 AISessionExists 做跨用户域存在性判定（存在 = 归属其他用户）。
+// 透明重建复用原 sessionID 前调用：仅「存在但归属其他用户」需改用新 ID，避免
+// upsert 覆盖他人会话；「彻底不存在」沿用原 ID（upsert 不会覆盖任何人）。
+func (s *Service) aiSessionOwnership(user, sessionID string) aiSessionOwner {
+	user = NormalizeUser(user)
+	m := s.ai
+	m.mu.Lock()
+	ses, ok := m.sessions[sessionID]
+	m.mu.Unlock()
+	if ok {
+		if NormalizeUser(ses.User) == user {
+			return aiSessionOwnedSelf
+		}
+		return aiSessionOwnedOther
+	}
+	if s.persist != nil {
+		// 落盘归属校验由 store 层按 user 列完成（不属于该用户域时 ok=false）
+		if _, found := s.persist.LoadAISession(user, sessionID); found {
+			return aiSessionOwnedSelf
+		}
+		if s.persist.AISessionExists(sessionID) {
+			return aiSessionOwnedOther // 落盘存在但归属其他用户域
+		}
+	}
+	return aiSessionAbsent
 }
 
 // isSessionNotFound 判断错误是否为「会话不存在/已过期」。
@@ -454,7 +536,7 @@ func findMsgIDUser(msgs []*schema.Message, msgID string) (idx int, answered bool
 }
 
 func (s *Service) aiChat(ctx context.Context, sessionID, action, task, msgID string, onDelta func(string), onTool func(string, string)) (aiChatResult, error) {
-	ses, err := s.getSession(sessionID)
+	ses, err := s.getSession(userFromCtx(ctx), sessionID)
 	if err != nil {
 		return aiChatResult{}, err
 	}
@@ -629,9 +711,10 @@ func stripThinking(content string) string {
 // agentSystemPrompt 构建 agent 模式 system prompt：内置/自定义模板 + 工具使用规则 + 库/表名录。
 // 用户自定义 prompt（若配置）作为模板（支持 {dialect}/{schema} 占位符），规则与名录始终追加，
 // 保证 agent 模式必要的工具调用规则不被自定义 prompt 覆盖或遗漏；模板缺失 {schema} 时追加到末尾。
-func (s *Service) agentSystemPrompt(lang, dialect, target string, tableNames []string) string {
+func (s *Service) agentSystemPrompt(lang, dialect, target string, tableNames []string, pgSchema bool) string {
 	var b strings.Builder
-	b.WriteString(llm.AgentRules(lang, target))
+	// pgSchema=true（PG 系）时追加 schema.table 限定名规则，禁止 MySQL 风格的 库.表 引用
+	b.WriteString(llm.AgentRulesFor(lang, target, pgSchema))
 	b.WriteString(llm.KnownTables(lang, target, tableNames))
 	return llm.RenderSystemPrompt(lang, s.cfg.AI.SystemPrompt, dialect, b.String())
 }
@@ -646,7 +729,7 @@ type agentToolArgsListTables struct {
 // agentToolArgsSchema get_schema 工具参数。
 type agentToolArgsSchema struct {
 	DB    string `json:"db" jsonschema:"description=数据库名（Oracle 为 schema 名）,required"`
-	Table string `json:"table" jsonschema:"description=表名,required"`
+	Table string `json:"table" jsonschema:"description=表名（PG 系传 schema.table 限定名，如 public.users）,required"`
 }
 
 // buildAgentTools 构建三个只读探索工具（闭包捕获会话，用于工具事件透传）。
@@ -689,7 +772,8 @@ func (s *Service) buildAgentTools(conn DBConnInfo, maxSchemaChars int, ses *AISe
 			}
 			for _, db := range tree {
 				if strings.EqualFold(db.Name, args.DB) {
-					return strings.Join(db.Tables, "\n"), nil
+					// PG 系返回 schema.table 限定名，模型可直接照抄进 SQL
+					return strings.Join(qualifiedTableNames(db), "\n"), nil
 				}
 			}
 			// 库名拼错：返回可用库列表（不返回 error，让模型纠正后重试）
@@ -729,18 +813,28 @@ func (s *Service) buildAgentTools(conn DBConnInfo, maxSchemaChars int, ses *AISe
 			sub.DBName = realDB
 			meta, err := engine.GetTableMeta(sub, args.Table)
 			if err != nil {
-				// 表不存在：返回该库可用表列表，让模型纠正表名（不返回 error）
+				// 表不存在：返回该库可用表列表（PG 系为 schema.table 限定名），让模型纠正表名（不返回 error）
 				var tbls []string
 				for _, db := range tree {
 					if strings.EqualFold(db.Name, realDB) {
-						tbls = db.Tables
+						tbls = qualifiedTableNames(db)
 						break
 					}
 				}
 				return fmt.Sprintf(tt.TableNotFound,
 					args.Table, realDB, strings.Join(tbls, ", ")), nil
 			}
-			ti := llm.TableInfo{Schema: realDB, Table: args.Table, Comment: meta.Comment}
+			// 渲染表头归属：PG 系按 schema.table 拆分（裸表名缺省 public，与 cydb 解析口径一致）；
+			// MySQL/Oracle 无 schema 层，沿用库名
+			schemaName, tableName := realDB, args.Table
+			if isPGLike(conn.Type) {
+				schemaName = "public"
+				tableName = args.Table
+				if sch, tbl, ok := strings.Cut(args.Table, "."); ok && sch != "" && tbl != "" {
+					schemaName, tableName = sch, tbl
+				}
+			}
+			ti := llm.TableInfo{Schema: schemaName, Table: tableName, Comment: meta.Comment}
 			for _, col := range meta.Columns {
 				ti.Columns = append(ti.Columns, llm.ColumnInfo{
 					Name:     col.Name,
@@ -769,60 +863,84 @@ func (s *Service) AIProcessUsage() llm.Usage {
 	return m.procUsage
 }
 
-// AISessionUsage 返回会话累计 token 消耗。
-func (s *Service) AISessionUsage(sessionID string) (llm.Usage, bool) {
+// AISessionUsage 返回当前用户某会话的累计 token 消耗（他人会话按不存在处理）。
+func (s *Service) AISessionUsage(user, sessionID string) (llm.Usage, bool) {
 	m := s.ai
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	ses, ok := m.sessions[sessionID]
-	if !ok {
+	if !ok || NormalizeUser(ses.User) != NormalizeUser(user) {
 		return llm.Usage{}, false
 	}
 	return ses.Usage, true
 }
 
 // AIResetSession 清空会话消息（重建 system prompt）与累计 token。
-func (s *Service) AIResetSession(sessionID string) error {
+// 内存会话不存在（空闲回收/进程重启）时回退清空落盘记录的消息并幂等成功：
+// 否则前端重置只清了 UI，重进页面会从持久化恢复出旧对话。
+func (s *Service) AIResetSession(user, sessionID string) error {
+	user = NormalizeUser(user)
 	m := s.ai
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	ses, ok := m.sessions[sessionID]
-	if !ok {
-		return cyginWrapAI(newSvcErr(0, svcAISessionNotFound, sessionID))
+	// 归属校验：他人会话按不存在处理（回退清空落盘路径同样有归属校验）
+	if ok && NormalizeUser(ses.User) != user {
+		ok = false
 	}
-	// 重建名录 system，复用已有 Agent（model + tools 不变）
-	ses.mu.Lock()
-	ses.Messages = []*schema.Message{schema.SystemMessage(ses.Sys)}
-	ses.Usage = llm.Usage{}
-	ses.LastAt = time.Now()
-	ses.schemaQueried.Store(false)
-	ses.mu.Unlock()
-	s.persistSession(ses)
+	m.mu.Unlock()
+	if ok {
+		// 重建名录 system，复用已有 Agent（model + tools 不变）
+		ses.mu.Lock()
+		ses.Messages = []*schema.Message{schema.SystemMessage(ses.Sys)}
+		ses.Usage = llm.Usage{}
+		ses.LastAt = time.Now()
+		ses.schemaQueried.Store(false)
+		ses.mu.Unlock()
+		s.persistSession(ses)
+		return nil
+	}
+	// 内存无此会话：清空落盘记录的消息（记录保留，重进页面恢复出空对话）
+	if s.persist != nil {
+		if rec, found := s.persist.LoadAISession(user, sessionID); found {
+			rec.Messages = []any{}
+			rec.UpdatedAt = time.Now().UnixMilli()
+			if err := s.persist.SaveAISession(user, rec); err != nil {
+				cylog.Warnf("[ai] 重置清空落盘会话失败 session=%s err=%v", sessionID, err)
+			}
+		}
+	}
 	return nil
 }
 
-// AIDeleteSession 删除会话。
-func (s *Service) AIDeleteSession(sessionID string) error {
+// AIDeleteSession 删除会话（校验归属：不存在或不属于当前用户均按会话不存在处理）。
+func (s *Service) AIDeleteSession(user, sessionID string) error {
+	user = NormalizeUser(user)
 	m := s.ai
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.sessions[sessionID]; !ok {
+	ses, ok := m.sessions[sessionID]
+	if ok && NormalizeUser(ses.User) != user {
+		ok = false
+	}
+	if !ok {
+		m.mu.Unlock()
 		return cyginWrapAI(newSvcErr(0, svcAISessionNotFound, sessionID))
 	}
 	delete(m.sessions, sessionID)
+	m.mu.Unlock()
 	// 同步删除落盘记录
 	if s.persist != nil {
-		_ = s.persist.DeleteAISession(sessionID)
+		_ = s.persist.DeleteAISession(user, sessionID)
 	}
 	return nil
 }
 
-func (s *Service) getSession(sessionID string) (*AISession, error) {
+// getSession 取当前用户的内存会话；不存在或不属于该用户（会话按用户域隔离）均按过期处理。
+func (s *Service) getSession(user, sessionID string) (*AISession, error) {
 	m := s.ai
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	ses, ok := m.sessions[sessionID]
-	if !ok {
+	if !ok || NormalizeUser(ses.User) != NormalizeUser(user) {
 		return nil, cyginWrapAI(newSvcErr(0, svcAISessionExpired))
 	}
 	return ses, nil
@@ -830,21 +948,21 @@ func (s *Service) getSession(sessionID string) (*AISession, error) {
 
 // ---- AI 会话持久化对外接口（供 Web 层） ----
 
-// AIListSessions 列出某连接（可选指定 tab）的会话（新→旧，仅元信息，供前端恢复历史对话选择）。
-func (s *Service) AIListSessions(connID, tabID string) []AISessionRecord {
+// AIListSessions 列出某用户域下某连接（可选指定 tab）的会话（新→旧，仅元信息，供前端恢复历史对话选择）。
+func (s *Service) AIListSessions(user, connID, tabID string) []AISessionRecord {
 	if s.persist == nil {
 		return []AISessionRecord{}
 	}
-	return s.persist.ListAISessions(connID, tabID)
+	return s.persist.ListAISessions(user, connID, tabID)
 }
 
 // AILoadSessionHistory 读取某会话的对话历史（role/content 序列，供前端恢复展示）。
 // 返回 nil 表示无记录。system 消息与空内容消息已过滤，仅返回 user/assistant 轮次。
-func (s *Service) AILoadSessionHistory(sessionID string) []AISessionRecord {
+func (s *Service) AILoadSessionHistory(user, sessionID string) []AISessionRecord {
 	if s.persist == nil {
 		return nil
 	}
-	rec, ok := s.persist.LoadAISession(sessionID)
+	rec, ok := s.persist.LoadAISession(user, sessionID)
 	if !ok {
 		return nil
 	}
@@ -852,15 +970,17 @@ func (s *Service) AILoadSessionHistory(sessionID string) []AISessionRecord {
 }
 
 // AIDeleteSessionByTab 删除某连接下指定 tab 的会话（tab 关闭时调用），同步清理内存会话。
-func (s *Service) AIDeleteSessionByTab(connID, tabID string) {
+func (s *Service) AIDeleteSessionByTab(user, connID, tabID string) {
 	if s.persist != nil {
-		_ = s.persist.DeleteAISessionByTab(connID, tabID)
+		_ = s.persist.DeleteAISessionByTab(user, connID, tabID)
 	}
-	// 同步清理内存中该 tab 的会话（若有）
+	// 同步清理内存中该 tab 的会话（若有）。仅清理归属当前用户域的会话，
+	// 与文件内 getSession/AIResetSession 等既有归属校验同口径
+	u := NormalizeUser(user)
 	m := s.ai
 	m.mu.Lock()
 	for id, ses := range m.sessions {
-		if ses.ConnKey == connID && ses.TabID == tabID {
+		if ses.ConnKey == connID && ses.TabID == tabID && NormalizeUser(ses.User) == u {
 			delete(m.sessions, id)
 		}
 	}

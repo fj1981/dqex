@@ -7,8 +7,8 @@ import (
 
 	. "github.com/fj1981/dqex/internal/service"
 
-	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/spf13/cobra"
+	"github.com/fj1981/infrakit/pkg/cygin"
 )
 
 var migrateSrc, migrateTarget connFlags

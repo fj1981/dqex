@@ -31,6 +31,8 @@ export default function SnapshotView() {
 
   const [createOpen, setCreateOpen] = useState(false)
   const [search, setSearch] = useState("")
+  // 连接/环境过滤（"" = 全部）：服务端过滤（?connId=），避免多环境快照混在一起难以选择
+  const [connFilter, setConnFilter] = useState("")
 
   // 对比态
   const [comparing, setComparing] = useState(false)
@@ -43,23 +45,43 @@ export default function SnapshotView() {
 
   // 对比目标选择
   const [targetConn, setTargetConn] = useState("")
+  // 嵌入模式 conn 注入（EmbedShell 解析 ?conn= 后写入 store，非嵌入模式恒为空）：
+  // 预选为对比目标连接（宿主语义：以宿主指定环境为对比基准的"当前侧"），
+  // 同时把列表默认过滤为宿主指定环境（tl-env 嵌入语义：按环境隔离快照，避免多环境混排）
+  const embedConn = useAppStore((s) => s.embedConn)
+  const embedApplied = useRef(false)
+  useEffect(() => {
+    if (!embedConn || embedApplied.current) return
+    embedApplied.current = true
+    setTargetConn(embedConn)
+    setConnFilter(embedConn)
+  }, [embedConn])
   // 快照库 → 目标库 映射（默认同名，仅在不同时设置）
   const [dbMapping, setDBMapping] = useState<Record<string, string>>({})
   // 目标连接下的库列表（用于快照对比的库映射下拉）
   const [targetDBOptions, setTargetDBOptions] = useState<string[]>([])
 
+  // 列表加载：连接过滤下推服务端（?connId=），过滤变化即重新请求；
+  // 嵌入模式 embedConn 注入 connFilter 后会自动触发带过滤的重载
   const loadList = useCallback(() => {
     setLoadingList(true)
     api
-      .listSnapshots()
+      .listSnapshots(connFilter || undefined)
       .then((list) => setSnapshots(list ?? []))
       .catch((e: Error) => toast.error(t("snapshot.loadFailed", { err: e.message })))
       .finally(() => setLoadingList(false))
-  }, [t])
+  }, [t, connFilter])
 
   useEffect(() => {
     loadList()
   }, [loadList])
+
+  // 切换连接过滤后原选中快照可能不在新列表中：清空选中与详情，
+  // 列表加载完成后由默认选中逻辑落入新过滤的第一条
+  useEffect(() => {
+    setSelectedId(null)
+    setDetail(null)
+  }, [connFilter])
 
   // URL 参数消费（running=任务详情）
   useEffect(() => {
@@ -112,15 +134,6 @@ export default function SnapshotView() {
   )
 
   useEffect(() => {
-    if (runningTaskID) return // 通过 URL 进入时详情由用户后续点击
-    const first = snapshots[0]
-    if (first && !selectedId) {
-      setSelectedId(first.id)
-      setTargetConn(defaultTargetConn(first))
-    }
-  }, [snapshots, selectedId, runningTaskID, defaultTargetConn])
-
-  useEffect(() => {
     if (selectedId && !runningTaskID && !detail) loadDetail(selectedId)
   }, [selectedId, runningTaskID, detail, loadDetail])
 
@@ -129,7 +142,22 @@ export default function SnapshotView() {
     [snapshots, selectedId],
   )
 
-  // 搜索过滤：名称/数据库/连接名模糊匹配
+  // 连接/环境过滤选项：已注册连接 ∪ 快照来源连接（按 connId 去重，兼容已删除连接的历史快照；
+  // 标签优先用当前连接名，其次快照记录的来源标签）
+  const connOptions = useMemo(() => {
+    const seen = new Set<string>()
+    const opts: { id: string; label: string }[] = []
+    const push = (id: string, label: string) => {
+      if (!id || seen.has(id)) return
+      seen.add(id)
+      opts.push({ id, label: label || id })
+    }
+    for (const c of connections) push(c.id, c.name)
+    for (const s of snapshots) push(s.connId, s.connLabel)
+    return opts
+  }, [connections, snapshots])
+
+  // 过滤：连接/环境已由服务端过滤（?connId=），此处仅做关键词（名称/数据库/连接名模糊匹配）
   const filteredSnapshots = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return snapshots
@@ -140,6 +168,16 @@ export default function SnapshotView() {
         s.connLabel.toLowerCase().includes(q),
     )
   }, [snapshots, search])
+
+  // 默认选中过滤后列表的第一条（过滤为空则不选中；已选中时不抢占）
+  useEffect(() => {
+    if (runningTaskID) return // 通过 URL 进入时详情由用户后续点击
+    const first = filteredSnapshots[0]
+    if (first && !selectedId) {
+      setSelectedId(first.id)
+      setTargetConn(defaultTargetConn(first))
+    }
+  }, [filteredSnapshots, selectedId, runningTaskID, defaultTargetConn])
 
   // 加载目标连接下的库列表（用于快照对比的库映射下拉）
   useEffect(() => {
@@ -251,7 +289,26 @@ export default function SnapshotView() {
       <div className="flex min-h-0 flex-1 gap-4 px-6 pb-6">
         {/* 左侧快照列表 */}
         <Card className="flex min-h-0 w-72 shrink-0 flex-col">
-          <div className="border-b p-3">
+          <div className="space-y-2 border-b p-3">
+            {/* 连接/环境过滤：嵌入模式默认锁定宿主环境（embedConn 注入），standalone 默认全部 */}
+            <Select
+              value={connFilter || "all"}
+              onValueChange={(v) => setConnFilter(v === "all" ? "" : v)}
+            >
+              <SelectTrigger className="h-8 text-xs" title={t("snapshot.connFilter")}>
+                <SelectValue placeholder={t("snapshot.connFilterAll")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-xs">
+                  {t("snapshot.connFilterAll")}
+                </SelectItem>
+                {connOptions.map((c) => (
+                  <SelectItem key={c.id} value={c.id} className="text-xs">
+                    {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Input
               placeholder={t("snapshot.searchPlaceholder")}
               value={search}
@@ -286,7 +343,10 @@ export default function SnapshotView() {
                 </div>
                 <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
                   <DbTypeIcon type={s.dbType} className="h-3.5 w-3.5 text-[7px]" />
-                  <span className="truncate">{s.dbNames?.length ? s.dbNames.join(", ") : s.dbName}</span>
+                  <span className="truncate">
+                    {s.connLabel ? `${s.connLabel} · ` : ""}
+                    {s.dbNames?.length ? s.dbNames.join(", ") : s.dbName}
+                  </span>
                 </div>
                 <div className="mt-1 text-[11px] text-muted-foreground">
                   {t("snapshot.tableCount", { n: s.tableCount })} · {s.createdAt ? new Date(s.createdAt * 1000).toLocaleString() : ""}

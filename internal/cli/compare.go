@@ -12,8 +12,8 @@ import (
 	"github.com/fj1981/dqex/internal/engine"
 	. "github.com/fj1981/dqex/internal/service"
 
-	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/spf13/cobra"
+	"github.com/fj1981/infrakit/pkg/cygin"
 )
 
 var compareSrc, compareTarget connFlags

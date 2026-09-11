@@ -1,11 +1,22 @@
 package store
 
-import "path/filepath"
+import (
+	"path/filepath"
+
+	"github.com/fj1981/infrakit/pkg/cydb/def"
+)
 
 // OpenSQLite 打开（或创建）SQLite 存储并执行自动迁移，返回 Store 接口。
 // dbPath 为 SQLite 数据库文件路径。
 func OpenSQLite(dbPath string) (Store, error) {
-	return NewSQLiteStore(dbPath)
+	return newSQLStore(&def.DBConnection{Type: "sqlite", Path: sqliteDSN(dbPath)})
+}
+
+// OpenSQL 按连接配置打开 SQL 存储并执行自动迁移（库模式 WithStoreConn 用）。
+// 经 cydb 跨方言能力支持 sqlite/mysql/postgresql/oracle；宿主可复用自己的
+// MySQL 实例（独立 database，表自动迁移创建），元数据不落本地文件。
+func OpenSQL(conn *def.DBConnection) (Store, error) {
+	return newSQLStore(conn)
 }
 
 // DBFileName SQLite 数据库文件名（位于数据根目录）。
@@ -75,56 +86,93 @@ type Store interface {
 	// ---- SQL 执行历史 ----
 
 	// AddSQLHistory 追加一条 SQL 执行历史（每连接环形保留最近 N 条）。
-	AddSQLHistory(item SQLHistoryItem) error
-	// ListSQLHistory 返回某连接的历史（新→旧）。
-	ListSQLHistory(connID string) ([]SQLHistoryItem, error)
-	// ClearSQLHistory 清空某连接的历史。
-	ClearSQLHistory(connID string) error
+	// user 为所属用户域；item.ConnID 为裸连接 key（三列同写：user/conn_key/conn_id 作用域键）。
+	AddSQLHistory(user string, item SQLHistoryItem) error
+	// ListSQLHistory 返回某用户域下某连接的历史（新→旧）。
+	// connID 为裸连接 key（user 列 + conn_key 双条件过滤）；为空时仅按 user 列过滤
+	// （该用户域全部连接）。
+	ListSQLHistory(user, connID string) ([]SQLHistoryItem, error)
+	// ClearSQLHistory 清空某用户域下某连接的历史（connID 为空=该用户域全部连接）。
+	ClearSQLHistory(user, connID string) error
 
-	// ---- SQL 收藏（全局共享，conn_id/db 仅作来源标记） ----
+	// ---- SQL 收藏（按用户域隔离；conn_id/db 仅作来源标记） ----
 
-	// AddFavorite 新增一条收藏。
-	AddFavorite(f *SQLFavorite) error
-	// ListFavorites 返回全部收藏（全局共享，不按连接隔离；新→旧）。
-	ListFavorites() ([]*SQLFavorite, error)
-	// DeleteFavorite 删除收藏（按全局唯一 id 定位；无 conn_id 隔离，跨连接可见）。
-	DeleteFavorite(id string) error
-	// RenameFavorite 重命名收藏（按全局唯一 id 定位）。
-	RenameFavorite(id, title string) error
+	// AddFavorite 新增一条收藏（user 为所属用户域；f.ConnID 为裸连接 key，三列同写）。
+	AddFavorite(user string, f *SQLFavorite) error
+	// ListFavorites 返回该用户域的全部收藏（新→旧）。
+	ListFavorites(user string) ([]*SQLFavorite, error)
+	// DeleteFavorite 删除收藏（按 id 定位，仅限本用户域）。
+	DeleteFavorite(user, id string) error
+	// RenameFavorite 重命名收藏（按 id 定位，仅限本用户域）。
+	RenameFavorite(user, id, title string) error
 
 	// ---- SQL 审计（只增不删） ----
 
 	// AppendSQLAudit 追加一条 SQL 审计日志（只追加，不提供删除）。
-	AppendSQLAudit(entry SQLAuditEntry) error
-	// ListSQLAudit 读取审计日志（倒序，分页）。connID 为空返回全部连接。
-	ListSQLAudit(connID string, limit, offset int) ([]SQLAuditEntry, error)
+	// user 为所属用户域；entry.ConnID 为裸连接 key（三列同写）。
+	AppendSQLAudit(user string, entry SQLAuditEntry) error
+	// ListSQLAudit 读取审计日志（倒序，分页）。connID 为裸连接 key（user 列 + conn_key
+	// 双条件过滤）；为空时仅按 user 列过滤（该用户域全部连接，跨用户隔离由 user 列保证）。
+	ListSQLAudit(user, connID string, limit, offset int) ([]SQLAuditEntry, error)
 
 	// ---- 查询工作区（SQL 终端 Tab 布局，按连接持久化） ----
 
-	// SaveWorkspace 保存某连接的工作区（整体覆盖）。
-	SaveWorkspace(connID string, state WorkspaceState) error
-	// LoadWorkspace 读取某连接的工作区；无记录时 ok=false。
-	LoadWorkspace(connID string) (WorkspaceState, bool)
-	// DeleteWorkspace 删除某连接的工作区。
-	DeleteWorkspace(connID string) error
+	// SaveWorkspace 保存某用户域下某连接的工作区（整体覆盖）。
+	// connID 为裸连接 key（conn_id 物理列存作用域键作主键，conn_key 存裸 key）；
+	// user 为所属用户域。
+	SaveWorkspace(user, connID string, state WorkspaceState) error
+	// LoadWorkspace 读取某用户域下某连接的工作区（user 列 + conn_key 双条件）；无记录时 ok=false。
+	LoadWorkspace(user, connID string) (WorkspaceState, bool)
+	// DeleteWorkspace 删除某用户域下某连接的工作区（user 列 + conn_key 双条件）。
+	DeleteWorkspace(user, connID string) error
+	// DeleteWorkspacesByConnAllUsers 跨用户域删除某连接的全部工作区（连接删除级联清理，
+	// connID 为裸连接 key，按 conn_key 列等值删除所有用户域的行）。
+	DeleteWorkspacesByConnAllUsers(connID string) error
 
 	// ---- AI 会话（对话历史，按连接持久化） ----
 
 	// SaveAISession 保存/更新一个 AI 会话（整组消息覆盖写）。
-	SaveAISession(rec AISessionRecord) error
-	// LoadAISession 读取指定会话；无记录时 ok=false。
-	LoadAISession(sessionID string) (AISessionRecord, bool)
-	// ListAISessions 列出某连接（可选指定 tab）的会话（新→旧，仅元信息不含消息，供前端恢复选择）。
-	ListAISessions(connID, tabID string) ([]AISessionRecord, error)
-	// DeleteAISession 删除指定会话。
-	DeleteAISession(sessionID string) error
-	// DeleteAISessionByTab 删除某连接下指定 tab 的会话（tab 关闭时调用）。
-	DeleteAISessionByTab(connID, tabID string) error
-	// DeleteAISessionsByConn 删除某连接的全部会话。
-	DeleteAISessionsByConn(connID string) error
+	// user 为所属用户域；rec.ConnID 为裸连接 key（三列同写：user/conn_key/conn_id 作用域键）。
+	SaveAISession(user string, rec AISessionRecord) error
+	// LoadAISession 读取指定会话（user 为所属用户域，按 user 列归属校验，不属于该用户域
+	// 视为不存在）；无记录时 ok=false。rec.ConnID 还原为裸连接 key。
+	LoadAISession(user, sessionID string) (AISessionRecord, bool)
+	// AISessionExists 判断会话 ID 是否已落盘（跨用户域存在性判定，不含归属校验），
+	// 供透明重建复用原 ID 前区分「彻底不存在」与「存在但归属其他用户域」。
+	AISessionExists(sessionID string) bool
+	// ListAISessions 列出某用户域下某连接（可选指定 tab）的会话（新→旧，仅元信息不含
+	// 消息，供前端恢复选择）。connID 为裸连接 key，按 user 列 + conn_key 双条件过滤。
+	ListAISessions(user, connID, tabID string) ([]AISessionRecord, error)
+	// DeleteAISession 删除指定会话（user 为所属用户域，按 user 列 + 主键双条件删除）。
+	DeleteAISession(user, sessionID string) error
+	// DeleteAISessionByTab 删除某用户域下某连接指定 tab 的会话（tab 关闭时调用）。
+	DeleteAISessionByTab(user, connID, tabID string) error
+	// DeleteAISessionsByConn 删除某用户域下某连接的全部会话。
+	DeleteAISessionsByConn(user, connID string) error
+	// DeleteAISessionsByConnAllUsers 跨用户域删除某连接的全部会话（连接删除级联清理，
+	// connID 为裸连接 key，按 conn_key 列等值删除所有用户域的会话）。
+	DeleteAISessionsByConnAllUsers(connID string) error
 	// PurgeExcessAISessions 清理超额会话：当某连接会话数 > maxPerConn 时，
 	// 删除其中「超过 keepDays 天未活动」的会话（从最旧开始），返回删除条数。
 	PurgeExcessAISessions(maxPerConn int, keepDays int) (int64, error)
+
+	// ---- 快照索引（仅索引元数据；快照内容仍为 OSS 对象/本地文件） ----
+
+	// UpsertSnapshot 写入/更新快照索引行（按 info.ID 主键幂等；存量 JSON 索引迁移与
+	// 新建快照共用）。conn_id/created_at 同步写入真实列供 SQL 过滤。
+	UpsertSnapshot(info SnapshotInfo) error
+	// ListSnapshots 列出快照索引（created_at 倒序）。connID 非空时按 conn_id 列等值过滤
+	// （连接 ID 即创建时连接，库模式下虚拟连接为 env:<id>，用于按环境隔离）。
+	ListSnapshots(connID string) ([]SnapshotInfo, error)
+	// DeleteSnapshot 删除快照索引行（按主键 ID）。
+	DeleteSnapshot(id string) error
+
+	// ---- 通用 KV 元信息（迁移标记等进程间共享状态） ----
+
+	// GetMeta 读取 KV 元信息；无记录时 ok=false。
+	GetMeta(key string) (string, bool, error)
+	// SetMeta 写入/更新 KV 元信息（按 key 幂等）。
+	SetMeta(key, value string) error
 }
 
 // maxSQLHistoryPerConn 每个连接保留的 SQL 历史条数。

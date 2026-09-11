@@ -27,16 +27,18 @@ const (
 func nowMillis() int64 { return time.Now().UnixMilli() }
 
 // appendSQLAudit 将 SQL 执行记录追加写入审计（只增不删）。失败仅记录日志，不阻塞主流程。
-// 超长字段截断（防单条过大）。
-func (s *Service) appendSQLAudit(entry SQLAuditEntry) {
+// 超长字段截断（防单条过大）。按请求用户域隔离，store 层统一计算作用域键并三列同写。
+func (s *Service) appendSQLAudit(ctx context.Context, entry SQLAuditEntry) {
 	// StoreNone 库模式无持久化存储：跳过落盘（审计语义随宿主 ConnHooks/自身体系承接）
 	if s.persist == nil {
 		return
 	}
+	// 按请求用户域隔离（entry.ConnID 保持裸连接 key，store 层统一计算作用域键）
+	user := userFromCtx(ctx)
 	// 超长字段截断，防止单条审计过大
 	entry.SQL = truncateAuditString(entry.SQL)
 	entry.ErrorMsg = truncateAuditString(entry.ErrorMsg)
-	if err := s.persist.AppendSQLAudit(entry); err != nil {
+	if err := s.persist.AppendSQLAudit(user, entry); err != nil {
 		cylog.Warnf("写入 SQL 审计日志失败: %v", err)
 	}
 }
@@ -65,11 +67,11 @@ func (s *Service) UpdateTableCell(ctx context.Context, connKey, dbName string, p
 	affected, err := engine.RunParamUpdate(ctx, cli, p)
 	if err != nil {
 		// 失败也记审计（真实参数），便于排查失败的改动尝试
-		s.appendSQLAudit(s.newCellAuditEntry(connKey, dbName, p, 0, "error", err.Error()))
+		s.appendSQLAudit(ctx, s.newCellAuditEntry(connKey, dbName, p, 0, "error", err.Error()))
 		return 0, err
 	}
 	// 单元格编辑：不进「SQL 执行历史」（非用户手写 SQL，不可回填），仅审计记真实参数
-	s.appendSQLAudit(s.newCellAuditEntry(connKey, dbName, p, int(affected), "ok", ""))
+	s.appendSQLAudit(ctx, s.newCellAuditEntry(connKey, dbName, p, int(affected), "ok", ""))
 	return affected, nil
 }
 
@@ -108,11 +110,11 @@ func (s *Service) DeleteTableRows(ctx context.Context, connKey, dbName, table st
 		affected, err := engine.RunParamDelete(ctx, cli, p)
 		if err != nil {
 			// 失败也记审计（真实参数），便于排查失败的删除尝试
-			s.appendSQLAudit(s.newDeleteAuditEntry(connKey, dbName, table, pkColumns, pkValues, 0, "error", err.Error()))
+			s.appendSQLAudit(ctx, s.newDeleteAuditEntry(connKey, dbName, table, pkColumns, pkValues, 0, "error", err.Error()))
 			return total, err
 		}
 		total += affected
-		s.appendSQLAudit(s.newDeleteAuditEntry(connKey, dbName, table, pkColumns, pkValues, int(affected), "ok", ""))
+		s.appendSQLAudit(ctx, s.newDeleteAuditEntry(connKey, dbName, table, pkColumns, pkValues, int(affected), "ok", ""))
 	}
 	return total, nil
 }
@@ -133,10 +135,10 @@ func (s *Service) InsertTableRow(ctx context.Context, connKey, dbName string, p 
 	affected, err := engine.RunParamInsert(ctx, cli, p)
 	if err != nil {
 		// 失败也记审计（真实参数），便于排查失败的插入尝试
-		s.appendSQLAudit(s.newInsertAuditEntry(connKey, dbName, p, 0, "error", err.Error()))
+		s.appendSQLAudit(ctx, s.newInsertAuditEntry(connKey, dbName, p, 0, "error", err.Error()))
 		return 0, err
 	}
-	s.appendSQLAudit(s.newInsertAuditEntry(connKey, dbName, p, int(affected), "ok", ""))
+	s.appendSQLAudit(ctx, s.newInsertAuditEntry(connKey, dbName, p, int(affected), "ok", ""))
 	return affected, nil
 }
 
@@ -213,7 +215,7 @@ func (s *Service) RunSQLScript(ctx context.Context, connKey, dbName, sql string,
 	if err != nil {
 		// 连接/分割级失败：记录历史并审计，返回错误（前端展示）
 		item := SQLHistoryItem{ConnID: connKey, DB: dbName, Mode: mode, SQL: sql, Status: "error", ErrorMsg: err.Error(), CreatedAt: nowMillis()}
-		s.recordSQL(item, dbName, mode)
+		s.recordSQL(ctx, item, dbName, mode)
 		return nil, err
 	}
 	// 语句级失败（结果中含错误占位）：整次执行记为 error，错误信息取第一条失败语句；
@@ -227,7 +229,7 @@ func (s *Service) RunSQLScript(ctx context.Context, connKey, dbName, sql string,
 	}
 	if firstErr != "" {
 		item := SQLHistoryItem{ConnID: connKey, DB: dbName, Mode: mode, SQL: sql, Status: "error", ErrorMsg: firstErr, CreatedAt: nowMillis()}
-		s.recordSQL(item, dbName, mode)
+		s.recordSQL(ctx, item, dbName, mode)
 		return results, nil
 	}
 	// 全部成功：记录历史（汇总）
@@ -245,17 +247,20 @@ func (s *Service) RunSQLScript(ctx context.Context, connKey, dbName, sql string,
 		ConnID: connKey, DB: dbName, Mode: mode, SQL: sql, IsWrite: hasWrite, RowCount: totalRows,
 		Elapsed: results[len(results)-1].Elapsed, Status: "ok", CreatedAt: nowMillis(),
 	}
-	s.recordSQL(item, dbName, mode)
+	s.recordSQL(ctx, item, dbName, mode)
 	return results, nil
 }
 
 // recordSQL 写入 SQL 执行历史并追加审计日志（来源恒为用户手写 manual）。
-// StoreNone 库模式无持久化存储时跳过历史落盘。
-func (s *Service) recordSQL(item SQLHistoryItem, dbName, mode string) {
+// StoreNone 库模式无持久化存储时跳过历史落盘。历史/审计按请求用户域（ctx 注入）隔离，
+// item.ConnID 保持裸连接 key（store 层统一计算作用域键并三列同写）。
+func (s *Service) recordSQL(ctx context.Context, item SQLHistoryItem, dbName, mode string) {
+	audit := s.newAuditEntry(item.ConnID, dbName, mode, auditSourceManual, item.SQL, item.IsWrite, item.RowCount, item.Elapsed, item.Status, item.ErrorMsg)
 	if s.persist != nil {
-		_ = s.persist.AddSQLHistory(item)
+		user := userFromCtx(ctx)
+		_ = s.persist.AddSQLHistory(user, item)
 	}
-	s.appendSQLAudit(s.newAuditEntry(item.ConnID, dbName, mode, auditSourceManual, item.SQL, item.IsWrite, item.RowCount, item.Elapsed, item.Status, item.ErrorMsg))
+	s.appendSQLAudit(ctx, audit)
 }
 
 // newAuditEntry 构造审计条目（SQL 执行类）。
@@ -370,20 +375,20 @@ func (s *Service) GetObjectDDL(ctx context.Context, connKey, dbName, objType, na
 	return &ObjectDDLResult{Type: objType, Name: name, DDL: ddl}, nil
 }
 
-// SQLHistory 返回某连接的历史记录
-func (s *Service) SQLHistory(connID string) []SQLHistoryItem {
-	return s.persist.ListSQLHistory(connID)
+// SQLHistory 返回某用户域下某连接的历史记录
+func (s *Service) SQLHistory(user, connID string) []SQLHistoryItem {
+	return s.persist.ListSQLHistory(user, connID)
 }
 
-// ClearSQLHistory 清空某连接的历史记录
-func (s *Service) ClearSQLHistory(connID string) {
-	_ = s.persist.ClearSQLHistory(connID)
+// ClearSQLHistory 清空某用户域下某连接的历史记录
+func (s *Service) ClearSQLHistory(user, connID string) {
+	_ = s.persist.ClearSQLHistory(user, connID)
 }
 
 // ---- SQL 收藏（独立表，按连接隔离） ----
 
 // AddFavorite 新增一条收藏。校验 SQL 非空、长度合理，标题缺省时取首行。
-func (s *Service) AddFavorite(f *SQLFavorite) error {
+func (s *Service) AddFavorite(user string, f *SQLFavorite) error {
 	if f == nil || f.ConnID == "" {
 		return newSvcErr(cygin.ErrParamsInvalid, svcFavConnID)
 	}
@@ -402,24 +407,24 @@ func (s *Service) AddFavorite(f *SQLFavorite) error {
 	if f.CreatedAt == 0 {
 		f.CreatedAt = nowMillis()
 	}
-	return s.persist.AddFavorite(f)
+	return s.persist.AddFavorite(user, f)
 }
 
-// ListFavorites 返回全部收藏（全局共享，不按连接隔离；新→旧）
-func (s *Service) ListFavorites() []*SQLFavorite {
-	return s.persist.ListFavorites()
+// ListFavorites 返回该用户域的全部收藏（新→旧）
+func (s *Service) ListFavorites(user string) []*SQLFavorite {
+	return s.persist.ListFavorites(user)
 }
 
-// DeleteFavorite 删除收藏（按全局唯一 id 定位）
-func (s *Service) DeleteFavorite(id string) error {
+// DeleteFavorite 删除收藏（按 id 定位，仅限本用户域）
+func (s *Service) DeleteFavorite(user, id string) error {
 	if id == "" {
 		return newSvcErr(cygin.ErrParamsInvalid, svcFavIDEmpty)
 	}
-	return s.persist.DeleteFavorite(id)
+	return s.persist.DeleteFavorite(user, id)
 }
 
-// RenameFavorite 重命名收藏（按全局唯一 id 定位）
-func (s *Service) RenameFavorite(id, title string) error {
+// RenameFavorite 重命名收藏（按 id 定位，仅限本用户域）
+func (s *Service) RenameFavorite(user, id, title string) error {
 	if id == "" {
 		return newSvcErr(cygin.ErrParamsInvalid, svcFavIDEmpty)
 	}
@@ -430,7 +435,7 @@ func (s *Service) RenameFavorite(id, title string) error {
 	if len(title) > 256 {
 		title = title[:256]
 	}
-	return s.persist.RenameFavorite(id, title)
+	return s.persist.RenameFavorite(user, id, title)
 }
 
 // defaultFavoriteTitle 取 SQL 去注释后首行前 40 字符作为默认标题。
@@ -454,23 +459,25 @@ func defaultFavoriteTitle(sql string) string {
 	return first
 }
 
-// SQLAudit 读取某连接的审计日志（倒序，分页）。审计只读、不提供删除。
-// connID 为空时返回全部连接；limit<=0 时默认 100，上限 500。
-func (s *Service) SQLAudit(connID string, limit, offset int) ([]SQLAuditEntry, error) {
-	return s.persist.ListSQLAudit(connID, limit, offset)
+// SQLAudit 读取某用户域的审计日志（倒序，分页）。审计只读、不提供删除。
+// connID 为空时按 user 列等值过滤，返回该用户域全部连接数据（跨用户隔离由
+// user 列保证，非用户域前缀过滤、非全表）；connID 非空时按 user 列 + conn_key
+// 双条件过滤；limit<=0 时默认 100，上限 500。
+func (s *Service) SQLAudit(user, connID string, limit, offset int) ([]SQLAuditEntry, error) {
+	return s.persist.ListSQLAudit(user, connID, limit, offset)
 }
 
-// SaveWorkspace 保存某连接的工作区（整体覆盖）。
-func (s *Service) SaveWorkspace(connID string, state WorkspaceState) error {
-	return s.persist.SaveWorkspace(connID, state)
+// SaveWorkspace 保存某用户域下某连接的工作区（整体覆盖）。
+func (s *Service) SaveWorkspace(user, connID string, state WorkspaceState) error {
+	return s.persist.SaveWorkspace(user, connID, state)
 }
 
-// LoadWorkspace 读取某连接的工作区；无记录时返回空状态。
-func (s *Service) LoadWorkspace(connID string) (WorkspaceState, bool) {
-	return s.persist.LoadWorkspace(connID)
+// LoadWorkspace 读取某用户域下某连接的工作区；无记录时返回空状态。
+func (s *Service) LoadWorkspace(user, connID string) (WorkspaceState, bool) {
+	return s.persist.LoadWorkspace(user, connID)
 }
 
-// DeleteWorkspace 删除某连接的工作区。
-func (s *Service) DeleteWorkspace(connID string) error {
-	return s.persist.DeleteWorkspace(connID)
+// DeleteWorkspace 删除某用户域下某连接的工作区。
+func (s *Service) DeleteWorkspace(user, connID string) error {
+	return s.persist.DeleteWorkspace(user, connID)
 }

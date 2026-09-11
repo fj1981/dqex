@@ -556,7 +556,6 @@ export default function ImportView() {
         <ProgressView
           taskID={runningTaskID}
           taskType="import"
-          onSaveTask={() => setSaveOpen(true)}
           onBack={() => {
             setRunningTaskID("")
             setStep(0)

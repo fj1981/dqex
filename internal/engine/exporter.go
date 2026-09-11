@@ -50,10 +50,11 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 		return nil, NewMsgErrf(errExpOutDir, err)
 	}
 
-	taskName := sanitizeName(opts.TaskName)
+	taskName := opts.TaskName
 	if taskName == "" {
 		taskName = "export"
 	}
+	taskName = sanitizeName(taskName)
 	ts := time.Now().Format("20060102_150405")
 	baseDir := filepath.Join(outputDir, fmt.Sprintf("%s_%s", taskName, ts))
 	if err := os.MkdirAll(baseDir, 0o755); err != nil {
@@ -93,12 +94,11 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 				}
 				return nil, err
 			}
-			all, err := listSchemaTables(cli, db, &opts.Source.Schema)
+			tables, err := planTables(cli, db, opts.Source.Schema, sel.Tables, t)
 			cli.Close()
 			if err != nil {
 				return nil, NewMsgErrf(errExpListTables, err, db)
 			}
-			tables := filterTables(all, sel.Tables, db)
 			if len(tables) == 0 {
 				t.log(engineTextsFor(t.lang).expNoTables, db)
 			}
@@ -119,12 +119,11 @@ func RunExport(ctx context.Context, opts ExportOptions, cb ProgressFunc) (*Expor
 				}
 				return nil, err
 			}
-			all, err := listSchemaTables(cli, db, &opts.Source.Schema)
+			tables, err := planTables(cli, db, opts.Source.Schema, opts.Tables, t)
 			cli.Close()
 			if err != nil {
 				return nil, NewMsgErrf(errExpListTables, err, db)
 			}
-			tables := filterTables(all, opts.Tables, db)
 			if len(tables) == 0 {
 				t.log(engineTextsFor(t.lang).expNoTables, db)
 			}
@@ -318,6 +317,8 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 	}
 
 	// ============ 建表 DDL（含触发器）============
+	ddlByTable := make(map[string]string, len(tables))     // 明细回调用：表 → 已写入的 DDL
+	metaByTable := make(map[string]TableMeta, len(tables)) // 明细回调用：表 → 注释 + 列明细
 	if len(tables) > 0 && !opts.DataOnly {
 		fmt.Fprintf(w, "-- ============ Tables ============\n\n")
 		for _, table := range tables {
@@ -325,11 +326,23 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 				return totalRows, NewMsgErr(errCancelled)
 			}
 			t.p.CurrentTable = db + "." + table
+			t.p.Phase = "schema"
 			t.emit(true)
 
 			fmt.Fprintf(w, "-- Table: %s\n", table)
-			if err := writeTableDDL(cli, table, w, opts.CompatCollation); err != nil {
+			ddl, err := writeTableDDL(cli, table, w, opts.CompatCollation)
+			if err != nil {
 				return totalRows, NewMsgErrf(errExpDDL, err, db, table)
+			}
+			ddlByTable[table] = ddl
+			// 元数据查询仅在宿主消费明细时执行，避免无回调场景每表多一次 DB 查询
+			if opts.OnDetail != nil {
+				metaByTable[table] = exportTableMeta(cli, table)
+			}
+			// SchemaOnly 模式无数据段：DDL 落定即视为该表导出完成，此处回调
+			if opts.SchemaOnly && opts.OnDetail != nil {
+				opts.OnDetail(ExportDetail{Database: db, Kind: DetailKindTable, Name: table, Ddl: ddl,
+					Comment: metaByTable[table].Comment, Columns: metaByTable[table].Columns})
 			}
 			// 结构段完成即计一次进度；双段模式下数据段完成后再计一次（TotalUnits 已按双倍预分配）
 			t.p.DoneUnits++
@@ -346,6 +359,7 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 				return totalRows, NewMsgErr(errCancelled)
 			}
 			t.p.CurrentTable = db + "." + table
+			t.p.Phase = "data"
 			t.emit(true)
 
 			cond := findCondition(opts.Conditions, db, table)
@@ -359,16 +373,20 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 				t.log(engineTextsFor(t.lang).expSkipData, db, table)
 				t.p.DoneUnits++
 				desc.Tables = append(desc.Tables, ExportDescTable{Name: table, Rows: 0})
+				if opts.OnDetail != nil {
+					opts.OnDetail(ExportDetail{Database: db, Kind: DetailKindTable, Name: table, Ddl: ddlByTable[table],
+						Comment: metaByTable[table].Comment, Columns: metaByTable[table].Columns})
+				}
 				continue
 			}
 
 			// 数据段注释：表名 + 条件 SQL（仅 condition 模式；多行 SQL 折叠为单行注释）
+			var detailQuery string
 			if dataMode == TableDataModeCondition && cond != nil {
-				if q := conditionQuery(cli.DBType(), cli.DBSubType(), table, cond); q != "" {
-					fmt.Fprintf(w, "-- Data: %s\n-- Query: %s\n", table, strings.Join(strings.Fields(q), " "))
-				} else {
-					fmt.Fprintf(w, "-- Data: %s\n", table)
-				}
+				detailQuery = conditionQuery(cli.DBType(), cli.DBSubType(), table, cond)
+			}
+			if detailQuery != "" {
+				fmt.Fprintf(w, "-- Data: %s\n-- Query: %s\n", table, strings.Join(strings.Fields(detailQuery), " "))
 			} else {
 				fmt.Fprintf(w, "-- Data: %s\n", table)
 			}
@@ -382,17 +400,19 @@ func exportDatabase(ctx context.Context, cli *cydb.DBCli, db string, tables []st
 			fmt.Fprintln(w)
 
 			// 记录表信息到 desc（条件统一归一化为完整 SELECT）
-			td := ExportDescTable{Name: table, Rows: rows}
-			if dataMode == TableDataModeCondition && cond != nil {
-				td.Query = conditionQuery(cli.DBType(), cli.DBSubType(), table, cond)
-			}
+			td := ExportDescTable{Name: table, Rows: rows, Query: detailQuery}
 			desc.Tables = append(desc.Tables, td)
+			// 明细回调：该表数据段完成（Rows 为实际导出行数；skip/SchemaOnly 场景 Rows=0）
+			if opts.OnDetail != nil {
+				opts.OnDetail(ExportDetail{Database: db, Kind: DetailKindTable, Name: table, Rows: rows, Query: detailQuery,
+					Ddl: ddlByTable[table], Comment: metaByTable[table].Comment, Columns: metaByTable[table].Columns})
+			}
 		}
 	}
 
 	// ============ 视图/函数/存储过程 ============
 	if !opts.DataOnly {
-		exportedObjs, err := exportObjectsToWriter(ctx, cli, db, opts.Source.Schema, w, objects, t)
+		exportedObjs, err := exportObjectsToWriter(ctx, cli, db, opts.Source.Schema, w, objects, t, opts.OnDetail)
 		if err != nil {
 			return totalRows, NewMsgErrf(errExpObjects, err, db)
 		}
@@ -499,21 +519,23 @@ func writeSqlBlock(w *bufio.Writer, sql string) {
 	fmt.Fprintf(w, "%s\n\n", terminateSQL(sql))
 }
 
-// writeTableDDL 将单表的 CREATE TABLE DDL（含触发器——底层库方言已一并返回）写入 bufio.Writer。
+// writeTableDDL 将单表的 CREATE TABLE DDL（含触发器——底层库方言已一并返回）写入 bufio.Writer，
+// 返回写入的 DDL 文本（供明细回调；无内容时返回空串）。
 // compatCollation=true 时，MySQL 8.0 特有排序规则（如 utf8mb4_0900_*）替换为 5.7 兼容版本
-func writeTableDDL(cli *cydb.DBCli, table string, w *bufio.Writer, compatCollation bool) error {
+func writeTableDDL(cli *cydb.DBCli, table string, w *bufio.Writer, compatCollation bool) (string, error) {
 	content, err := cli.GetDDLSql(dialect.FuncNameGetCreateTableSql, table)
 	if err != nil {
-		return NewMsgErrf(errExpGenDDL, err)
+		return "", NewMsgErrf(errExpGenDDL, err)
 	}
+	ddl := ""
 	if content != nil && strings.TrimSpace(content.Content) != "" {
-		ddl := strings.TrimRight(strings.TrimSpace(content.Content), ";")
+		ddl = strings.TrimRight(strings.TrimSpace(content.Content), ";")
 		if compatCollation && strings.EqualFold(cli.DBType(), "mysql") {
 			ddl = compatCollationSQL(ddl)
 		}
 		fmt.Fprintf(w, "%s;\n\n", ddl)
 	}
-	return nil
+	return ddl, nil
 }
 
 // writeTableData 将单表的 INSERT 数据写入 bufio.Writer，返回导出行数
@@ -530,7 +552,7 @@ func writeTableData(ctx context.Context, cli *cydb.DBCli, db, table string, w *b
 	var rows int64
 	// DirectForEachQuery 跳过 preProcess：GoSQLX（MySQL 方言）无法解析 PG/Kingbase 的双引号限定名
 	// （"schema"."table"），而 selectSQL 均为可执行完整 SQL，直接交由数据库解析执行
-	err := cli.DirectForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
+	err := cli.DirectForEachQueryContext(ctx, table, selectSQL, func(rd cydb.RowData) error {
 		if err := ctx.Err(); err != nil {
 			return NewMsgErr(errCancelled)
 		}
@@ -559,8 +581,9 @@ func writeTableData(ctx context.Context, cli *cydb.DBCli, db, table string, w *b
 // objects 为对象白名单（格式 子目录/对象名）：nil=全部导出，空数组=不导出。
 // 触发器不单独导出：底层库三方言的建表 DDL 已包含该表触发器。
 // 单个对象导出失败仅记录日志不阻断（对象属于辅助能力，不应影响已完成的表数据导出）
+// onDetail 明细回调（可为 nil）：对象 DDL 写入成功后回调
 // 返回已导出的对象列表（按类型分组，key 为 _views/_functions/_procedures）
-func exportObjectsToWriter(ctx context.Context, cli *cydb.DBCli, db, schema string, w *bufio.Writer, objects []string, t *tracker) (map[string][]string, error) {
+func exportObjectsToWriter(ctx context.Context, cli *cydb.DBCli, db, schema string, w *bufio.Writer, objects []string, t *tracker, onDetail func(ExportDetail)) (map[string][]string, error) {
 	exported := make(map[string][]string)
 	if objects != nil && len(objects) == 0 {
 		return exported, nil // 显式指定了空列表：不导出任何对象
@@ -570,6 +593,12 @@ func exportObjectsToWriter(ctx context.Context, cli *cydb.DBCli, db, schema stri
 		allowed[strings.TrimSpace(o)] = true
 	}
 	objs := listDBObjects(cli, db, schema)
+	// 对象存在性校验：白名单条目在库内未命中 → 逐条告警（对齐原 ValidateDbObjects 缺失对象标准）
+	if objects != nil {
+		for _, w := range missingWhitelistObjects(objects, allowed, objs, db) {
+			t.log(engineTextsFor(t.lang).objMissing, w, db)
+		}
+	}
 
 	kindTitles := map[objectKind]string{
 		objectView:      "Views",
@@ -605,6 +634,7 @@ func exportObjectsToWriter(ctx context.Context, cli *cydb.DBCli, db, schema stri
 				return exported, NewMsgErr(errCancelled)
 			}
 			t.p.CurrentTable = db + "." + dirName + "/" + name
+			t.p.Phase = "" // 对象导出无 schema/data 之分，清空避免残留上一张表的 data
 			t.emit(true)
 
 			ddl, err := objectDDL(cli, kind, name)
@@ -617,6 +647,9 @@ func exportObjectsToWriter(ctx context.Context, cli *cydb.DBCli, db, schema stri
 			fmt.Fprintf(w, "%s\n\n", terminateSQL(ddl))
 			t.p.DoneUnits++
 			t.log(engineTextsFor(t.lang).expObjDone, db, dirName, name)
+			if onDetail != nil {
+				onDetail(ExportDetail{Database: db, Kind: string(kind), Name: name, Ddl: ddl})
+			}
 			exported[dirName] = append(exported[dirName], name)
 		}
 		fmt.Fprintln(w)
@@ -640,60 +673,25 @@ func dbHasSelection(db string, tables, objects []string) bool {
 	return false
 }
 
-// filterTables 按指定表名过滤：nil=全部，空数组=不过滤出任何表。
-// wanted 条目支持（PG 枚举表名为 "schema.table" 限定形式）：
+// planTables 构建单库表计划（导出/迁移/字典共用）：
+//   - 白名单 nil=整库全部（枚举库内表）
+//   - 非空=按名单直查校验存在性（不枚举全库，未定义表不可能进入计划；缺失条目逐条告警）
+//   - 空数组=不导出任何表
 //
-//	"库.schema.表"：库匹配时按 schema.表 精确比较（PG 分层）
-//	"库.表"：库匹配时按裸表名比较（任意 schema 同名表均命中，兼容旧配置）
-//	裸表名：匹配任意库/schema 的同名表（便于 CLI 手输）
-func filterTables(all []string, wanted []string, db string) []string {
+// 白名单条目语义见 resolveTablesByWhitelist（"库.schema.表" / "库.表" / 裸名）。
+func planTables(cli *cydb.DBCli, db, connSchema string, wanted []string, t *tracker) ([]string, error) {
 	if wanted == nil {
-		return all
+		return listSchemaTables(cli, db, &connSchema)
 	}
-	type entry struct {
-		bare   string // 裸表名（小写）
-		schema string // schema（小写，空=任意）
-		db     string // 库（小写，空=任意）
+	if len(wanted) == 0 {
+		return nil, nil
 	}
-	entries := make([]entry, 0, len(wanted))
-	for _, w := range wanted {
-		w = strings.TrimSpace(w)
-		if w == "" {
-			continue
-		}
-		parts := strings.Split(w, ".")
-		e := entry{bare: strings.ToLower(parts[len(parts)-1])}
-		switch len(parts) {
-		case 1:
-			// 裸名：任意库/schema
-		case 2:
-			e.db = strings.ToLower(parts[0])
-		case 3:
-			e.db = strings.ToLower(parts[0])
-			e.schema = strings.ToLower(parts[1])
-		default:
-			continue // 超过三级不支持
-		}
-		entries = append(entries, e)
+	matched, missing, err := resolveTablesByWhitelist(cli, db, &connSchema, wanted)
+	if err != nil {
+		return nil, err
 	}
-	dbLower := strings.ToLower(db)
-	ret := make([]string, 0, len(all))
-	for _, tb := range all {
-		schema, bare := splitTableBare(tb)
-		lb := strings.ToLower(bare)
-		for _, e := range entries {
-			if e.bare != lb {
-				continue
-			}
-			if e.db != "" && e.db != dbLower {
-				continue
-			}
-			if e.schema != "" && !strings.EqualFold(e.schema, schema) {
-				continue
-			}
-			ret = append(ret, tb)
-			break
-		}
+	for _, m := range missing {
+		t.log(engineTextsFor(t.lang).tblMissing, m, db)
 	}
-	return ret
+	return matched, nil
 }

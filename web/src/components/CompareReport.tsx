@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { ChevronRight, Database, RotateCcw, Save } from "lucide-react"
+import { ChevronRight, Database, RotateCcw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -361,7 +361,7 @@ function TableDiffDetail({ t }: { t: CompareTableResult }) {
 
 // 对比报告：汇总统计 + 表级结果列表（限高内滚，差异明细弹窗查看）
 // 实时对比与快照对比共用此组件，统一报告展示体验
-export function CompareReport({ result, onSaveTask, onRestart }: { result: CompareResult; onSaveTask?: () => void; onRestart?: () => void }) {
+export function CompareReport({ result, onRestart }: { result: CompareResult; onRestart?: () => void }) {
   const { t } = useTranslation()
   const [filter, setFilter] = useState("")
   const [showMatched, setShowMatched] = useState(false)
@@ -417,11 +417,6 @@ export function CompareReport({ result, onSaveTask, onRestart }: { result: Compa
           {t("compareReport.snapshotNote")}
         </span>
         <div className="ml-auto flex items-center gap-2">
-          {onSaveTask && (
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onSaveTask}>
-              <Save className="mr-1 h-3.5 w-3.5" /> {t("compareReport.saveTask")}
-            </Button>
-          )}
           {onRestart && (
             <Button size="sm" className="h-7 text-xs" onClick={onRestart}>
               <RotateCcw className="mr-1 h-3.5 w-3.5" /> {t("compareReport.restart")}

@@ -57,9 +57,14 @@ export default function ConnectionSelect({ title, subtitle, value, onChange, fil
   // min-w-0：grid/flex 子项默认 min-width:auto，内容不可收缩部分会把 track/容器撑宽，
   // 必须显式归零才能让内部 truncate 生效（卡片宽度由布局约束，而非内容）
 
+  // 连接地址副行：真实连接 host:port；虚拟/直连连接（无 host，如宿主 env:<id>）退化为类型名，
+  // 避免 host 空、port 0 时拼出 ":0"（与 WorkspaceLayout 下拉副行规则一致）
+  const addrOf = (c: { conn: { Host: string; Port: number; Type: string } }) =>
+    c.conn.Host ? `${c.conn.Host}:${c.conn.Port}` : c.conn.Type
+
   // 连接摘要全文：截断后悬停 title 仍可看完整信息（host:port / 库 / service / schema）
   const summary = selected
-    ? [`${selected.conn.Host}:${selected.conn.Port}`, selected.conn.DBName, selected.conn.Service, selected.conn.Schema]
+    ? [addrOf(selected), selected.conn.DBName, selected.conn.Service, selected.conn.Schema]
         .filter(Boolean)
         .join(" / ")
     : ""
@@ -101,14 +106,17 @@ export default function ConnectionSelect({ title, subtitle, value, onChange, fil
             // 卡片宽度固定（380px）且高度恒定（h-11），任意长度内容不改变布局
             <span
               className="flex min-w-0 items-center gap-2"
-              title={`${selected.name} · ${selected.conn.Host}:${selected.conn.Port}`}
+              title={selected.conn.Host ? `${selected.name} · ${selected.conn.Host}:${selected.conn.Port}` : selected.name}
             >
               <DbTypeIcon type={selected.conn.Type} />
               <span className="min-w-0 flex-1 truncate font-medium">{selected.name}</span>
               {selected.shortName && <span className="shrink-0 text-xs text-muted-foreground">({selected.shortName})</span>}
-              <span className="shrink-0 text-xs text-muted-foreground">
-                {selected.conn.Host}:{selected.conn.Port}
-              </span>
+              {/* 虚拟/直连连接（无 host）不渲染地址段，避免 ":0" */}
+              {selected.conn.Host && (
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {selected.conn.Host}:{selected.conn.Port}
+                </span>
+              )}
             </span>
           ) : (
             <span className="truncate">{t("conn.selectPlaceholder")}</span>
@@ -131,9 +139,12 @@ export default function ConnectionSelect({ title, subtitle, value, onChange, fil
                   <span className="min-w-0 flex-1 truncate font-medium">{c.name}</span>
                   {c.shortName && <span className="shrink-0 text-xs font-mono text-muted-foreground">({c.shortName})</span>}
                 </span>
-                <span className="truncate pl-6 font-mono text-xs text-muted-foreground">
-                  {c.conn.Host}:{c.conn.Port}
-                </span>
+                {/* 副行：真实连接显示 host:port；虚拟/直连连接（无 host）显示类型名；都无则不渲染 */}
+                {(c.conn.Host || c.conn.Type) && (
+                  <span className="truncate pl-6 font-mono text-xs text-muted-foreground">
+                    {c.conn.Host ? `${c.conn.Host}:${c.conn.Port}` : c.conn.Type}
+                  </span>
+                )}
               </span>
             </SelectItem>
           ))}

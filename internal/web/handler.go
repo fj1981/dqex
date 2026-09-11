@@ -198,6 +198,7 @@ func handleExport(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req ExportReq) (StartResp, error) {
 		opts := req.Options
 		opts.Lang = cygin.FromCtx(c) // 任务日志语言跟随请求语言（缺省回退 zh）
+		opts.User = dqexUser(c)      // 发起人随 OnTaskStart 透传宿主（独立部署为 local）
 		if req.Compress != nil {
 			opts.Compress = *req.Compress
 		} else {
@@ -224,6 +225,7 @@ func handleDictionary(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req DictionaryReq) (StartResp, error) {
 		opts := req.Options
 		opts.Lang = cygin.FromCtx(c) // 产物文案语言跟随请求语言（缺省回退 zh）
+		opts.User = dqexUser(c)      // 发起人随 OnTaskStart 透传宿主（独立部署为 local）
 		if req.Compress != nil {
 			opts.Compress = *req.Compress
 		} else {
@@ -250,6 +252,7 @@ func handleImport(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req ImportReq) (StartResp, error) {
 		opts := req.Options
 		opts.Lang = cygin.FromCtx(c) // 任务日志语言跟随请求语言（缺省回退 zh）
+		opts.User = dqexUser(c)      // 发起人随 OnTaskStart 透传宿主（独立部署为 local）
 		if req.Backup != nil {
 			opts.Backup = *req.Backup
 		} else {
@@ -325,6 +328,7 @@ func handleMigrate(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req MigrateReq) (StartResp, error) {
 		opts := req.Options
 		opts.Lang = cygin.FromCtx(c) // 任务日志语言跟随请求语言（缺省回退 zh）
+		opts.User = dqexUser(c)      // 发起人随 OnTaskStart 透传宿主（独立部署为 local）
 		if req.Backup != nil {
 			opts.Backup = *req.Backup
 		} else {
@@ -350,6 +354,7 @@ func handleCompare(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req CompareReq) (StartResp, error) {
 		opts := req.Options
 		opts.Lang = cygin.FromCtx(c) // 任务日志语言跟随请求语言（缺省回退 zh）
+		opts.User = dqexUser(c)      // 发起人随 OnTaskStart 透传宿主（独立部署为 local）
 		taskID, err := svc.StartCompare(opts, req.TaskConfigID)
 		if err != nil {
 			return StartResp{}, renderErr(c, err)
@@ -499,8 +504,10 @@ func handleCreateSnapshot(svc *service.Service) gin.HandlerFunc {
 }
 
 func handleListSnapshots(svc *service.Service) gin.HandlerFunc {
-	return cygin.Handle(func(c *gin.Context, req struct{}) ([]service.SnapshotInfo, error) {
-		return svc.ListSnapshots(), nil
+	return cygin.Handle(func(c *gin.Context, req struct {
+		ConnID string `form:"connId"` // 可选：按创建时连接 ID 过滤（库模式虚拟连接为 env:<id>）
+	}) ([]service.SnapshotInfo, error) {
+		return svc.ListSnapshots(req.ConnID), nil
 	})
 }
 
@@ -531,6 +538,7 @@ func handleSnapshotCompare(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req SnapshotCompareReq) (StartResp, error) {
 		opts := req.Options
 		opts.Lang = cygin.FromCtx(c) // 任务日志语言跟随请求语言（缺省回退 zh）
+		opts.User = dqexUser(c)      // 发起人随 OnTaskStart 透传宿主（独立部署为 local）
 		taskID, err := svc.StartSnapshotCompare(opts, req.TaskConfigID)
 		if err != nil {
 			return StartResp{}, renderErr(c, err)
@@ -559,13 +567,13 @@ func handleDBTypes() gin.HandlerFunc {
 }
 
 // VersionInfo 版本信息（构建版本 + 提交 + 构建时间 + 支持的数据库类型）
-// ShowLinks 为开源构建（-tags opensource）时 true，前端据此展示项目 Git 地址与联系方式
 type VersionInfo struct {
 	Version   string   `json:"version"`
 	CommitID  string   `json:"commitId"`
 	BuildTime string   `json:"buildTime"`
 	DBTypes   []string `json:"dbTypes"`
-	ShowLinks bool     `json:"showLinks"`
+	// ShowLinks 是否展示开源项目链接（opensource 构建时为 true）
+	ShowLinks bool `json:"showLinks"`
 }
 
 func handleVersion() gin.HandlerFunc {

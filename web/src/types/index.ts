@@ -673,7 +673,6 @@ export interface VersionInfo {
   commitId?: string
   buildTime: string
   dbTypes: string[]
-  /** 开源构建（后端 -tags opensource）时为 true，展示项目 Git 地址与联系方式 */
   showLinks?: boolean
 }
 

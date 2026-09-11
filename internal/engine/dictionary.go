@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fj1981/infrakit/pkg/cydb/def"
 	"github.com/xuri/excelize/v2"
+	"github.com/fj1981/infrakit/pkg/cydb/def"
 )
 
 // 数据字典 Excel 常量
@@ -116,10 +116,11 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 		return nil, NewMsgErrf(errDictOutDir, err)
 	}
 
-	taskName := sanitizeName(opts.TaskName)
+	taskName := opts.TaskName
 	if taskName == "" {
 		taskName = "dictionary"
 	}
+	taskName = sanitizeName(taskName)
 	ts := time.Now().Format("20060102_150405")
 	baseDir := filepath.Join(outputDir, fmt.Sprintf("%s_%s", taskName, ts))
 	if err := os.MkdirAll(baseDir, 0o755); err != nil {
@@ -158,12 +159,11 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 				}
 				return nil, err
 			}
-			all, err := listSchemaTables(cli, db, &opts.Source.Schema)
+			tables, err := planTables(cli, db, opts.Source.Schema, sel.Tables, t)
 			cli.Close()
 			if err != nil {
 				return nil, NewMsgErrf(errDictListTables, err, db)
 			}
-			tables := filterTables(all, sel.Tables, db)
 			if len(tables) == 0 {
 				t.log(engineTextsFor(t.lang).dictNoTables, db)
 				continue
@@ -180,12 +180,11 @@ func RunDictionary(ctx context.Context, opts DictionaryOptions, cb ProgressFunc)
 			if err != nil {
 				return nil, err
 			}
-			all, err := listSchemaTables(cli, db, &opts.Source.Schema)
+			tables, err := planTables(cli, db, opts.Source.Schema, opts.Tables, t)
 			cli.Close()
 			if err != nil {
 				return nil, NewMsgErrf(errDictListTables, err, db)
 			}
-			tables := filterTables(all, opts.Tables, db)
 			if len(tables) == 0 {
 				t.log(engineTextsFor(t.lang).dictNoTables, db)
 				continue

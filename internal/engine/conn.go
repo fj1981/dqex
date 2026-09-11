@@ -188,6 +188,168 @@ func listSchemaTables(cli *cydb.DBCli, db string, schemaPtr *string) ([]string, 
 	return out, nil
 }
 
+// ---- 白名单直查：按名单校验表存在性，不枚举全库 ----
+//
+// 语义（与导出/迁移/字典共用的表计划构建配套）：白名单非空时不再"枚举库内全部表再过滤"，
+// 而是逐条目直查校验——rule 未定义的表在机制上无法进入导出计划；rule 定义但源库缺失的表
+// 由调用方逐条告警。条目形式与旧 filterTables 一致：
+//
+//	"库.schema.表"：库 + schema 精确（PG 分层）
+//	"库.表"：库匹配；PG 按 search_path 定位首个命中 schema，MySQL/Oracle 按裸名
+//	"表"：任意库（当前库尝试命中）
+
+// tableWanted 白名单条目解析结果
+type tableWanted struct {
+	raw     string // 条目原文（缺失告警用）
+	bareRaw string // 裸表名（条目原样大小写）
+	bare    string // 裸表名（小写）
+	schema  string // schema（小写，空=任意）
+	db      string // 库（小写，空=任意）
+}
+
+// parseTableWanted 解析白名单条目（1/2/3 级）；空条目或超过三级不支持（ok=false）
+func parseTableWanted(w string) (tableWanted, bool) {
+	w = strings.TrimSpace(w)
+	if w == "" {
+		return tableWanted{}, false
+	}
+	parts := strings.Split(w, ".")
+	e := tableWanted{raw: w, bareRaw: parts[len(parts)-1], bare: strings.ToLower(parts[len(parts)-1])}
+	switch len(parts) {
+	case 1: // 裸名：任意库/schema
+	case 2:
+		e.db = strings.ToLower(parts[0])
+	case 3:
+		e.db = strings.ToLower(parts[0])
+		e.schema = strings.ToLower(parts[1])
+	default:
+		return tableWanted{}, false
+	}
+	return e, true
+}
+
+// entriesForDB 解析白名单条目并筛出归属指定库的条目（库段空=任意库）
+func entriesForDB(wanted []string, db string) []tableWanted {
+	dbLower := strings.ToLower(db)
+	entries := make([]tableWanted, 0, len(wanted))
+	for _, w := range wanted {
+		e, ok := parseTableWanted(w)
+		if !ok {
+			continue
+		}
+		if e.db != "" && e.db != dbLower {
+			continue
+		}
+		entries = append(entries, e)
+	}
+	return entries
+}
+
+// singleColumnRows 取查询结果首列为字符串值（不依赖驱动返回的列名大小写）
+func singleColumnRows(rows []map[string]any) []string {
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		for _, v := range r {
+			if v != nil {
+				if s := fmt.Sprint(v); s != "" {
+					out = append(out, s)
+				}
+				break
+			}
+		}
+	}
+	return out
+}
+
+// resolveTablesByWhitelist 按白名单逐条目校验表存在性（复用底层库 IsTableExist 单表校验，
+// 不枚举全库——rule 未定义的表在机制上无法进入导出计划）。
+// 返回命中表名（PG 系为 "schema.table"，MySQL/Oracle 为裸名，均为库内真实存储名）
+// 与未命中条目原文（missing，由调用方逐条告警）；条目顺序即输出顺序，同表多条件命中去重。
+func resolveTablesByWhitelist(cli *cydb.DBCli, db string, schemaPtr *string, wanted []string) (matched, missing []string, err error) {
+	entries := entriesForDB(wanted, db)
+	if len(entries) == 0 {
+		return nil, nil, nil
+	}
+	// PG 系 schema 候选：连接指定 schema 时仅它；否则 search_path 顺序（一次查询）
+	pgSchemas := ([]string)(nil)
+	if strings.EqualFold(cli.DBType(), "postgresql") {
+		if pgSchemas, err = pgSchemaCandidates(cli, schemaPtrValue(schemaPtr)); err != nil {
+			return nil, nil, err
+		}
+	}
+	seen := make(map[string]bool, len(entries))
+	seenMissing := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		name, found, lerr := locateWhitelistedTable(cli, pgSchemas, e)
+		if lerr != nil {
+			return nil, nil, lerr
+		}
+		if !found {
+			if !seenMissing[e.raw] {
+				seenMissing[e.raw] = true
+				missing = append(missing, e.raw)
+			}
+			continue
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		matched = append(matched, name)
+	}
+	return matched, missing, nil
+}
+
+// pgSchemaCandidates PG 系 schema 候选：连接指定 schema 时仅它；否则 current_schemas(true)
+// （search_path 顺序，含隐式 public）；获取失败兜底 public（缺失条目以 missing 形式可见）。
+func pgSchemaCandidates(cli *cydb.DBCli, connSchema string) ([]string, error) {
+	if connSchema != "" {
+		return []string{connSchema}, nil
+	}
+	rows, err := cli.DirectQuery("SELECT unnest(current_schemas(true))")
+	if err == nil {
+		if out := singleColumnRows(rows); len(out) > 0 {
+			return out, nil
+		}
+	}
+	return []string{"public"}, nil
+}
+
+// locateWhitelistedTable 定位单个条目对应的库内表，返回实际表名与是否存在。
+// 复用底层库 IsTableExist 单表校验（MySQL 按连接库、Oracle 按当前 schema、
+// PG 支持 "schema.table" 限定名，见 pgSchemaCandidates）；先按条目原样校验，
+// 未命中按小写兜底（兼容 MySQL Linux 大小写敏感表与 PG 引号大写表，
+// 与旧过滤的不区分大小写语义一致）。PG 下 schema 归属：3 级条目精确 schema，
+// 2/1 级按候选顺序取首个命中——rule 未定义的 schema 不会被带入。
+func locateWhitelistedTable(cli *cydb.DBCli, pgSchemas []string, e tableWanted) (string, bool, error) {
+	tries := []string{e.bareRaw}
+	if e.bare != e.bareRaw {
+		tries = append(tries, e.bare)
+	}
+	if pgSchemas != nil {
+		schemas := pgSchemas
+		if e.schema != "" {
+			schemas = []string{e.schema} // 3 级条目：精确 schema
+		}
+		for _, s := range schemas {
+			for _, t := range tries {
+				ok, err := cli.IsTableExist(s + "." + t)
+				if err != nil || ok {
+					return s + "." + t, ok, err
+				}
+			}
+		}
+		return "", false, nil
+	}
+	for _, t := range tries {
+		ok, err := cli.IsTableExist(t)
+		if err != nil || ok {
+			return t, ok, err
+		}
+	}
+	return "", false, nil
+}
+
 // findCondition 查找指定表的过滤条件。
 // 条件表名支持限定形式 "库.schema.表"（PG 分层）/"库.表" 与裸表名（便于 CLI 手输），
 // 限定形式优先；tableName 可能为 "schema.table"（PG 分层枚举）或裸名（MySQL/Oracle）

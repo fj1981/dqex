@@ -266,6 +266,21 @@ func TestAgentRules(t *testing.T) {
 	}
 }
 
+// TestAgentRulesFor PG 系连接须追加 schema.table 限定名规则；非 PG 不追加（回归：PG 下
+// 模型按 MySQL 习惯生成 库.表 引用导致语法错误）。
+func TestAgentRulesFor(t *testing.T) {
+	for _, lang := range []string{"zh", "en"} {
+		pg := AgentRulesFor(lang, "mydb", true)
+		if !strings.Contains(pg, "schema.table") || !strings.Contains(pg, "public.users") {
+			t.Fatalf("%s PG 规则段缺失 schema 限定说明:\n%s", lang, pg)
+		}
+		plain := AgentRulesFor(lang, "mydb", false)
+		if strings.Contains(plain, "schema.table") {
+			t.Fatalf("%s 非 PG 不应包含 schema 限定规则:\n%s", lang, plain)
+		}
+	}
+}
+
 func TestToolTextsFor(t *testing.T) {
 	zh := ToolTextsFor("zh")
 	if !strings.Contains(zh.ListDBsDesc, "列出当前连接可访问的所有数据库") {

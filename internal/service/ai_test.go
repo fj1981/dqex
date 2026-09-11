@@ -5,12 +5,52 @@ import (
 	"testing"
 
 	"github.com/cloudwego/eino/schema"
+
+	"github.com/fj1981/dqex/internal/engine"
 )
 
 func mkUser(raw string) *schema.Message {
 	m := schema.UserMessage(raw)
 	m.Extra = map[string]any{"action": "generate", "raw": raw}
 	return m
+}
+
+// TestQualifiedTableNames PG 系库节点应输出 schema.table 限定名；无 schema 层（MySQL/Oracle）原样返回。
+func TestQualifiedTableNames(t *testing.T) {
+	pg := engine.DBTables{
+		Name:   "mydb",
+		Tables: []string{"users", "orders"},
+		Schemas: []engine.DBSchema{
+			{Name: "app", Tables: []string{"users", "orders"}},
+			{Name: "public", Tables: []string{"users"}}, // 与 app.users 同名，须去重
+		},
+	}
+	got := qualifiedTableNames(pg)
+	want := []string{"app.users", "app.orders", "public.users"}
+	if len(got) != len(want) {
+		t.Fatalf("限定名数量不符: got=%v want=%v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("限定名[%d]=%s want=%s", i, got[i], want[i])
+		}
+	}
+	mysql := engine.DBTables{Name: "mydb", Tables: []string{"users", "orders"}}
+	if got := qualifiedTableNames(mysql); len(got) != 2 || got[0] != "users" {
+		t.Fatalf("无 schema 层应原样返回裸表名: %v", got)
+	}
+}
+
+// TestIsPGLike PG 系类型判定（含空白/大小写容错）。
+func TestIsPGLike(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want bool
+	}{{"postgresql", true}, {"PostgreSQL", true}, {" postgresql ", true}, {"mysql", false}, {"oracle", false}, {"", false}} {
+		if got := isPGLike(c.in); got != c.want {
+			t.Fatalf("isPGLike(%q)=%v want=%v", c.in, got, c.want)
+		}
+	}
 }
 
 // TestTrimMessagesCountLimit 条数上限裁剪：超过 aiMaxMessages 时按轮次裁剪最旧，回写后生效。

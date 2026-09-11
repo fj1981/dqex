@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
@@ -61,8 +61,20 @@ export default function MigrateView() {
   const [savedTasks, setSavedTasks] = useState<TaskConfig[]>([])
   const [saveOpen, setSaveOpen] = useState(false)
   const connections = useAppStore((s) => s.connections)
+  // 嵌入模式 conn 注入（EmbedShell 解析 ?conn= 后写入 store，非嵌入模式恒为空）
+  const embedConn = useAppStore((s) => s.embedConn)
 
   const set = (patch: Partial<MigrateOptions>) => setOpts((o) => ({ ...o, ...patch }))
+
+  // 宿主注入连接消费（一次性，docs/dqex-data-tools-plan.md 阶段 2）：预选为源连接。
+  // 与用户手动切换连接同语义：清空已选库/表/对象，避免与缓存任务配置的旧选择错位。
+  // 若注入先于上次配置恢复完成，恢复侧 bindTaskOptions 会因源连接不一致自动剔除绑定字段
+  const embedApplied = useRef(false)
+  useEffect(() => {
+    if (!embedConn || embedApplied.current) return
+    embedApplied.current = true
+    set({ sourceConn: embedConn, source: null, databases: [], tables: [], objects: [], conditions: [] })
+  }, [embedConn])
 
   // 新任务（无缓存配置）时，compatCollation 默认采用设置页的全局值；已加载任务配置不覆盖
   useEffect(() => {
@@ -345,7 +357,6 @@ export default function MigrateView() {
         <ProgressView
           taskID={runningTaskID}
           taskType="migrate"
-          onSaveTask={() => setSaveOpen(true)}
           onBack={() => {
             setRunningTaskID("")
             setStep(0)

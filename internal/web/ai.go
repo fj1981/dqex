@@ -12,9 +12,9 @@ import (
 	"github.com/fj1981/dqex/internal/service"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/gin-gonic/gin"
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cylog"
-	"github.com/gin-gonic/gin"
 )
 
 // ==================== AI 辅助 SQL API ====================
@@ -125,27 +125,27 @@ type AISessionIDReq struct {
 // handleAIDeleteSession 删除 AI 会话。
 func handleAIDeleteSession(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req AISessionIDReq) (any, error) {
-		if err := svc.AIDeleteSession(req.ID); err != nil {
+		if err := svc.AIDeleteSession(dqexUser(c), req.ID); err != nil {
 			return nil, renderErr(c, err)
 		}
 		return gin.H{"ok": true}, nil
 	})
 }
 
-// handleAIResetSession 重置 AI 会话（清空上下文与 token 统计）。
+// handleAIResetSession 重置 AI 会话（清空上下文与 token 统计；含仅存于落盘的会话）。
 func handleAIResetSession(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req AISessionIDReq) (any, error) {
-		if err := svc.AIResetSession(req.ID); err != nil {
+		if err := svc.AIResetSession(dqexUser(c), req.ID); err != nil {
 			return nil, renderErr(c, err)
 		}
 		return gin.H{"ok": true}, nil
 	})
 }
 
-// handleAISessionUsage 查询会话累计 token。
+// handleAISessionUsage 查询会话累计 token（仅限当前用户自己的会话）。
 func handleAISessionUsage(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req AISessionIDReq) (any, error) {
-		usage, ok := svc.AISessionUsage(req.ID)
+		usage, ok := svc.AISessionUsage(dqexUser(c), req.ID)
 		if !ok {
 			return nil, cygin.NewError(service.ErrAISessionNotFound)
 		}
@@ -159,7 +159,7 @@ func handleAIListSessions(svc *service.Service) gin.HandlerFunc {
 		ConnID string `form:"connId" binding:"required"`
 		TabID  string `form:"tabId"`
 	}) (any, error) {
-		return gin.H{"sessions": svc.AIListSessions(req.ConnID, req.TabID)}, nil
+		return gin.H{"sessions": svc.AIListSessions(dqexUser(c), req.ConnID, req.TabID)}, nil
 	})
 }
 
@@ -169,7 +169,7 @@ func handleAIDeleteSessionByTab(svc *service.Service) gin.HandlerFunc {
 		ConnID string `form:"connId" binding:"required"`
 		TabID  string `form:"tabId" binding:"required"`
 	}) (any, error) {
-		svc.AIDeleteSessionByTab(req.ConnID, req.TabID)
+		svc.AIDeleteSessionByTab(dqexUser(c), req.ConnID, req.TabID)
 		return gin.H{"ok": true}, nil
 	})
 }
@@ -177,7 +177,7 @@ func handleAIDeleteSessionByTab(svc *service.Service) gin.HandlerFunc {
 // handleAISessionHistory 读取某会话的对话历史（含 role/content 消息与 usage），供前端恢复展示。
 func handleAISessionHistory(svc *service.Service) gin.HandlerFunc {
 	return cygin.Handle(func(c *gin.Context, req AISessionIDReq) (any, error) {
-		recs := svc.AILoadSessionHistory(req.ID)
+		recs := svc.AILoadSessionHistory(dqexUser(c), req.ID)
 		if recs == nil {
 			return nil, cygin.NewError(service.ErrAISessionNotFound)
 		}

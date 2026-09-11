@@ -1,5 +1,5 @@
 import i18n from "@/lib/i18n"
-import { post, request } from "@/api"
+import { apiUrl, post, request } from "@/api"
 import type {
   ColumnFilter,
   DBSchema,
@@ -176,7 +176,7 @@ export const fetchTableData = async (req: TableDataRequest): Promise<TableDataRe
 // 成功时触发浏览器下载；失败时解析 cygin 错误响应抛错。
 export const exportTableExcel = async (req: TableDataRequest, maxRows = 100000): Promise<void> => {
   const authToken = sessionStorage.getItem("dbx_token") || "" // 与 api/index.ts 的 resolveToken 保持一致
-  const res = await fetch("/api/sql/table-export", {
+  const res = await fetch(apiUrl("/api/sql/table-export"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

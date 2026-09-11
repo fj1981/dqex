@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fj1981/infrakit/pkg/cydb"
 	"github.com/rs/xid"
+	"github.com/fj1981/infrakit/pkg/cydb"
 )
 
 const defaultSampleLimit = 10
@@ -149,7 +149,7 @@ func loadSampleRows(ctx context.Context, cli *cydb.DBCli, table string, limit in
 	var samples []map[string]any
 	count := 0
 	// DirectForEachQuery 跳过 preProcess：GoSQLX 无法解析 PG/Kingbase 双引号限定名（"schema"."table"）
-	err := cli.DirectForEachQuery(table, selectSQL, func(rd cydb.RowData) error {
+	err := cli.DirectForEachQueryContext(ctx, table, selectSQL, func(rd cydb.RowData) error {
 		if err := ctx.Err(); err != nil {
 			return NewMsgErr(errCancelled)
 		}

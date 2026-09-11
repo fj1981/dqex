@@ -25,12 +25,12 @@ import { useAppStore } from "@/stores/app"
 import { cn, shortPaths } from "@/lib/utils"
 import { tKey } from "@/lib/i18n"
 import i18n from "@/lib/i18n"
+import { isEmbedMode } from "@/lib/embedBus"
 import type { Progress as ProgressInfo } from "@/types"
 
 interface Props {
   taskID: string
   taskType: string
-  onSaveTask?: () => void
   onBack: () => void
   // 完成（含失败/取消）回调：外部页面据此拉取最终结果
   onDone?: (p: ProgressInfo) => void
@@ -60,8 +60,10 @@ function StatBlock({ label, value, sub, title }: { label: string; value: string;
 }
 
 // 任务执行进度视图（SSE 实时推送）
-export default function ProgressView({ taskID, taskType, onSaveTask, onBack, onDone, wide, compactLog }: Props) {
+export default function ProgressView({ taskID, taskType, onBack, onDone, wide, compactLog }: Props) {
   const { t } = useTranslation()
+  // 嵌入模式（宿主 iframe）：本地文件系统操作（打开产物所在文件夹）对宿主无意义
+  const embedMode = isEmbedMode()
   const [progress, setProgress] = useState<ProgressInfo | null>(null)
   const [errorMsg, setErrorMsg] = useState("")
   const [errDetailOpen, setErrDetailOpen] = useState(false)
@@ -298,13 +300,12 @@ export default function ProgressView({ taskID, taskType, onSaveTask, onBack, onD
                     <Download className="mr-1 h-4 w-4" /> {t("progress.download")}
                   </a>
                 </Button>
-                <Button variant="outline" size="sm" onClick={doOpenDir}>
-                  <FolderOpen className="mr-1 h-4 w-4" /> {t("progress.openDir")}
-                </Button>
+                {!embedMode && (
+                  <Button variant="outline" size="sm" onClick={doOpenDir}>
+                    <FolderOpen className="mr-1 h-4 w-4" /> {t("progress.openDir")}
+                  </Button>
+                )}
               </>
-            )}
-            {state === "done" && onSaveTask && (
-              <Button variant="outline" size="sm" onClick={onSaveTask}>{t("progress.saveTask")}</Button>
             )}
             <Button size="sm" onClick={onBack}>
               <RotateCcw className="mr-1 h-4 w-4" /> {t("progress.restart")}

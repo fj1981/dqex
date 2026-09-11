@@ -7,7 +7,7 @@ import (
 	"github.com/fj1981/infrakit/pkg/cydb/dialect"
 )
 
-// objectKind 数据库对象类型
+// objectKind 数据库对象类型（值与 DetailKindView/Function/Procedure 一致，导出明细回调直接取 string(kind)）
 type objectKind string
 
 const (
@@ -78,9 +78,79 @@ func objectWhitelistID(dirName, name string) string {
 }
 
 // objectInWhitelist 判断对象（id 格式 目录/名 或 schema.目录/名）是否命中白名单。
-// 白名单条目支持限定形式 "库.schema.目录/名"（PG 分层）/ "库.目录/名" 与裸形式 "目录/名"（匹配任意库，便于 CLI 手输）
+// 白名单条目支持限定形式 "库.schema.目录/名"（PG 分层）/ "库.目录/名" 与裸形式 "目录/名"（匹配任意库，便于 CLI 手输）；
+// 库级裸名条目（"库.目录/名"）可命中 PG 的 schema 限定枚举名（"schema.对象名"，兜底剥 schema 后再匹配，
+// 与表过滤的"库.表命中任意 schema 同名表"语义一致）
 func objectInWhitelist(allowed map[string]bool, db, id string) bool {
-	return allowed[id] || allowed[db+"."+id]
+	if allowed[id] || allowed[db+"."+id] {
+		return true
+	}
+	if bare := objectBareWhitelistID(id); bare != id {
+		return allowed[bare] || allowed[db+"."+bare]
+	}
+	return false
+}
+
+// objectBareWhitelistID 剥离 schema 限定："schema.目录/名" → "目录/名"；裸 id 原样返回
+func objectBareWhitelistID(id string) string {
+	slash := strings.LastIndex(id, "/")
+	if slash < 0 {
+		return id
+	}
+	if i := strings.LastIndex(id[:slash], "."); i >= 0 {
+		return id[i+1:]
+	}
+	return id
+}
+
+// objectWhitelistHits 返回对象白名单条目中被库内枚举对象命中的子集（key 为 trim 后条目原文）。
+// 复用 objectInWhitelist 做反向命中判断：每个枚举对象尝试匹配所有未命中条目
+// （对象/条目数量级均为百以内，嵌套遍历成本可忽略）
+func objectWhitelistHits(allowed map[string]bool, objs dbObjects, db string) map[string]bool {
+	hit := make(map[string]bool, len(allowed))
+	for _, kind := range objectExportOrder {
+		dirName := objectKindDirs[kind]
+		for _, name := range objs[kind] {
+			id := objectWhitelistID(dirName, name)
+			for w := range allowed {
+				if !hit[w] && objectInWhitelist(map[string]bool{w: true}, db, id) {
+					hit[w] = true
+					break
+				}
+			}
+		}
+	}
+	return hit
+}
+
+// objectEntryForDB 判断对象白名单条目是否归属指定库（对象导出按库执行，跨库条目不在此库校验）。
+// 条目形式："_views/v1"（裸条目=任意库，便于 CLI 手输）、"库._views/v1"、"库.schema._views/v1"；
+// 目录段固定 "_" 前缀，据此区分首段是目录还是库名（与 objectInWhitelist 的库前缀语义一致）
+func objectEntryForDB(entry, db string) bool {
+	head := strings.SplitN(entry, "/", 2)[0]
+	parts := strings.Split(head, ".")
+	if strings.HasPrefix(parts[0], "_") {
+		return true // 裸条目：任意库
+	}
+	return strings.EqualFold(parts[0], db)
+}
+
+// missingWhitelistObjects 返回归属当前库的对象白名单条目中未在库内命中的条目
+// （缺失告警用，保持原顺序去重；跨库条目不在此库校验，避免误报）。
+// 对齐原 ValidateDbObjects 的缺失对象校验标准：rule 定义了视图/函数/存储过程 → 逐一确认真存在
+func missingWhitelistObjects(objects []string, allowed map[string]bool, objs dbObjects, db string) []string {
+	hit := objectWhitelistHits(allowed, objs, db)
+	seen := make(map[string]bool, len(objects))
+	missing := make([]string, 0, len(objects))
+	for _, o := range objects {
+		w := strings.TrimSpace(o)
+		if w == "" || !objectEntryForDB(w, db) || hit[w] || seen[w] {
+			continue
+		}
+		seen[w] = true
+		missing = append(missing, w)
+	}
+	return missing
 }
 
 // dbObjects 一个库内的各类对象清单

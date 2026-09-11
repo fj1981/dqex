@@ -78,7 +78,7 @@ github.com/fj1981/dqex/     ← 公开门面（新目录，仓库根）
 
 ### 2.2 前置条件：module 路径修正（阶段一，破坏性）
 
-- `module dqex` → **`module github.com/fj1981/dqex`（已定，评审结论）**：与 infrakit（`github.com/fj1981/infrakit`）同 owner、同路径方案，一致且默认可解析；repo 可保持私有，宿主经 `GOPRIVATE=github.com/fj1981/*` + 凭证或公司 GOPROXY 拉取，无需 replace 特判。阶段一全仓 import 重写一次到位，避免未来二次迁移。
+- `module dqex` → **`module github.com/fj1981/dqex`（已定，评审结论）**：与 infrakit（`github.com/fj1981/infrakit`）同 group、同路径方案，一致且默认可解析；repo 保持私有，宿主经 `GOPRIVATE=gitlab.mycyclone.com/*` + 凭证或公司 GOPROXY 拉取，无需 replace 特判。阶段一全仓 import 重写一次到位，避免未来二次迁移。
 - 全仓 import 路径一次性替换（`dqex/internal/...` → `github.com/fj1981/dqex/internal/...`），涉及 `cmd/`、`internal/`、`web/embed.go`、`web/src` 无关。
 - 同步更新 `Makefile`、`.github/workflows/ci.yml`、安装脚本中的构建变量。
 - 打 `v0.1.0` tag，此后每阶段独立发版，库使用者可锁版本。**tag 语义说明（已定，评审结论）**：延续现有 tag 方式，**库版本与二进制版本一致**（同一 commit 同一 tag，二进制经 ldflags 注入同一版本号）。理由：库的 `Run*` 与二进制的 `/dqex/api` 来自同一 engine 实现，本就不是两个独立演进的工件；单版本号让两个使用方的支持问答只有一个答案，避免"库 v0.2 + 二进制 v1.5"的排查矩阵。配套两条升版纪律：① **以库 API 兼容性为最严约束**——门面 API 破坏性变更时即使应用侧无感也必须升 minor（v0 期）/ major（v1 后），防止应用小版本夹带库破坏；② **changelog 强制三节分列**（库 API / CLI / Web），使用方按需阅读。
@@ -358,18 +358,19 @@ const (
 | 元数据缓存 | cydist `NewCacheWrapper` 纯本地 FreeCache；**原生支持 `WithRedisClient`，只是没传** | 透传 RedisClient 即可（go-redis 已在依赖树） | 小 |
 | 产物存储 | 本地路径 `OutputPath`，Web 下载 handler 读本地文件 | **复用 infrakit `cystore.Store`**（已支持 MinIO/S3/OBS/OSS/本地）+ Web 下载改造为流式读取 | 中 |
 
-#### 4.4.1 内部存储：基于 cydb 统一实现（多数据库）
+#### 4.4.1 内部存储：基于 cydb 统一实现（多数据库）——✅ 已落地（v1.3）
 
 **不自写方言分叉**——infrakit 的 `pkg/cydb` 已支持多数据库（`def.DBConnection{Type: mysql / postgresql / sqlite / oracle ...}`），且提供屏蔽差异的高级构建接口：`cli.AutoMigrate(&Model{})` 结构体迁移、`cydb/ss` 全套查询构建器（Select/Insert/Update/Delete/CreateTable/Union/CTE + `cydb.EQ` 等条件构建），方言差异由 cydb 处理。
 
 ```go
-func WithStoreConn(conn def.DBConnection) Option  // 参数注入：mysql / postgresql / sqlite / oracle
-func WithStoreDB(cli *cydb.DBCli) Option          // 实例注入：宿主复用已有 cydb client/连接池
+func WithStoreConn(conn def.DBConnection) Option  // 参数注入：mysql / postgresql / sqlite / oracle（✅ 已落地）
+func WithStoreDB(cli *cydb.DBCli) Option          // 实例注入：宿主复用已有 cydb client/连接池（仍为触发式）
 ```
 
-- **实施路线**：将 store 层的裸 SQL（store/*.go 共 6 个文件的 CRUD/建表）迁到 cydb——建表走 `AutoMigrate`（结构体即模型），CRUD 走 ss 构建器。一次迁移，SQLite/MySQL/PostgreSQL/Oracle 全部获得支持，且后续新增存储引擎零方言成本。
+- **落地记录（v1.3）**：`WithStoreConn` 已实现——`store.OpenSQL(conn)` 经 `cydb.TryConnect` 按连接配置打开存储（`SQLiteStore` 实为跨方言实现，原有 SQLite 路径行为不变），表自动迁移（migrate.AutoMigrate）。`LibraryOptions.StoreConn` 优先级高于 `DataDir`；StoreExternal 模式下元数据（连接/任务/历史/审计/工作区/AI 会话）落宿主数据库，目录类资源（tmp/uploads/exports/compares/snapshots）仍为本地目录（DataDir 为空时回退系统临时目录）。同时为 StoreNone 库模式补齐 `PersistMgr` 全方法 nil-safe 防护（读返回空、写返回 `ErrStoreDisabled`），此前未配置存储时持久化端点会 nil panic。
+- **实施路线**：将 store 层的裸 SQL（store/*.go 共 6 个文件的 CRUD/建表）迁到 cydb——建表走 `AutoMigrate`（结构体即模型），CRUD 走 ss 构建器。一次迁移，SQLite/MySQL/PostgreSQL/Oracle 全部获得支持，且后续新增存储引擎零方言成本。（实际实现直接基于 cydb 高级 CRUD，无裸 SQL。）
 - **默认行为**：未注入时 `WithDataDir(dataDir)` 即 StoreSQLite 便捷糖（内部等价于 `DBConnection{Type: "sqlite"}`，见 3.1/4.1），CLI/Web 现状行为不变。
-- **迁移风险**：现有 store/migrate.go 的手写建表语句与 `AutoMigrate` 生成的 schema 需做等价性回归（类型映射、索引、默认值）；**另需核实 cydb 的 SQLite 驱动是否纯 Go**（现 store 用纯 Go 驱动保证交叉编译，若 cydb 走 cgo 驱动会破坏现有 CI 交叉编译能力——迁移前必须确认）。v0 不做 SQLite→其它库的数据迁移工具（库使用者是新集成，无存量）。
+- **迁移风险**：migrate.AutoMigrate 的 schema 等价性已由 store/service 既有测试覆盖（SQLite 方言回归通过）；MySQL 方言由环境管理产品（tl-env）集成实测（`database0.db` 配 `dqex: dqex` 独立 database，`EnsureDB` 自动建库 + `CompatCollation` 5.7 兼容）。cydb SQLite 驱动为纯 Go（modernc.org/sqlite），交叉编译不受影响。v0 不做 SQLite→其它库的数据迁移工具（库使用者是新集成，无存量）。
 - 场景：宿主多副本部署共享连接库/历史/任务/快照索引，或运维上要求内部数据进已有数据库实例（不再限定 MySQL）。
 
 #### 4.4.2 元数据缓存：Redis 后端

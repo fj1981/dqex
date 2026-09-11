@@ -3,6 +3,8 @@ package dqex
 import (
 	"context"
 	"os"
+
+	"github.com/fj1981/dqex/internal/engine"
 )
 
 // ---- 任务型能力（docs/library-api-design.md 3.2 tasks.go） ----
@@ -98,6 +100,12 @@ func (c *Client) RunCompare(ctx context.Context, opts CompareOptions, cb Progres
 		return nil, err
 	}
 	return c.svc.RunCompare(c.ctx(ctx), opts, cb)
+}
+
+// LoadDataPackage 从 JSON 字节解析数据包（DataPackage 格式契约，与 tl-env DataHolder 兼容）。
+// 供宿主 DataPreparer 回调在修改包内容后重建数据包（JSON 往返）。
+func LoadDataPackage(data []byte) (*DataPackage, error) {
+	return engine.LoadDataPackage(data)
 }
 
 // localArtifactRef 将服务层返回的本地产物路径包装为 ArtifactRef（文件取大小，目录为 0）。

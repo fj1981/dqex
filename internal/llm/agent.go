@@ -103,6 +103,9 @@ func (a *ReactAgent) Stream(ctx context.Context, msgs []*schema.Message, cb Agen
 
 	var b strings.Builder
 	var u Usage
+	// 思考内容剥离状态机：推理模型（MiniMax M 系列等）在正文前输出 <think> 块，
+	// 标签可能被流式增量拆在任意位置；工具轮 Content 为空不影响状态机。
+	var stripper thinkStripper
 	for {
 		m, err := sr.Recv()
 		if errors.Is(err, io.EOF) {
@@ -122,15 +125,23 @@ func (a *ReactAgent) Stream(ctx context.Context, msgs []*schema.Message, cb Agen
 		if m.Content != "" {
 			b.WriteString(m.Content)
 			if cb.OnContent != nil {
-				cb.OnContent(m.Content)
+				if clean := stripper.Feed(m.Content); clean != "" {
+					cb.OnContent(clean)
+				}
 			}
 		}
 	}
-	content := b.String()
-	hasThinking := hasThinkingTag(content)
-	cylog.Debugf("[llm] Agent Stream 完成 耗时=%s contentChars=%d usage=prompt=%d/completion=%d/total=%d hasThinking=%v content=%q",
-		time.Since(start).Round(time.Millisecond), len(content),
-		u.PromptTokens, u.CompletionTokens, u.TotalTokens, hasThinking, truncStr(content, 300))
+	// 流结束：输出缓冲中残留的不完整标签片段（think 外）
+	if cb.OnContent != nil {
+		if rest := stripper.Flush(); rest != "" {
+			cb.OnContent(rest)
+		}
+	}
+	rawContent := b.String()
+	content := stripThinkAll(rawContent)
+	cylog.Debugf("[llm] Agent Stream 完成 耗时=%s contentChars=%d(think剥离后%d) usage=prompt=%d/completion=%d/total=%d rawHasThinking=%v content=%q",
+		time.Since(start).Round(time.Millisecond), len(rawContent), len(content),
+		u.PromptTokens, u.CompletionTokens, u.TotalTokens, hasThinkingTag(rawContent), truncStr(content, 300))
 	return content, u, nil
 }
 

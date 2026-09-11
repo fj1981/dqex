@@ -21,9 +21,9 @@ import (
 	"github.com/fj1981/dqex/internal/service"
 	webui "github.com/fj1981/dqex/web"
 
+	"github.com/gin-gonic/gin"
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cylog"
-	"github.com/gin-gonic/gin"
 )
 
 func nowMillis() int64 { return time.Now().UnixMilli() }
@@ -578,6 +578,7 @@ func Mount(r *gin.Engine, svc *service.Service, opts MountOptions) {
 	if len(opts.FrameAncestors) > 0 {
 		mws = append(mws, frameAncestors(opts.FrameAncestors))
 	}
+	mws = append(mws, injectUser)
 	root := r.Group(prefix, mws...)
 
 	// API 路由（与 RunWeb 同一套 handler，前缀参数化）
@@ -607,4 +608,18 @@ func Mount(r *gin.Engine, svc *service.Service, opts MountOptions) {
 		}
 		c.Status(http.StatusNotFound)
 	})
+}
+
+// ---- 用户身份（嵌入宿主多用户隔离） ----
+
+// dqexUser 从宿主注入的身份头读取用户标识（X-DQEX-User，由宿主鉴权中间件设置）；
+// 独立部署无该头时回退 local（原样存储，兼容既有数据）。
+func dqexUser(c *gin.Context) string {
+	return service.NormalizeUser(c.GetHeader("X-DQEX-User"))
+}
+
+// injectUser 把用户标识注入请求 context（写侧链路：执行历史/审计/AI 会话落盘时按域隔离）。
+func injectUser(c *gin.Context) {
+	c.Request = c.Request.WithContext(service.WithUser(c.Request.Context(), dqexUser(c)))
+	c.Next()
 }

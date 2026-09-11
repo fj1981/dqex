@@ -865,7 +865,6 @@ export default function CompareView() {
               taskType="compare"
               wide
               compactLog
-              onSaveTask={() => setSaveOpen(true)}
               onBack={() => {
                 setRunningTaskID("")
                 setReport(null)
@@ -885,7 +884,6 @@ export default function CompareView() {
           {report && (
             <CompareReport
               result={report}
-              onSaveTask={() => setSaveOpen(true)}
               onRestart={() => {
                 setRunningTaskID("")
                 setReport(null)

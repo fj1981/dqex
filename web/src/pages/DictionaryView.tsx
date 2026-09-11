@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
@@ -52,8 +52,19 @@ export default function DictionaryView() {
   const [runningTaskID, setRunningTaskID] = useState("")
   const [savedTasks, setSavedTasks] = useState<TaskConfig[]>([])
   const [saveOpen, setSaveOpen] = useState(false)
+  // 嵌入模式 conn 注入（EmbedShell 解析 ?conn= 后写入 store，非嵌入模式恒为空）
+  const embedConn = useAppStore((s) => s.embedConn)
 
   const set = (patch: Partial<DictionaryOptions>) => setOpts((o) => ({ ...o, ...patch }))
+
+  // 宿主注入连接消费（一次性）：预选为源连接。与用户手动切换连接同语义：
+  // 清空已选库/表，避免与缓存任务配置的旧选择错位（参照 MigrateView）
+  const embedApplied = useRef(false)
+  useEffect(() => {
+    if (!embedConn || embedApplied.current) return
+    embedApplied.current = true
+    set({ sourceConn: embedConn, databases: [], tables: [] })
+  }, [embedConn]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadSavedTasks = useCallback(async () => {
     try {
@@ -226,7 +237,6 @@ export default function DictionaryView() {
         <ProgressView
           taskID={runningTaskID}
           taskType="dictionary"
-          onSaveTask={() => setSaveOpen(true)}
           onBack={resetWizard}
         />
       )}

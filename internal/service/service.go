@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fj1981/dqex/internal/engine"
@@ -19,6 +20,7 @@ import (
 	"github.com/fj1981/infrakit/pkg/cydist"
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cylog"
+	"github.com/fj1981/infrakit/pkg/cystore"
 )
 
 // Service 业务服务层：Web/CLI 共用，编排引擎 + 连接 + 任务 + 历史 + AI 辅助
@@ -39,6 +41,12 @@ type Service struct {
 	contributors  []Contributor                  // 业务对象贡献者模板（WithContributors 注册，代理层）
 	queryHooks    *engine.QueryHooks             // SQL 审计钩子（WithQueryHooks 注册，逐语句回调）
 	dataPreparers map[string]engine.DataPreparer // 数据前置处理器（按目标库名注册，With 库模式选项注入）
+
+	// ---- 快照对象存储（WithArtifactStore，见 snapshot.go） ----
+	artifactStore  *cystore.Store // 非空 = 快照落对象存储；nil = 本地目录（默认行为）
+	artifactBucket string         // 对象存储 bucket（空 = store 默认 bucket）
+	snapIdxMu      sync.Mutex     // 快照索引读-改-写串行化（本地/对象存储共用 + 存量索引迁移互斥）
+	snapIdxMig     atomic.Bool    // 存量 JSON 索引 → DB 一次性迁移已确认（成功后快路径；失败不固化）
 }
 
 // ---- 元数据分级接口缓存 ----
@@ -280,9 +288,10 @@ func (s *Service) DeleteConnection(key string) error {
 	if err := s.persist.DeleteConn(key); err != nil {
 		return cygin.WrapError(err, cygin.ErrInternalServer, cygin.WithErrPrint())
 	}
-	// 级联清理该连接的 AI 会话与工作区（连接删除后其对话/布局一并失效）
-	_ = s.persist.DeleteAISessionsByConn(connID)
-	_ = s.persist.DeleteWorkspace(connID)
+	// 级联清理该连接的 AI 会话与工作区（连接删除后其对话/布局一并失效）。
+	// 跨用户域按 conn_key 等值清理所有用户域的数据，避免其他用户域残留孤儿数据
+	_ = s.persist.DeleteAllUsersAISessionsByConn(connID)
+	_ = s.persist.DeleteAllUsersWorkspacesByConn(connID)
 	// 连接删除：元数据缓存全量失效，避免旧连接信息残留
 	invalidateMetaCache(context.Background())
 	s.fireDeleted(key)
@@ -620,11 +629,11 @@ func (s *Service) RunCompareRecorded(ctx context.Context, opts CompareOptions, c
 		record.ErrorMsg = err.Error()
 	} else {
 		record.Status = "done"
-		outputPath := filepath.Join(s.persist.CompareDir(), "compare-"+taskID+".json")
-		if e := saveCompareResult(outputPath, result); e != nil {
+		outPath, e := s.saveCompareResultArtifact("compare-"+taskID+".json", result)
+		if e != nil {
 			cylog.Errorf("保存对比结果失败: %v", e)
 		} else {
-			record.OutputPath = outputPath
+			record.OutputPath = outPath
 		}
 		sm := result.Summary
 		record.Summary = fmt.Sprintf("%d项, 一致%d, 结构差异%d, 数据差异%d", sm.Total, sm.Matched, sm.StructureDiff, sm.DataDiff)
@@ -653,6 +662,7 @@ func normalizeReset(mode ResetMode) ResetMode {
 type TaskRunner struct {
 	mu      sync.RWMutex
 	running map[string]*runningTask
+	hooks   *TaskHooks // 任务生命周期回调（库模式注入；nil 时零开销）
 }
 
 type runningTask struct {
@@ -667,8 +677,9 @@ func newTaskRunner() *TaskRunner {
 	return &TaskRunner{running: map[string]*runningTask{}}
 }
 
-// Start 注册并启动一个异步任务；lang 为任务语言（错误终态消息按其渲染）
-func (r *TaskRunner) Start(taskID, taskType, lang string, run func(ctx context.Context, publish ProgressFunc) error) {
+// Start 注册并启动一个异步任务；source 为任务主连接 key、title 为展示标题、user 为
+// 发起人标识（均随 OnTaskStart 钩子透传宿主，详见 TaskHooks 契约）；lang 为任务语言（错误终态消息按其渲染）
+func (r *TaskRunner) Start(taskID, taskType, source, title, lang, user string, run func(ctx context.Context, publish ProgressFunc) error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	rt := &runningTask{
 		cancel:   cancel,
@@ -677,7 +688,12 @@ func (r *TaskRunner) Start(taskID, taskType, lang string, run func(ctx context.C
 	}
 	r.mu.Lock()
 	r.running[taskID] = rt
+	hooks := r.hooks
 	r.mu.Unlock()
+	// OnTaskStart 在登记完成后、goroutine 启动前同步调用（宿主镜像落库不阻塞任务执行）
+	if hooks != nil && hooks.OnTaskStart != nil {
+		hooks.OnTaskStart(TaskStartInfo{TaskID: taskID, TaskType: taskType, Source: source, Title: title, User: user})
+	}
 
 	go func() {
 		defer cancel()
@@ -729,9 +745,9 @@ func (r *TaskRunner) Start(taskID, taskType, lang string, run func(ctx context.C
 
 func (r *TaskRunner) publish(taskID string, p ProgressInfo) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	t, ok := r.running[taskID]
 	if !ok {
+		r.mu.Unlock()
 		return
 	}
 	t.latest = p
@@ -750,6 +766,12 @@ func (r *TaskRunner) publish(taskID string, p ProgressInfo) {
 			default:
 			}
 		}
+	}
+	hooks := r.hooks
+	r.mu.Unlock()
+	// OnTaskProgress 在任务执行 goroutine 中调用（含终态），锁外触发避免慢回调阻塞全部任务
+	if hooks != nil && hooks.OnTaskProgress != nil {
+		hooks.OnTaskProgress(taskID, p)
 	}
 }
 
@@ -791,9 +813,14 @@ func (r *TaskRunner) Cancel(taskID string) error {
 
 // StartExport 异步启动导出任务，返回 taskID
 func (s *Service) StartExport(opts ExportOptions, taskConfigID string) (string, error) {
-	if _, err := s.resolveConn(context.Background(), opts.SourceConn, opts.Source); err != nil {
+	// 启动前预解析并归一 opts.Source：闭包内 Run* 的 resolveConn 走 inline
+	// 快路径直接复用，避免「校验通过后、执行前连接被删/变更」导致任务失败。
+	// 副作用：Run* 中 fireResolved 会以 ConnSourceInline 多触发一次（连接审计注意）
+	src, err := s.resolveConn(context.Background(), opts.SourceConn, opts.Source)
+	if err != nil {
 		return "", err
 	}
+	opts.Source = src
 	taskID := newTaskID()
 	dbs, tbls := opts.Databases, opts.Tables
 	if len(opts.Selections) > 0 {
@@ -802,11 +829,20 @@ func (s *Service) StartExport(opts ExportOptions, taskConfigID string) (string, 
 			dbs = append(dbs, sel.DB)
 		}
 	}
+	// 对象存储模式：zip 产物组装到 tmp 工作区，完成后唯一一次流式上传（不落本地 exports/）
+	if s.artifactStore != nil && opts.Compress {
+		workDir, werr := s.artifactWorkDir("export")
+		if werr != nil {
+			return "", werr
+		}
+		opts.OutputDir = workDir
+		defer os.RemoveAll(workDir) // 任务结束（含失败）清理工作区残留
+	}
 	record := ExecutionRecord{ID: taskID, TaskType: "export", TaskConfigID: taskConfigID, Status: "running", StartedAt: time.Now().UnixMilli(),
 		Target: fmt.Sprintf("%s · %s", s.connLabel(opts.SourceConn, opts.Source), targetTables(dbs, tbls))}
 	_ = s.persist.SaveHistory(record)
 
-	s.runner.Start(taskID, "export", opts.Lang, func(ctx context.Context, publish ProgressFunc) error {
+	s.runner.Start(taskID, "export", opts.SourceConn, record.Target, opts.Lang, opts.User, func(ctx context.Context, publish ProgressFunc) error {
 		var last ProgressInfo
 		wrapped := func(p ProgressInfo) { last = p; publish(p) }
 		outputPath, err := s.RunExport(ctx, opts, wrapped)
@@ -817,14 +853,28 @@ func (s *Service) StartExport(opts ExportOptions, taskConfigID string) (string, 
 			r.TotalUnits = last.TotalUnits
 			r.TotalRows = last.DoneRows
 			r.Summary = buildSummary(last.TotalUnits, last.DoneRows, record.FileSize)
-			if outputPath != "" {
+			if outputPath == "" {
+				return
+			}
+			logical, size, rerr := s.relocateExportArtifact(outputPath)
+			if rerr != nil {
+				cylog.Errorf("归置导出产物失败: %v", rerr)
 				r.OutputPath = outputPath
-				if st, statErr := os.Stat(outputPath); statErr == nil {
-					r.FileSize = st.Size()
-					r.Summary = buildSummary(last.TotalUnits, last.DoneRows, r.FileSize)
-				}
+				return
+			}
+			r.OutputPath = logical
+			if size > 0 {
+				r.FileSize = size
+				r.Summary = buildSummary(last.TotalUnits, last.DoneRows, size)
 			}
 		})
+		// 归置后的产物路径回灌进度流：done 终态由 runner 以 t.latest 为底推送，
+		// 不回灌则 done 事件的 OutputPath 仍是 tmp 工作区路径（store 模式本地已删，
+		// SSE 订阅方与宿主 hook 拿到后无法取用）
+		if err == nil && record.OutputPath != "" && record.OutputPath != outputPath {
+			last.OutputPath = record.OutputPath
+			publish(last)
+		}
 		return err
 	})
 	return taskID, nil
@@ -832,9 +882,12 @@ func (s *Service) StartExport(opts ExportOptions, taskConfigID string) (string, 
 
 // StartDictionary 异步启动数据字典任务，返回 taskID；摘要口径为 "X库Y表, 大小"（字典无行数）
 func (s *Service) StartDictionary(opts DictionaryOptions, taskConfigID string) (string, error) {
-	if _, err := s.resolveConn(context.Background(), opts.SourceConn, opts.Source); err != nil {
+	// 预解析归一（语义见 StartExport，下同）
+	src, err := s.resolveConn(context.Background(), opts.SourceConn, opts.Source)
+	if err != nil {
 		return "", err
 	}
+	opts.Source = src
 	taskID := newTaskID()
 	dbs, tbls := opts.Databases, opts.Tables
 	if len(opts.Selections) > 0 {
@@ -843,11 +896,20 @@ func (s *Service) StartDictionary(opts DictionaryOptions, taskConfigID string) (
 			dbs = append(dbs, sel.DB)
 		}
 	}
+	// 对象存储模式：字典产物组装到 tmp 工作区，完成后唯一一次流式上传（不落本地 exports/）
+	if s.artifactStore != nil {
+		workDir, werr := s.artifactWorkDir("dictionary")
+		if werr != nil {
+			return "", werr
+		}
+		opts.OutputDir = workDir
+		defer os.RemoveAll(workDir)
+	}
 	record := ExecutionRecord{ID: taskID, TaskType: "dictionary", TaskConfigID: taskConfigID, Status: "running", StartedAt: time.Now().UnixMilli(),
 		Target: fmt.Sprintf("%s · %s", s.connLabel(opts.SourceConn, opts.Source), targetTables(dbs, tbls))}
 	_ = s.persist.SaveHistory(record)
 
-	s.runner.Start(taskID, "dictionary", opts.Lang, func(ctx context.Context, publish ProgressFunc) error {
+	s.runner.Start(taskID, "dictionary", opts.SourceConn, record.Target, opts.Lang, opts.User, func(ctx context.Context, publish ProgressFunc) error {
 		var last ProgressInfo
 		wrapped := func(p ProgressInfo) { last = p; publish(p) }
 		outputPath, err := s.RunDictionary(ctx, opts, wrapped)
@@ -865,14 +927,25 @@ func (s *Service) StartDictionary(opts DictionaryOptions, taskConfigID string) (
 			}
 			summary := fmt.Sprintf("%d库%d表", dbCount, last.TotalUnits)
 			if outputPath != "" {
-				r.OutputPath = outputPath
-				if st, statErr := os.Stat(outputPath); statErr == nil {
-					r.FileSize = st.Size()
-					summary += ", " + humanSize(r.FileSize)
+				logical, size, rerr := s.relocateExportArtifact(outputPath)
+				if rerr != nil {
+					cylog.Errorf("归置字典产物失败: %v", rerr)
+					r.OutputPath = outputPath
+				} else {
+					r.OutputPath = logical
+					if size > 0 {
+						r.FileSize = size
+						summary += ", " + humanSize(size)
+					}
 				}
 			}
 			r.Summary = summary
 		})
+		// 归置后的产物路径回灌进度流（语义见 StartExport）
+		if err == nil && record.OutputPath != "" && record.OutputPath != outputPath {
+			last.OutputPath = record.OutputPath
+			publish(last)
+		}
 		return err
 	})
 	return taskID, nil
@@ -880,15 +953,18 @@ func (s *Service) StartDictionary(opts DictionaryOptions, taskConfigID string) (
 
 // StartImport 异步启动导入任务，返回 taskID
 func (s *Service) StartImport(opts ImportOptions, taskConfigID string) (string, error) {
-	if _, err := s.resolveConn(context.Background(), opts.TargetConn, opts.Target); err != nil {
+	// 预解析归一（语义见 StartExport，下同）
+	target, err := s.resolveConn(context.Background(), opts.TargetConn, opts.Target)
+	if err != nil {
 		return "", err
 	}
+	opts.Target = target
 	taskID := newTaskID()
 	record := ExecutionRecord{ID: taskID, TaskType: "import", TaskConfigID: taskConfigID, Status: "running", StartedAt: time.Now().UnixMilli(),
 		Target: fmt.Sprintf("%s · %s", s.connLabel(opts.TargetConn, opts.Target), filepath.Base(opts.InputPath))}
 	_ = s.persist.SaveHistory(record)
 
-	s.runner.Start(taskID, "import", opts.Lang, func(ctx context.Context, publish ProgressFunc) error {
+	s.runner.Start(taskID, "import", opts.TargetConn, record.Target, opts.Lang, opts.User, func(ctx context.Context, publish ProgressFunc) error {
 		var last ProgressInfo
 		wrapped := func(p ProgressInfo) { last = p; publish(p) }
 		result, err := s.RunImport(ctx, opts, wrapped)
@@ -926,12 +1002,17 @@ func (s *Service) StartImport(opts ImportOptions, taskConfigID string) (string, 
 
 // StartMigrate 异步启动迁移任务，返回 taskID
 func (s *Service) StartMigrate(opts MigrateOptions, taskConfigID string) (string, error) {
-	if _, err := s.resolveConn(context.Background(), opts.SourceConn, opts.Source); err != nil {
+	// 预解析归一（语义见 StartExport，下同）
+	src, err := s.resolveConn(context.Background(), opts.SourceConn, opts.Source)
+	if err != nil {
 		return "", err
 	}
-	if _, err := s.resolveConn(context.Background(), opts.TargetConn, opts.Target); err != nil {
+	opts.Source = src
+	target, err := s.resolveConn(context.Background(), opts.TargetConn, opts.Target)
+	if err != nil {
 		return "", err
 	}
+	opts.Target = target
 	taskID := newTaskID()
 	dbs := []string{}
 	if len(opts.Selections) > 0 {
@@ -943,7 +1024,7 @@ func (s *Service) StartMigrate(opts MigrateOptions, taskConfigID string) (string
 		Target: fmt.Sprintf("%s → %s · %s", s.connLabel(opts.SourceConn, opts.Source), s.connLabel(opts.TargetConn, opts.Target), targetTables(dbs, opts.Tables))}
 	_ = s.persist.SaveHistory(record)
 
-	s.runner.Start(taskID, "migrate", opts.Lang, func(ctx context.Context, publish ProgressFunc) error {
+	s.runner.Start(taskID, "migrate", opts.TargetConn, record.Target, opts.Lang, opts.User, func(ctx context.Context, publish ProgressFunc) error {
 		var last ProgressInfo
 		wrapped := func(p ProgressInfo) { last = p; publish(p) }
 		err := s.RunMigrate(ctx, opts, wrapped)
@@ -982,7 +1063,7 @@ func (s *Service) StartCompare(opts CompareOptions, taskConfigID string) (string
 		Target: fmt.Sprintf("%s → %s · %s", s.connLabel(opts.SourceConn, src), s.connLabel(opts.TargetConn, target), targetTables(nil, opts.Tables))}
 	_ = s.persist.SaveHistory(record)
 
-	s.runner.Start(taskID, "compare", opts.Lang, func(ctx context.Context, publish ProgressFunc) error {
+	s.runner.Start(taskID, "compare", opts.TargetConn, record.Target, opts.Lang, opts.User, func(ctx context.Context, publish ProgressFunc) error {
 		var last ProgressInfo
 		wrapped := func(p ProgressInfo) { last = p; publish(p) }
 		result, err := s.RunCompare(ctx, opts, wrapped)
@@ -995,11 +1076,11 @@ func (s *Service) StartCompare(opts CompareOptions, taskConfigID string) (string
 			if result == nil {
 				return
 			}
-			outputPath := filepath.Join(s.persist.CompareDir(), "compare-"+taskID+".json")
-			if e := saveCompareResult(outputPath, result); e != nil {
+			outPath, e := s.saveCompareResultArtifact("compare-"+taskID+".json", result)
+			if e != nil {
 				cylog.Errorf("保存对比结果失败: %v", e)
 			} else {
-				r.OutputPath = outputPath
+				r.OutputPath = outPath
 			}
 			sm := result.Summary
 			r.Summary = fmt.Sprintf("%d项, 一致%d, 结构差异%d, 数据差异%d", sm.Total, sm.Matched, sm.StructureDiff, sm.DataDiff)
@@ -1009,29 +1090,31 @@ func (s *Service) StartCompare(opts CompareOptions, taskConfigID string) (string
 	return taskID, nil
 }
 
-// saveCompareResult 对比结果序列化落盘（带缩进便于人工查看）
-func saveCompareResult(path string, result *CompareResult) error {
+// saveCompareResultArtifact 对比结果序列化后经产物存取器落位，返回逻辑路径
+// （<prefix>/<name> 形式；对象存储模式直接上传，独立模式写 compares/ 受管目录）
+func (s *Service) saveCompareResultArtifact(name string, result *CompareResult) (string, error) {
 	data, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return err
+		return "", err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return s.artifactPut(artifactPrefixCompares, name, data)
 }
 
-// GetCompareResult 按 taskID 读取已落盘的对比结果报告
+// loadCompareResultArtifact 按 OutputPath（逻辑路径或历史中的文件名）读取对比报告
+func (s *Service) loadCompareResultArtifact(name string) ([]byte, error) {
+	if !isArtifactLogicalPath(name) {
+		name = artifactPrefixCompares + "/" + name
+	}
+	return s.artifactGet(name)
+}
+
+// GetCompareResult 按 taskID 读取已落位的对比结果报告
 func (s *Service) GetCompareResult(taskID string) (*CompareResult, error) {
-	path := ""
+	name := "compare-" + taskID + ".json"
 	if rec, err := s.persist.GetHistory(taskID); err == nil && rec.OutputPath != "" {
-		path = rec.OutputPath
+		name = rec.OutputPath
 	}
-	if path == "" {
-		path = filepath.Join(s.persist.CompareDir(), "compare-"+taskID+".json")
-		// 兼容：旧版对比报告存于 exports/，新路径不存在时回退旧路径读取
-		if _, serr := os.Stat(path); serr != nil {
-			path = filepath.Join(s.persist.ExportDir(), "compare-"+taskID+".json")
-		}
-	}
-	data, err := os.ReadFile(path)
+	data, err := s.loadCompareResultArtifact(name)
 	if err != nil {
 		return nil, cygin.NewError(ErrTaskNotFound, cygin.WithErrPrint(), cygin.WithErrDetailf("compare result not found: %s", taskID))
 	}
@@ -1224,7 +1307,15 @@ func (s *Service) DeleteHistory(taskID string) error {
 	if err := s.persist.DeleteHistory(taskID); err != nil {
 		return err
 	}
-	// 记录删除成功后清理对应产物（导出目录/zip、对比报告），用户自定义输出路径不受影响
+	// 记录删除成功后清理对应产物：逻辑路径（exports 包/对比报告）走存取器删除，
+	// 目录产物（Compress=false 明细目录）与用户自定义输出路径仍按本地文件清理
+	// （RemoveArtifact 仅作用于受管目录内，用户自定义路径不受影响）
+	if isArtifactLogicalPath(rec.OutputPath) {
+		if err := s.artifactRemove(rec.OutputPath); err != nil {
+			cylog.Warnf("清理产物对象失败: %v", err)
+		}
+		return nil
+	}
 	s.persist.RemoveArtifact(rec.OutputPath)
 	return nil
 }

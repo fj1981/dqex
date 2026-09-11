@@ -399,7 +399,7 @@ export default function WorkspaceLayout() {
                 {/* 窄栏放不下 host:port 文本，完整地址挂 title 悬停可见（下拉选项里仍完整展示） */}
                 <SelectTrigger
                   className="h-7 min-w-0 flex-1 px-2 text-xs"
-                  title={conn ? `${conn.name} · ${conn.conn.Host}:${conn.conn.Port}` : undefined}
+                  title={conn ? (conn.conn.Host ? `${conn.name} · ${conn.conn.Host}:${conn.conn.Port}` : conn.name) : undefined}
                 >
                   {conn ? (
                     <span className="flex min-w-0 items-center gap-1.5">
@@ -451,9 +451,12 @@ export default function WorkspaceLayout() {
                               <span className="shrink-0 text-xs font-mono text-muted-foreground">({c.shortName})</span>
                             )}
                           </span>
-                          <span className="truncate pl-6 font-mono text-xs text-muted-foreground">
-                            {c.conn.Host}:{c.conn.Port}
-                          </span>
+                          {/* 副行：真实连接显示 host:port；虚拟/直连连接（无 host）显示类型名；都无则不渲染 */}
+                          {(c.conn.Host || c.conn.Type) && (
+                            <span className="truncate pl-6 font-mono text-xs text-muted-foreground">
+                              {c.conn.Host ? `${c.conn.Host}:${c.conn.Port}` : c.conn.Type}
+                            </span>
+                          )}
                         </span>
                       </SelectItem>
                     ))

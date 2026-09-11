@@ -110,6 +110,105 @@ func (c *Client) debugf(format string, args ...any) {
 	cylog.Debugf(format, args...)
 }
 
+// stripThinkAll 剥离完整文本中的 <think>...</think> 思考块。
+// 推理模型（MiniMax M 系列、DeepSeek R1 等）默认在正文前输出思考内容且多数无法关闭，
+// SQL 生成场景只需要最终结果；未闭合的思考块（流被截断）整段丢弃。
+func stripThinkAll(s string) string {
+	for {
+		i := strings.Index(s, openThinkTag)
+		if i < 0 {
+			return s
+		}
+		j := strings.Index(s[i:], closeThinkTag)
+		if j < 0 {
+			return s[:i]
+		}
+		s = s[:i] + s[i+j+len(closeThinkTag):]
+	}
+}
+
+const (
+	openThinkTag  = "<think>"
+	closeThinkTag = "</think>"
+)
+
+// tagPrefixLen 返回 s 结尾与 tag 前缀的最大匹配长度。
+// 用于流式场景：缓冲尾部可能是被 chunk 拆开的标签前缀（如 "<thi"），
+// 这部分不能输出，需保留等待下一个增量确认。
+func tagPrefixLen(s, tag string) int {
+	n := len(s)
+	if n > len(tag) {
+		n = len(tag)
+	}
+	for i := n; i > 0; i-- {
+		if strings.HasSuffix(s, tag[:i]) {
+			return i
+		}
+	}
+	return 0
+}
+
+// thinkStripper 流式剥离 <think>...</think> 的状态机。
+// 流式增量可能把标签拆在任意位置（如 "<thi" + "nk>"），
+// 需要缓冲不确定的尾部直到能判定是否为标签。
+type thinkStripper struct {
+	inThink bool
+	buf     strings.Builder
+}
+
+// Feed 喂入一段增量，返回应透传给调用方的正文部分。
+func (t *thinkStripper) Feed(delta string) string {
+	t.buf.WriteString(delta)
+	var out strings.Builder
+	for {
+		s := t.buf.String()
+		if t.inThink {
+			idx := strings.Index(s, closeThinkTag)
+			if idx < 0 {
+				// 保留可能是闭合标签前缀的尾部，其余（思考内容）丢弃。
+				keep := tagPrefixLen(s, closeThinkTag)
+				t.buf.Reset()
+				if keep > 0 {
+					t.buf.WriteString(s[len(s)-keep:])
+				}
+				break
+			}
+			t.inThink = false
+			t.buf.Reset()
+			t.buf.WriteString(s[idx+len(closeThinkTag):])
+		} else {
+			idx := strings.Index(s, openThinkTag)
+			if idx < 0 {
+				keep := tagPrefixLen(s, openThinkTag)
+				t.buf.Reset()
+				if keep > 0 {
+					t.buf.WriteString(s[len(s)-keep:])
+				}
+				if out.Len() == 0 && len(s) == keep {
+					break
+				}
+				out.WriteString(s[:len(s)-keep])
+				break
+			}
+			out.WriteString(s[:idx])
+			t.inThink = true
+			t.buf.Reset()
+			t.buf.WriteString(s[idx+len(openThinkTag):])
+		}
+	}
+	return out.String()
+}
+
+// Flush 流结束时调用，返回缓冲残留（think 外的不完整标签片段）；未闭合的思考块丢弃。
+func (t *thinkStripper) Flush() string {
+	s := t.buf.String()
+	t.buf.Reset()
+	if t.inThink {
+		return ""
+	}
+	return s
+}
+
 // msgsChars 统计消息列表的字符总量（用于调试日志粗估上下文规模）。
 func msgsChars(msgs []*schema.Message) int {
 	n := 0
@@ -158,9 +257,10 @@ func (c *Client) Chat(ctx context.Context, msgs []*schema.Message) (string, Usag
 	if out == nil {
 		return "", u, errors.New("llm: 模型返回空响应")
 	}
-	c.debugf("[llm] Chat 完成 耗时=%s contentChars=%d usage=prompt=%d/completion=%d/total=%d",
-		time.Since(start).Round(time.Millisecond), len(out.Content), u.PromptTokens, u.CompletionTokens, u.TotalTokens)
-	return out.Content, u, nil
+	content := stripThinkAll(out.Content)
+	c.debugf("[llm] Chat 完成 耗时=%s contentChars=%d(think剥离后%d) usage=prompt=%d/completion=%d/total=%d",
+		time.Since(start).Round(time.Millisecond), len(out.Content), len(content), u.PromptTokens, u.CompletionTokens, u.TotalTokens)
+	return content, u, nil
 }
 
 // ChatStream 流式生成：每收到一段增量回调 onDelta，结束后返回流尾 usage（模型未提供则记 0）。
@@ -177,6 +277,8 @@ func (c *Client) ChatStream(ctx context.Context, msgs []*schema.Message, onDelta
 
 	var u Usage
 	var b strings.Builder
+	// 思考内容剥离状态机：标签可能被流式增量拆在任意位置
+	var stripper thinkStripper
 	first := true
 	for {
 		m, err := sr.Recv()
@@ -202,8 +304,16 @@ func (c *Client) ChatStream(ctx context.Context, msgs []*schema.Message, onDelta
 		if m.Content != "" {
 			b.WriteString(m.Content)
 			if onDelta != nil {
-				onDelta(m.Content)
+				if clean := stripper.Feed(m.Content); clean != "" {
+					onDelta(clean)
+				}
 			}
+		}
+	}
+	// 流结束：输出缓冲中残留的不完整标签片段（think 外）
+	if onDelta != nil {
+		if rest := stripper.Flush(); rest != "" {
+			onDelta(rest)
 		}
 	}
 	c.debugf("[llm] Stream 完成 耗时=%s contentChars=%d usage=prompt=%d/completion=%d/total=%d",

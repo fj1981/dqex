@@ -14,10 +14,10 @@ import (
 	"github.com/fj1981/dqex/internal/engine"
 	"github.com/fj1981/dqex/internal/llm"
 
+	"github.com/spf13/cobra"
 	"github.com/fj1981/infrakit/pkg/cydb/def"
 	"github.com/fj1981/infrakit/pkg/cygin"
 	"github.com/fj1981/infrakit/pkg/cylog"
-	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 

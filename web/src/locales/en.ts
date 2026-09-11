@@ -1071,6 +1071,8 @@ const en: typeof import("./zh").default = {
     create: "New Snapshot",
     createHere: "Create Snapshot",
     searchPlaceholder: "Search snapshots...",
+    connFilter: "Filter by connection",
+    connFilterAll: "All connections",
     empty: "No snapshots",
     noMatch: "No matching snapshots",
     tableCount: "{{n}} tables",

@@ -113,6 +113,20 @@ type SnapshotCompareOptions struct {
 - 单个快照文件独立：方便删除、导出、备份
 - 不使用加密：快照不含密码，仅含表结构（列名/类型）和行数统计，敏感度低
 
+### 3.1.1 索引落库（v1.6 起）
+
+自 v1.6 起，快照**索引**迁移至 SQL 存储（persist 可用时），**内容**仍为上述 OSS 对象/本地文件：
+
+| 层 | 内容 | 存储 |
+|---|---|---|
+| 索引条目 `SnapshotInfo` | id/name/connId/dbNames/tableCount/totalRows 等元信息（每条几百字节） | DB 表 `snapshot_index`（`conn_id`/`created_at` 真实列建索引 + `body_json` 存完整条目） |
+| 快照内容 `Snapshot` | 全部表结构/列/采样行 | OSS `snapshots/<id>.json` 或本地文件，按需加载 |
+
+- **动机**：JSON 索引为 O(n) 读-改-写，OSS 上非原子（多写入方覆盖丢索引）；落库后写 O(1)、`GET /api/snapshots?connId=` 服务端按连接/环境过滤。
+- **StoreNone 降级**（库模式未配 StoreConn 且无 DataDir）：persist 为 nil，自动回退 JSON 索引路径，行为与旧版一致。
+- **存量迁移**：`ListSnapshots`/`CreateSnapshot`/`DeleteSnapshot` 首次调用时把 legacy `index.json` 逐条按 ID 幂等 upsert 入库，meta 表 `snapshot_index_migrated` 标记防重复；legacy 文件只读保留（回滚旧版本仍可读）。迁移失败模式均收敛为「未迁移」，不存在丢数据路径。
+- `GET /api/snapshots` 支持可选 `connId` 查询参数（按创建时连接过滤；库模式虚拟连接 ID 为 `env:<envId>`）。
+
 ### 3.2 持久化路径
 
 在 `PersistMgr` 中新增 `snapshotDir`：
