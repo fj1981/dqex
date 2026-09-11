@@ -1,0 +1,45 @@
+name: Mirror to Gitee
+
+# 每次 push 到 main 或打 v* tag 时，自动把代码与 tags 镜像同步到 Gitee。
+# 需在仓库设置为 secret：GITEE_TOKEN（Gitee 私人令牌，projects 权限）。
+# 若 secret 未配置，该 job 会安全跳过（不会失败）。
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-gitee
+  cancel-in-progress: true
+
+jobs:
+  mirror:
+    name: Push to Gitee
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mirror main + tags to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          if [ -z "${GITEE_TOKEN:-}" ]; then
+            echo "GITEE_TOKEN secret 未配置，跳过 Gitee 镜像"
+            exit 0
+          fi
+
+          git remote add gitee "https://oauth2:${GITEE_TOKEN}@gitee.com/fjcn/dqex.git"
+          git push gitee "refs/heads/main:refs/heads/main"
+
+          echo ">> push tags (若存在)"
+          for t in $(git tag); do
+            git push gitee "refs/tags/${t}:refs/tags/${t}"
+          done
+
+          echo ">> Gitee 镜像同步完成"
