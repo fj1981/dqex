@@ -25,20 +25,65 @@
 
 ## 🚀 One Tool. Every Environment. Even the Air-Gapped Ones.
 
-dqex is a cross-platform database workbench that ships as a **single static binary** — no JVM, no Electron, no installers, no network required. It packs **export, import, migration, comparison, snapshots, Excel data dictionaries, a full SQL terminal, and an AI assistant** into one tool, with both a polished Web UI and a scriptable CLI.
+dqex is a cross-platform database workbench that ships as a **single static binary** — no JVM, no Electron, no installers, no network required. It packs **export, import, migration, comparison, snapshots, Excel data dictionaries, a full SQL terminal, and an AI assistant** into one tool, with both a polished Web UI and a scriptable CLI sharing one engine.
 
-- 🪶 **Zero-dependency** — copy it to a USB stick and run it on a bank's air-gapped server
-- ⚡ **Starts in <1s**, ~50–60 MB memory footprint
-- 🤖 **AI-native agent** — explores your *real* schema, writes dialect-correct SQL, and never executes without your confirmation
-- 🧩 **Web + CLI, one engine** — same connections, saved tasks, and history on both sides
-- 🌐 **MySQL · PostgreSQL · Oracle** with automatic dialect conversion for cross-type migration
-- 📋 **Excel data dictionaries & snapshot diff reports** — compliance-ready by design (等保 / GDPR / audits)
-- 🏠 **Take production data home safely** — conditional export + gzip, restore to your local test env in 2 commands
+- 🪶 **Zero dependency** — one binary, no runtime to ship. Copy it to a USB stick and run it on a bank's air-gapped server.
+- 🏢 **Built for restricted networks** — a built-in offline SQL template library, plus the compliance artifacts audits actually ask for (Excel data dictionaries, snapshot diff reports, exportable history) built in rather than bolted on.
+- 🤖 **AI that cannot surprise you** — it reads your *real* schema before writing anything, generates dialect-correct SQL, and never executes a write without your confirmation. Leave it unconfigured and the AI entry point does not even render.
+- 🌐 **MySQL · PostgreSQL · Oracle** with automatic dialect conversion for cross-database migration.
+
+![AI-Assisted SQL demo — the agent explores the real table schema, then generates verified SQL](docs/demo-ai.gif)
+
+---
+
+## ⚡ Quick Start
+
+**1. Download the zip for your platform** from the [Releases page](https://github.com/fj1981/dqex/releases/latest) — macOS (Intel / Apple Silicon), Linux (x64 / arm64), Windows (x64). **No installation required.**
+
+**2. Unzip and run**
+
+```bash
+unzip dqex-*.zip && cd dqex && ./start.sh
+```
+
+```bat
+:: Windows
+start.bat
+```
+
+**3. Open the Web UI**
+
+```
+http://127.0.0.1:8181
+```
+
+That's it — add a connection and start exporting, comparing or querying. Nothing leaves your machine.
+
+<details>
+<summary>Optional: install to PATH, run as a daemon, or stop it</summary>
+
+```bash
+./install.sh                    # install to /usr/local/bin (optional)
+dqex                            # start Web UI at 127.0.0.1:8181
+./start.sh -d                   # background daemon
+./stop.sh                       # stop the daemon
+```
+
+```bat
+install.bat                     :: install to %LOCALAPPDATA%\dqex and add to PATH
+dqex                            :: start Web UI in a new terminal
+start.bat -d                    :: background
+stop.bat                        :: stop background service
+```
+
+</details>
+
+> **Not a Web UI person?** Every capability below also exists as a CLI command, and every command can emit JSON — see the CLI section further down.
 
 ---
 
 ## ✨ Feature Highlights
-y
+
 | Feature | Web | CLI | Description |
 |---|---|---|---|
 | Export | ✅ | `export` (`exp`) | Schema + data → SQL file (zip / gzip), conditional & consistent |
@@ -56,35 +101,29 @@ y
 
 ---
 
-## 🧑‍💻 Quick Start
+## 🤔 Why dqex — and why not DBeaver?
 
-### Download
+**If DBeaver works in your environment, use it.** It is a bigger, more mature tool and it is free. dqex is not trying to win on breadth — it is built for the environments DBeaver structurally cannot enter.
 
-Grab the zip for your platform from the [Releases page](https://github.com/fj1981/dqex/releases) and unzip — **no installation required**.
+| | dqex | DBeaver | Navicat | DataGrip |
+|---|---|---|---|---|
+| Install form | Single static binary | JVM + driver jars | Installer, licensed | IDE, licensed |
+| Air-gapped deploy | Copy and run | Manual JVM + jars | License constrained | License constrained |
+| Time to first query | Under a minute | Several minutes | Install + activate | Install + activate |
+| Cross-dialect migration | Built in, automatic | No | Yes | Partial |
+| Excel data dictionary | One command | Plugin | Yes | No |
+| Snapshot diff | Built in | No | No | No |
+| AI-assisted SQL | Built in, offline fallback | No | Limited | Limited |
+| Database breadth | MySQL, PostgreSQL, Oracle | Very wide | Wide | Wide |
+| Price | Free, MIT | Free | Paid per seat | Paid |
 
-### Linux / macOS
+**Where dqex is weaker:** it supports three database engines, not twenty. If you need SQL Server, ClickHouse, MongoDB or anything outside MySQL / PostgreSQL / Oracle, DBeaver is the better answer today. Additional drivers are explicitly welcome as contributions.
 
-```bash
-./install.sh                    # install to /usr/local/bin (optional)
-dqex                            # start Web UI at 127.0.0.1:8181
-# or run without installing:
-./start.sh                      # foreground (Ctrl+C to stop)
-./start.sh -d                   # background daemon
-./stop.sh                       # stop the daemon
-```
+Full comparison, including Bytebase and the known limitations: [docs/COMPARISON.md](docs/COMPARISON.md).
 
-### Windows
+---
 
-```bat
-install.bat                     :: install to %LOCALAPPDATA%\dqex and add to PATH
-dqex                            :: start Web UI in a new terminal
-:: or run without installing:
-start.bat                       :: foreground
-start.bat -d                    :: background
-stop.bat                        :: stop background service
-```
-
-### CLI in 30 seconds
+## 🧑‍💻 CLI in 30 seconds
 
 ```bash
 # Save a connection once, reuse everywhere
@@ -111,10 +150,6 @@ dqex dict camunda -s prod -o data_dict.xlsx
 ---
 
 ## 🤖 AI-Assisted SQL (Optional, Offline-Safe)
-
-<p align="center">
-  <img src="docs/demo-ai.gif" alt="AI-Assisted SQL demo — the agent explores the real table schema, then generates verified SQL" width="100%">
-</p>
 
 - **Real schema, not guesses** — the agent queries your actual table structures before generating SQL (Web UI shows live progress)
 - **Generate ≠ Execute** — AI only produces SQL text; write operations require confirmation, dangerous statements are blocked, and you can `\e`-edit before running
@@ -149,6 +184,8 @@ make install            # → /usr/local/bin
 
 - [CLI Manual](CLI.md) — every command, flag, and meta-command
 - [Project Overview](docs/OVERVIEW.md) — philosophy, personas, and deep-dive scenarios
+- [Comparison](docs/COMPARISON.md) — how dqex compares to DBeaver, Navicat, DataGrip and Bytebase
+- [Offline Operations Guide](docs/OFFLINE_OPERATIONS_GUIDE.md) — running dqex in isolated networks
 - [Engineering Conventions](docs/conventions.md) — state modeling & data-flow rules (read before contributing)
 
 ---
