@@ -38,7 +38,17 @@ dqex is a cross-platform database workbench that ships as a **single static bina
 
 ## ⚡ Quick Start
 
-**1. Download the zip for your platform** from the [Releases page](https://github.com/fj1981/dqex/releases/latest) — macOS (Intel / Apple Silicon), Linux (x64 / arm64), Windows (x64). **No installation required.**
+**1. Download** — pick your platform, one click, no build step:
+
+| Platform | File | Direct link |
+|---|---|---|
+| macOS (Apple Silicon) | `dqex-v1.8.0-darwin-arm64.zip` | [Download](https://github.com/fj1981/dqex/releases/download/v1.8.0/dqex-v1.8.0-darwin-arm64.zip) |
+| macOS (Intel) | `dqex-v1.8.0-darwin-amd64.zip` | [Download](https://github.com/fj1981/dqex/releases/download/v1.8.0/dqex-v1.8.0-darwin-amd64.zip) |
+| Linux (x86_64) | `dqex-v1.8.0-linux-amd64.zip` | [Download](https://github.com/fj1981/dqex/releases/download/v1.8.0/dqex-v1.8.0-linux-amd64.zip) |
+| Linux (ARM64) | `dqex-v1.8.0-linux-arm64.zip` | [Download](https://github.com/fj1981/dqex/releases/download/v1.8.0/dqex-v1.8.0-linux-arm64.zip) |
+| Windows (x86_64) | `dqex-v1.8.0-windows-amd64.zip` | [Download](https://github.com/fj1981/dqex/releases/download/v1.8.0/dqex-v1.8.0-windows-amd64.zip) |
+
+<sub>Pin a specific version? Use the [Releases page](https://github.com/fj1981/dqex/releases) — `latest` always points at v1.8.0.</sub>
 
 **2. Unzip and run**
 
@@ -47,7 +57,7 @@ unzip dqex-*.zip && cd dqex && ./start.sh
 ```
 
 ```bat
-:: Windows
+:: Windows — unzip, then
 start.bat
 ```
 
@@ -183,6 +193,7 @@ make install            # → /usr/local/bin
 ## 📚 Documentation
 
 - [CLI Manual](CLI.md) — every command, flag, and meta-command
+- [FAQ](docs/FAQ.md) — port conflicts, remote access, connection storage, and more (bilingual)
 - [Project Overview](docs/OVERVIEW.md) — philosophy, personas, and deep-dive scenarios
 - [Comparison](docs/COMPARISON.md) — how dqex compares to DBeaver, Navicat, DataGrip and Bytebase
 - [Offline Operations Guide](docs/OFFLINE_OPERATIONS_GUIDE.md) — running dqex in isolated networks

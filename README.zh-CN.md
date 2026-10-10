@@ -28,12 +28,67 @@
 dqex 是一款跨平台数据库工作台，以**单个静态二进制**交付 —— 没有 JVM、没有 Electron、没有安装器、不需要联网。它把**导入、导出、迁移、对比、快照、Excel 数据字典、完整 SQL 终端和 AI 助手**集成于一体，同时提供精美的 Web 界面与可脚本化的 CLI。
 
 - 🪶 **零依赖** —— 拷进 U 盘，就能在银行隔离机房跑起来
-- ⚡ **启动 <1 秒**，内存占用约 50–60 MB
-- 🤖 **AI 原生智能体** —— 先探索你的*真实*表结构，再生成符合方言的 SQL，未经确认绝不执行
-- 🧩 **Web + CLI 同一引擎** —— 两端的连接、任务、历史完全共享
+- 🏢 **为受限网络而生** —— 内置离线 SQL 模板库，审计真正要的东西（Excel 数据字典、快照差异报告、可导出的执行历史）都是原生内置，不是事后补丁
+- 🤖 **不会惊到你的 AI** —— 先读你*真实*的表结构再动手，生成符合方言的 SQL，未经确认绝不执行写操作；不配置 AI，入口根本不渲染
 - 🌐 **MySQL · PostgreSQL · Oracle** —— 跨类型迁移自动做方言转换
-- 📋 **Excel 数据字典 & 快照对比报告** —— 天生满足合规审计（等保 / GDPR / 项目验收）
-- 🏠 **安全地把生产数据带回家** —— 条件导出 + gzip 压缩，两条命令还原到本地测试库
+
+<p align="center">
+  <img src="docs/demo-ai.gif" alt="AI 辅助写 SQL 演示——Agent 先探索真实表结构，再生成已验证的 SQL" width="100%">
+</p>
+
+---
+
+## ⚡ 快速开始
+
+**1. 下载** —— 选你的平台，一键直达，无需编译：
+
+| 平台 | 文件 | 直链 |
+|---|---|---|
+| macOS (Apple Silicon) | `dqex-v1.8.0-darwin-arm64.zip` | [直接下载](https://github.com/fj1981/dqex/releases/download/v1.8.0/dqex-v1.8.0-darwin-arm64.zip) |
+| macOS (Intel) | `dqex-v1.8.0-darwin-amd64.zip` | [直接下载](https://github.com/fj1981/dqex/releases/download/v1.8.0/dqex-v1.8.0-darwin-amd64.zip) |
+| Linux (x86_64) | `dqex-v1.8.0-linux-amd64.zip` | [直接下载](https://github.com/fj1981/dqex/releases/download/v1.8.0/dqex-v1.8.0-linux-amd64.zip) |
+| Linux (ARM64) | `dqex-v1.8.0-linux-arm64.zip` | [直接下载](https://github.com/fj1981/dqex/releases/download/v1.8.0/dqex-v1.8.0-linux-arm64.zip) |
+| Windows (x86_64) | `dqex-v1.8.0-windows-amd64.zip` | [直接下载](https://github.com/fj1981/dqex/releases/download/v1.8.0/dqex-v1.8.0-windows-amd64.zip) |
+
+<sub>需要锁定某个版本？去[Releases 页面](https://github.com/fj1981/dqex/releases)选 —— `latest` 永远指向 v1.8.0。</sub>
+
+**2. 解压并运行**
+
+```bash
+unzip dqex-*.zip && cd dqex && ./start.sh
+```
+
+```bat
+:: Windows —— 解压后
+start.bat
+```
+
+**3. 打开 Web 界面**
+
+```
+http://127.0.0.1:8181
+```
+
+就这些 —— 加个连接，开始导出、对比或查询。数据不出你的机器。
+
+<details>
+<summary>可选：装到 PATH、后台运行、或停止服务</summary>
+
+```bash
+./install.sh                    # 安装到 /usr/local/bin（可选）
+dqex# 启动 Web 界面（127.0.0.1:8181）
+./start.sh -d                   # 后台守护
+./stop.sh                       # 停止后台服务
+```
+
+```bat
+install.bat                     :: 安装到 %LOCALAPPDATA%\dqex 并加入 PATH
+dqex                            :: 新开终端启动 Web 界面
+start.bat -d                    :: 后台运行
+stop.bat                        :: 停止后台服务
+```
+
+</details>
 
 ---
 
@@ -56,35 +111,29 @@ dqex 是一款跨平台数据库工作台，以**单个静态二进制**交付 �
 
 ---
 
-## 🧑‍💻 快速开始
+## 🤔 为什么是 dqex，而不是 DBeaver？
 
-### 下载
+**如果 DBeaver 在你的环境里能跑，就用 DBeaver。** 它更成熟、更免费。dqex 不想在"广度"上赢——它是为**DBeaver 结构上进不去的环境**而生的。
 
-从 [Releases 页面](https://github.com/fj1981/dqex/releases) 下载对应平台的 zip 包并解压 —— **无需安装**。
+| | dqex | DBeaver | Navicat | DataGrip |
+|---|---|---|---|---|
+| 交付形式 | 单静态二进制 | JVM + 驱动 jar | 安装器，需授权 | IDE，需授权 |
+| 隔离网部署 | 拷贝即跑 | 手动配 JVM + jar | 授权受限 | 授权受限 |
+| 首次查询耗时 | 1 分钟内 | 数分钟 | 安装 + 激活 | 安装 + 激活 |
+| 跨方言迁移 | 内置，自动 | 无 | 有 | 部分支持 |
+| Excel 数据字典 | 一条命令 | 插件 | 有 | 无 |
+| 快照差异对比 | 内置 | 无 | 无 | 无 |
+| AI 辅助写 SQL | 内置，离线兜底 | 无 | 有限 | 有限 |
+| 数据库广度 | MySQL / PostgreSQL / Oracle | 非常广 | 广 | 广 |
+| 价格 | 免费，MIT | 免费 | 按席位付费 | 付费 |
 
-### Linux / macOS
+**dqex 的短板：** 它只支持三种数据库，不是二十种。如果你需要 SQL Server、ClickHouse、MongoDB 或 MySQL / PostgreSQL / Oracle 之外的东西，今天 DBeaver 是更好的答案。更多驱动非常欢迎作为贡献提交。
 
-```bash
-./install.sh                    # 安装到 /usr/local/bin（可选）
-dqex                            # 启动 Web 界面（127.0.0.1:8181）
-# 或不安装直接使用：
-./start.sh                      # 前台运行（Ctrl+C 停止）
-./start.sh -d                   # 后台运行
-./stop.sh                       # 停止后台服务
-```
+完整对比（含 Bytebase 与已知限制）：[docs/COMPARISON.md](docs/COMPARISON.md)。
 
-### Windows
+---
 
-```bat
-install.bat                     :: 安装到 %LOCALAPPDATA%\dqex 并加入 PATH
-dqex                            :: 新开终端启动 Web 界面
-:: 或不安装直接使用：
-start.bat                       :: 前台运行
-start.bat -d                    :: 后台运行
-stop.bat                        :: 停止后台服务
-```
-
-### CLI 30 秒上手
+## 🧑‍💻 CLI 30 秒上手
 
 ```bash
 # 连接只需保存一次，随处复用
@@ -111,10 +160,6 @@ dqex dict camunda -s 生产库 -o 数据字典.xlsx
 ---
 
 ## 🤖 AI 辅助写 SQL（可选模块，离线安全）
-
-<p align="center">
-  <img src="docs/demo-ai.gif" alt="AI 辅助写 SQL 演示——Agent 先探索真实表结构，再生成已验证的 SQL" width="100%">
-</p>
 
 - **基于真实表结构，杜绝凭空想象** —— 生成前自动查询库表结构（Web 端实时显示查询进度）
 - **生成 ≠ 执行** —— AI 只产出 SQL 文本；写操作需二次确认、危险语句被拦截，可 `\e` 编辑后再执行
@@ -148,7 +193,10 @@ make install            # → /usr/local/bin
 ## 📚 文档
 
 - [CLI 使用手册](CLI.md) —— 每个命令、参数与元命令
+- [常见问题](docs/FAQ.md) —— 端口占用、跨机器访问、连接保存等（中英双语）
 - [项目概览](docs/OVERVIEW.md) —— 设计哲学、用户画像与深度场景
+- [竞品对比](docs/COMPARISON.md) —— 与 DBeaver、Navicat、DataGrip、Bytebase 的逐项对比
+- [离线运维指南](docs/OFFLINE_OPERATIONS_GUIDE.md) —— 在隔离网络中运行 dqex
 - [开发约定](docs/conventions.md) —— 状态建模与数据流规范（贡献前必读）
 
 ---
