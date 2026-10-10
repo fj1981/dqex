@@ -193,6 +193,7 @@ make install            # → /usr/local/bin
 ## 📚 Documentation
 
 - [CLI Manual](CLI.md) — every command, flag, and meta-command
+- [Agent Integration](docs/AGENT_INTEGRATION.md) — JSON output, scripting, and CI pipelines (bilingual)
 - [FAQ](docs/FAQ.md) — port conflicts, remote access, connection storage, and more (bilingual)
 - [Project Overview](docs/OVERVIEW.md) — philosophy, personas, and deep-dive scenarios
 - [Comparison](docs/COMPARISON.md) — how dqex compares to DBeaver, Navicat, DataGrip and Bytebase

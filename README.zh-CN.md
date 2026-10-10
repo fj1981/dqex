@@ -193,6 +193,7 @@ make install            # → /usr/local/bin
 ## 📚 文档
 
 - [CLI 使用手册](CLI.md) —— 每个命令、参数与元命令
+- [Agent 集成指南](docs/AGENT_INTEGRATION.md) —— JSON 输出、脚本化与 CI 流水线（中英双语）
 - [常见问题](docs/FAQ.md) —— 端口占用、跨机器访问、连接保存等（中英双语）
 - [项目概览](docs/OVERVIEW.md) —— 设计哲学、用户画像与深度场景
 - [竞品对比](docs/COMPARISON.md) —— 与 DBeaver、Navicat、DataGrip、Bytebase 的逐项对比
