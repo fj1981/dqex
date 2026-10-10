@@ -45,3 +45,32 @@ jobs:
           done
 
           echo ">> Gitee 镜像同步完成"
+
+      # Gitee Releases 附件同步：只同步最新一个 tag，避免每次 push 都全量重传。
+      # 国内用户的主要入口是 Gitee，没有附件等于镜像只给了代码、拿不到安装包。
+      - name: Sync latest release assets to Gitee
+        if: ${{ env.GITEE_TOKEN != '' }}
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          tag=$(git tag --sort=-v:refname | head -1)
+          if [ -z "$tag" ]; then
+            echo "无 tag，跳过"
+            exit 0
+          fi
+          echo ">> 同步 $tag 的发行版附件到 Gitee"
+
+          mkdir -p /tmp/gitee-assets && cd /tmp/gitee-assets
+          failed=0
+          for name in $(curl -fsSL "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+                        | grep -o '"browser_download_url": *"[^"]*"' \
+                        | cut -d'"' -f4); do
+            file=$(basename "$name")
+            echo ">> 下载 $file"
+            curl -fsSL -o "$file" "$name" || { echo "!! 下载失败: $file"; failed=1; continue; }
+            curl -fsSL -X POST "https://gitee.com/api/v5/repos/fjcn/dqex/releases/${tag}/attach_files" \
+              -H "Authorization: token ${GITEE_TOKEN}" \
+              -F "attachment=@${file}" || { echo "!! 上传失败: $file"; failed=1; }
+          done
+
+          [ "$failed" -eq 0 ] && echo ">> Gitee 发行版附件同步完成" || echo "!! 部分附件同步失败，请检查日志"

@@ -60,10 +60,17 @@ jobs:
         # TAGS=opensource：GitHub Release 产物在"关于"弹窗展示项目 Git 地址与联系方式；本地出包不传该变量即不带
         run: make release TAGS=opensource
 
+      # 校验和随产物一起发布：HN / Reddit 评论区第一问就是"checksum 呢"，
+      # 离线环境交付尤其需要，用户可核对后再放到内网服务器上。
+      - name: Generate SHA256SUMS
+        run: cd release && sha256sum dqex-*.zip > SHA256SUMS && cat SHA256SUMS
+
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release/dqex-*.zip
+          files: |
+            release/dqex-*.zip
+            release/SHA256SUMS
           generate_release_notes: true
 
       # 由 GITHUB_TOKEN 创建的 Release 不会触发 release:published 事件，
